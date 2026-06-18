@@ -10,10 +10,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.office import bus, registry, loop as office_loop, demo
+from src.office import bus, registry, loop as office_loop, demo, chat
 
 load_dotenv()
 
@@ -90,3 +91,23 @@ async def get_agents():
         }
         for a in registry.all_agents()
     ]
+
+
+@app.post("/api/ask")
+async def ask_agent(request: Request):
+    """Пользователь задаёт вопрос конкретному агенту."""
+    data = await request.json()
+    agent_id = data.get("agent_id", "")
+    message = data.get("message", "").strip()
+
+    if not agent_id or not message:
+        return JSONResponse({"error": "agent_id и message обязательны"}, status_code=400)
+
+    if registry.get(agent_id) is None:
+        return JSONResponse({"error": "агент не найден"}, status_code=404)
+
+    try:
+        reply = await chat.ask(agent_id, message, publish=bus.publish)
+        return {"agent_id": agent_id, "reply": reply}
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)

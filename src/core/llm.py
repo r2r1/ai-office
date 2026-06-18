@@ -58,12 +58,14 @@ async def run_agent(
     extra_tools: Optional[list] = None,
     tool_handlers: Optional[dict[str, Callable[[dict], Awaitable[str]]]] = None,
     max_iterations: int = 8,
+    history: Optional[list[dict[str, str]]] = None,
 ) -> str:
     """
     Запускает агентный цикл: LLM думает, вызывает инструменты, отвечает.
 
     extra_tools     — дополнительные инструменты (формат OpenAI function).
     tool_handlers   — {имя_инструмента: async-функция(args)->str} для extra_tools.
+    history         — предыдущие реплики диалога [{role, content}] для памяти.
     """
     client = _client()
     model = model or DEFAULT_MODEL
@@ -74,10 +76,10 @@ async def run_agent(
     if extra_tools:
         tools.extend(extra_tools)
 
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user})
 
     final_text = ""
 

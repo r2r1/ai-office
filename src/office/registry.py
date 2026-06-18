@@ -49,6 +49,10 @@ def update_status(agent_id: str, status: str, message: str = "") -> None:
             _agents[agent_id].last_message = message[:200]
 
 
+def get(agent_id: str) -> Optional[AgentRecord]:
+    return _agents.get(agent_id)
+
+
 def all_agents() -> list[AgentRecord]:
     return list(_agents.values())
 

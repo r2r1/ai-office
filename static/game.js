@@ -436,6 +436,16 @@ function render() {
   // Агенты
   const now = Date.now();
   for (const [id, a] of Object.entries(agents)) {
+    // Подсветка выбранного агента
+    if (id === selectedAgentId) {
+      ctx.beginPath();
+      ctx.arc(a.x, a.y - 8, 22, 0, Math.PI * 2);
+      ctx.strokeStyle = a.color;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 300);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     drawCharacter(a.x, a.y, a.color, a.role, a.status);
   }
 
@@ -468,10 +478,136 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
+// ============================================================
+// ИНТЕРАКТИВ: клик по агенту → чат
+// ============================================================
+let selectedAgentId = null;
+
+function findAgentAt(px, py) {
+  let best = null, bestDist = 30; // радиус клика
+  for (const [id, a] of Object.entries(agents)) {
+    const dx = a.x - px;
+    const dy = (a.y - 8) - py;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if (d < bestDist) { bestDist = d; best = id; }
+  }
+  return best;
+}
+
+function setupClickHandler() {
+  canvas.addEventListener("click", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const id = findAgentAt(px, py);
+    if (id) openChat(id);
+  });
+}
+
+// ---- Чат-окно ----
+const chatWindow = document.getElementById("chat-window");
+const chatTitle = document.getElementById("chat-title");
+const chatMessages = document.getElementById("chat-messages");
+const chatInput = document.getElementById("chat-input");
+const chatSend = document.getElementById("chat-send");
+const chatClose = document.getElementById("chat-close");
+
+// Истории чатов на клиенте: agent_id -> [{role, text}]
+const chatHistories = {};
+
+function openChat(agentId) {
+  selectedAgentId = agentId;
+  const a = agents[agentId];
+  if (!a) return;
+
+  chatTitle.textContent = `${ROLE_ICONS[a.role] || "🤖"} ${a.role}`;
+  chatTitle.style.color = a.color;
+  chatWindow.classList.remove("hidden");
+
+  // Восстанавливаем историю
+  renderChatHistory(agentId);
+  chatInput.focus();
+
+  // Прячем подсказку
+  const hint = document.getElementById("hint");
+  if (hint) hint.style.opacity = "0";
+}
+
+function closeChat() {
+  chatWindow.classList.add("hidden");
+  selectedAgentId = null;
+}
+
+function renderChatHistory(agentId) {
+  chatMessages.innerHTML = "";
+  const hist = chatHistories[agentId] || [];
+  if (hist.length === 0) {
+    const a = agents[agentId];
+    addChatMessage("agent", `Привет! Я ${a.role}. ${a.task ? "Сейчас работаю над: " + a.task : ""} Чем помочь?`, false);
+  } else {
+    for (const m of hist) addChatMessage(m.role, m.text, false);
+  }
+}
+
+function addChatMessage(role, text, save = true) {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.textContent = text;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  if (save && selectedAgentId) {
+    (chatHistories[selectedAgentId] = chatHistories[selectedAgentId] || []).push({role, text});
+  }
+  return div;
+}
+
+async function sendChat() {
+  const message = chatInput.value.trim();
+  if (!message || !selectedAgentId) return;
+  const agentId = selectedAgentId;
+
+  addChatMessage("user", message);
+  chatInput.value = "";
+  chatSend.disabled = true;
+
+  // Индикатор "печатает"
+  const typing = document.createElement("div");
+  typing.className = "msg typing";
+  typing.textContent = "печатает...";
+  chatMessages.appendChild(typing);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  try {
+    const resp = await fetch("/api/ask", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({agent_id: agentId, message}),
+    });
+    const data = await resp.json();
+    typing.remove();
+    if (data.error) {
+      addChatMessage("agent", "⚠ Ошибка: " + data.error, false);
+    } else {
+      addChatMessage("agent", data.reply);
+    }
+  } catch (err) {
+    typing.remove();
+    addChatMessage("agent", "⚠ Не удалось связаться с агентом: " + err.message, false);
+  } finally {
+    chatSend.disabled = false;
+    chatInput.focus();
+  }
+}
+
+chatSend.addEventListener("click", sendChat);
+chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+chatClose.addEventListener("click", closeChat);
+
 // ---- Init ----
 window.addEventListener("load", () => {
   resize();
   connectSSE();
+  setupClickHandler();
   gameLoop();
 });
 
