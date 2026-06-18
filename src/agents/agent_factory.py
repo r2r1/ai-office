@@ -12,6 +12,7 @@ from src.core import llm
 from src.agents import researcher as researcher_agent
 from src.office import questions as questions_module
 from src.office import agent_inbox
+from src.office import brief as brief_module
 
 _INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
 
@@ -105,9 +106,31 @@ _REQUEST_RESEARCH_TOOL = {
 }
 
 
+def _brief_context() -> str:
+    """Формирует блок с брифом клиента для вставки в системный промпт."""
+    b = brief_module.get()
+    if not b:
+        return ""
+    parts = []
+    if b.get("niche"):
+        parts.append(f"Ниша: {b['niche']}")
+    if b.get("goal"):
+        parts.append(f"Цель клиента: {b['goal']}")
+    if b.get("audience"):
+        parts.append(f"Аудитория: {b['audience']}")
+    if b.get("assets"):
+        parts.append(f"Что есть: {b['assets']}")
+    if b.get("summary"):
+        parts.append(f"Резюме: {b['summary']}")
+    if not parts:
+        return ""
+    return "\n\n=== БРИФ КЛИЕНТА (всегда держи в контексте) ===\n" + "\n".join(parts)
+
+
 def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]]):
     """Возвращает async-функцию, запускающую агента."""
-    system = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.") + _INTER_AGENT_SUFFIX
+    base = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.")
+    system = base + _brief_context() + _INTER_AGENT_SUFFIX
 
     async def _handle_request_research(args: dict) -> str:
         question = args.get("question", "")

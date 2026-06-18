@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
-from src.office import registry
+from src.office import registry, agent_inbox
+from src.office import brief as brief_module
 
 HISTORY_FILE = Path("reports/chat_histories.json")
 
@@ -69,6 +70,60 @@ def _save_histories() -> None:
 _load_histories()
 
 
+_SEND_MESSAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_message",
+        "description": "Отправляет сообщение другому агенту-коллеге по его agent_id. Используй чтобы делегировать задачу или запросить информацию у коллеги.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to_agent_id": {"type": "string", "description": "ID агента-получателя (например: marketer_1, analyst_1)"},
+                "message": {"type": "string", "description": "Текст сообщения коллеге"},
+            },
+            "required": ["to_agent_id", "message"],
+        },
+    },
+}
+
+_READ_MESSAGES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_messages",
+        "description": "Читает входящие сообщения от других агентов-коллег.",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+def _build_system(agent_id: str, rec) -> str:
+    role = rec.role if rec else "researcher"
+    system = ROLE_SYSTEM.get(role, f"Ты — {role} агент AI-офиса. Отвечай как дружелюбный коллега.")
+
+    if rec and rec.task:
+        system += f"\n\nТвоя текущая задача в офисе: {rec.task}"
+
+    # Добавляем бриф клиента — агент знает всё что клиент рассказал при онбординге
+    b = brief_module.get()
+    if b:
+        parts = []
+        if b.get("niche"):
+            parts.append(f"Ниша: {b['niche']}")
+        if b.get("goal"):
+            parts.append(f"Цель: {b['goal']}")
+        if b.get("audience"):
+            parts.append(f"Аудитория: {b['audience']}")
+        if b.get("assets"):
+            parts.append(f"Что есть у клиента: {b['assets']}")
+        if b.get("summary"):
+            parts.append(f"Резюме брифа: {b['summary']}")
+        if parts:
+            system += "\n\n=== БРИФ КЛИЕНТА ===\n" + "\n".join(parts)
+
+    system += "\n\nТы можешь общаться с коллегами: send_message — отправить сообщение агенту, read_messages — прочитать входящие."
+    return system
+
+
 async def ask(
     agent_id: str,
     message: str,
@@ -76,18 +131,25 @@ async def ask(
 ) -> str:
     """Задаёт вопрос конкретному агенту и возвращает его ответ."""
     rec = registry.get(agent_id)
-    role = rec.role if rec else "researcher"
-    system = ROLE_SYSTEM.get(role, f"Ты — {role} агент AI-офиса. Отвечай как дружелюбный коллега.")
-
-    # Добавляем контекст о текущей задаче агента
-    if rec and rec.task:
-        system += f"\n\nТвоя текущая задача в офисе: {rec.task}"
-
+    system = _build_system(agent_id, rec)
     history = _histories.setdefault(agent_id, [])
 
     if publish:
         await publish({"type": "thinking", "agent_id": agent_id,
                        "text": "печатает ответ..."})
+
+    async def _handle_send_message(args: dict) -> str:
+        to_id = args.get("to_agent_id", "")
+        msg = args.get("message", "")
+        agent_inbox.send(to_id, agent_id, msg)
+        if publish:
+            await publish({"type": "speech", "agent_id": agent_id,
+                           "text": f"→ {to_id}: {msg[:60]}"})
+        return f"Сообщение отправлено агенту {to_id}"
+
+    async def _handle_read_messages(_: dict) -> str:
+        msgs = agent_inbox.read(agent_id)
+        return json.dumps(msgs, ensure_ascii=False)
 
     reply = await llm.run_agent(
         system=system,
@@ -96,8 +158,10 @@ async def ask(
         max_tokens=1500,
         max_iterations=5,
         use_search=True,
-        publish=None,  # не спамим пузырями во время диалога — покажем только финал
+        publish=None,
         agent_id=agent_id,
+        extra_tools=[_SEND_MESSAGE_TOOL, _READ_MESSAGES_TOOL],
+        tool_handlers={"send_message": _handle_send_message, "read_messages": _handle_read_messages},
     )
 
     # Обновляем историю
@@ -117,3 +181,9 @@ async def ask(
 
 def clear_history(agent_id: str) -> None:
     _histories.pop(agent_id, None)
+    _save_histories()
+
+
+def clear_all() -> None:
+    _histories.clear()
+    _save_histories()

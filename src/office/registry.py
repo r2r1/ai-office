@@ -63,3 +63,24 @@ def count() -> int:
 
 def has_role(role: str) -> bool:
     return any(a.role == role for a in _agents.values())
+
+
+def restore(saved: list[dict]) -> None:
+    """Восстанавливает нанятых ранее агентов после перезапуска сервера."""
+    for a in saved:
+        aid = a.get("agent_id")
+        if not aid or aid in _agents:
+            continue
+        desk = a.get("desk", 0)
+        if desk in _used_desks:
+            desk = next((i for i in range(MAX_DESKS) if i not in _used_desks), desk)
+        _used_desks.add(desk)
+        _agents[aid] = AgentRecord(
+            agent_id=aid, role=a.get("role", ""), desk=desk,
+            status="done", task=a.get("task", ""),
+        )
+
+
+def reset() -> None:
+    _agents.clear()
+    _used_desks.clear()
