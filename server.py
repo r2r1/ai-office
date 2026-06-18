@@ -140,6 +140,16 @@ async def brief_reset():
     return {"ok": True}
 
 
+@app.post("/api/answer")
+async def answer_question(request: Request):
+    data = await request.json()
+    qid = data.get("question_id", "")
+    ans = data.get("answer", "").strip()
+    from src.office import questions as q_module
+    ok = q_module.answer(qid, ans)
+    return {"ok": ok}
+
+
 @app.post("/api/ask")
 async def ask_agent(request: Request):
     """Пользователь задаёт вопрос конкретному агенту."""

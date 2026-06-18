@@ -5,10 +5,15 @@
 Любой агент может запросить ресёрчера через инструмент request_research.
 """
 
+import json
 from typing import Callable, Awaitable
 
 from src.core import llm
 from src.agents import researcher as researcher_agent
+from src.office import questions as questions_module
+from src.office import agent_inbox
+
+_INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
 
 ROLE_PROMPTS = {
     "salesman": (
@@ -29,6 +34,53 @@ ROLE_PROMPTS = {
         "Ты — аналитик AI-агентства. Собери и проанализируй данные по рынку, "
         "конкурентам или клиентам. Выводы с цифрами. Используй web_search."
     ),
+}
+
+# Инструмент: задать вопрос пользователю
+_ASK_USER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "ask_user",
+        "description": "Задаёт вопрос пользователю и ждёт ответа. Используй когда нужна уточняющая информация от клиента.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Вопрос пользователю"},
+            },
+            "required": ["question"],
+        },
+    },
+}
+
+# Инструмент: отправить сообщение другому агенту
+_SEND_MESSAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_message",
+        "description": "Отправляет сообщение другому агенту по его agent_id.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to_agent_id": {"type": "string", "description": "ID агента-получателя"},
+                "message": {"type": "string", "description": "Текст сообщения"},
+            },
+            "required": ["to_agent_id", "message"],
+        },
+    },
+}
+
+# Инструмент: прочитать входящие сообщения
+_READ_MESSAGES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_messages",
+        "description": "Читает входящие сообщения от других агентов.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
 
 # Инструмент: запросить ресёрчера
@@ -55,7 +107,7 @@ _REQUEST_RESEARCH_TOOL = {
 
 def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]]):
     """Возвращает async-функцию, запускающую агента."""
-    system = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.")
+    system = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.") + _INTER_AGENT_SUFFIX
 
     async def _handle_request_research(args: dict) -> str:
         question = args.get("question", "")
@@ -65,6 +117,25 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         return await researcher_agent.run_async(
             question=question, depth=depth, publish=publish, agent_id="researcher_1",
         )
+
+    async def _handle_ask_user(args: dict) -> str:
+        question_text = args.get("question", "")
+        qid, fut = questions_module.ask(question_text, publish)
+        await publish({"type": "question", "agent_id": agent_id, "question_id": qid, "text": question_text})
+        answer = await fut
+        return answer
+
+    async def _handle_send_message(args: dict) -> str:
+        to_agent_id = args.get("to_agent_id", "")
+        message = args.get("message", "")
+        agent_inbox.send(to_agent_id, agent_id, message)
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"→ {to_agent_id}: {message[:60]}"})
+        return f"Сообщение отправлено агенту {to_agent_id}"
+
+    async def _handle_read_messages(args: dict) -> str:
+        msgs = agent_inbox.read(agent_id)
+        return json.dumps(msgs, ensure_ascii=False)
 
     async def run() -> str:
         await publish({"type": "thinking", "agent_id": agent_id,
@@ -78,8 +149,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             use_search=True,
             publish=publish,
             agent_id=agent_id,
-            extra_tools=[_REQUEST_RESEARCH_TOOL],
-            tool_handlers={"request_research": _handle_request_research},
+            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL, _READ_MESSAGES_TOOL],
+            tool_handlers={
+                "request_research": _handle_request_research,
+                "ask_user": _handle_ask_user,
+                "send_message": _handle_send_message,
+                "read_messages": _handle_read_messages,
+            },
         )
 
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})

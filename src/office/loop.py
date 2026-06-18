@@ -71,7 +71,8 @@ async def run() -> None:
                 await publish({"type": "system",
                                "text": "Команда укомплектована — агенты работают над задачами"})
         else:
-            await publish({"type": "system", "text": "Все столы заняты — офис на полной мощности"})
+            await publish({"type": "system", "text": "Все столы заняты — переназначаю задачи агентам"})
+            await _reassign_existing_agents(strategy, publish)
 
         await publish({"type": "system",
                        "text": f"Цикл #{cycle} завершён. Следующий через {LOOP_INTERVAL}с"})
@@ -108,6 +109,9 @@ async def _bootstrap(publish) -> str:
 
 
 async def _hire_and_run(decision: dict, publish) -> None:
+    if decision.get("hire") and registry.has_role(decision.get("role", "")):
+        await publish({"type": "system", "text": f"Роль {decision['role']} уже есть — пропускаю найм"})
+        return
     role = decision["role"]
     task = decision.get("task", f"Выполни задачи {role}")
     agent_id = f"{role}_{registry.count() + 1}"
@@ -160,6 +164,17 @@ def _hire_initial(publish_sync) -> None:
                 "type": "hired", "agent_id": "hr_1",
                 "role": "hr", "desk": rec.desk, "task": rec.task,
             }))
+
+
+async def _reassign_existing_agents(strategy: str, publish) -> None:
+    """Re-run agents that are done or idle (not researcher/strategist/hr)."""
+    skip_roles = {"researcher", "strategist", "hr"}
+    for agent in registry.all_agents():
+        if agent.role in skip_roles:
+            continue
+        if agent.status in ("done", "idle"):
+            agent_fn = agent_factory.create(agent.role, agent.task, agent.agent_id, publish)
+            asyncio.create_task(_run_hired_agent(agent.agent_id, agent_fn, publish))
 
 
 async def _run_hired_agent(agent_id: str, agent_fn, publish) -> None:

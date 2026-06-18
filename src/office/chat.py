@@ -3,10 +3,14 @@
 Каждый агент помнит контекст диалога. Использует web_search при необходимости.
 """
 
+import json
+from pathlib import Path
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
 from src.office import registry
+
+HISTORY_FILE = Path("reports/chat_histories.json")
 
 # Системные промпты по ролям — задают характер и компетенции агента
 ROLE_SYSTEM = {
@@ -47,6 +51,24 @@ _histories: dict[str, list[dict[str, str]]] = {}
 MAX_HISTORY = 12  # храним последние N реплик, чтобы не раздувать токены
 
 
+def _load_histories() -> None:
+    if HISTORY_FILE.exists():
+        try:
+            data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                _histories.update(data)
+        except Exception:
+            pass
+
+
+def _save_histories() -> None:
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY_FILE.write_text(json.dumps(_histories, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+_load_histories()
+
+
 async def ask(
     agent_id: str,
     message: str,
@@ -83,6 +105,7 @@ async def ask(
     history.append({"role": "assistant", "content": reply})
     if len(history) > MAX_HISTORY:
         del history[:len(history) - MAX_HISTORY]
+    _save_histories()
 
     if publish:
         # Показываем ответ пузырём над агентом

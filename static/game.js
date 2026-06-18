@@ -327,6 +327,80 @@ function handleEvent(event) {
   else if (event.type === "error") {
     addLog(event.agent_id, "⚠ " + event.text, getRole(event.agent_id));
   }
+  else if (event.type === "question") {
+    showQuestionModal(event);
+  }
+}
+
+function showQuestionModal(event) {
+  // Remove any existing modal
+  const existing = document.getElementById("question-modal");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "question-modal";
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.75); z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+  `;
+
+  const role = getRole(event.agent_id);
+  const color = (agents[event.agent_id] && agents[event.agent_id].color) || "#4fc3f7";
+
+  const box = document.createElement("div");
+  box.style.cssText = `
+    background: #0f0f1a; border: 1px solid ${color}; border-radius: 8px;
+    padding: 24px; max-width: 480px; width: 90%; font-family: 'Courier New', monospace;
+    color: #e0e0e0;
+  `;
+
+  box.innerHTML = `
+    <div style="color:${color}; font-weight:bold; margin-bottom:12px; font-size:13px;">
+      Вопрос от агента ${role} (${event.agent_id})
+    </div>
+    <div style="margin-bottom:16px; font-size:13px; line-height:1.5;">${event.text}</div>
+    <textarea id="q-answer" rows="3" style="
+      width:100%; box-sizing:border-box; background:#1a1a2a; color:#e0e0e0;
+      border:1px solid #333; border-radius:4px; padding:8px; font-family:inherit;
+      font-size:12px; resize:vertical; margin-bottom:12px;
+    " placeholder="Введите ответ..."></textarea>
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button id="q-cancel" style="
+        background:transparent; color:#888; border:1px solid #333;
+        padding:6px 16px; cursor:pointer; border-radius:4px; font-family:inherit;
+      ">Пропустить</button>
+      <button id="q-submit" style="
+        background:${color}22; color:${color}; border:1px solid ${color};
+        padding:6px 16px; cursor:pointer; border-radius:4px; font-family:inherit;
+      ">Отправить</button>
+    </div>
+  `;
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  const answerEl = document.getElementById("q-answer");
+  answerEl.focus();
+
+  async function submit() {
+    const answer = answerEl.value.trim();
+    overlay.remove();
+    if (!answer) return;
+    try {
+      await fetch("/api/answer", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({question_id: event.question_id, answer}),
+      });
+    } catch (err) {
+      console.error("Failed to send answer:", err);
+    }
+  }
+
+  document.getElementById("q-submit").addEventListener("click", submit);
+  document.getElementById("q-cancel").addEventListener("click", () => overlay.remove());
+  answerEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKey) submit(); });
 }
 
 function getRole(agent_id) {
