@@ -65,6 +65,9 @@ async def run_async(
     if save:
         _save_plan(result)
 
+    from src.office import state
+    state.save_deliverable(agent_id, "strategist", "Бизнес-план офиса", result)
+
     if publish:
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})
 

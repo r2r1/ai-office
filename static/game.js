@@ -320,6 +320,7 @@ function handleEvent(event) {
   else if (event.type === "task_done") {
     addLog(event.agent_id, "✓ задача выполнена", getRole(event.agent_id));
     updateAgentStatus(event.agent_id, "done", event.summary || "");
+    loadDeliverables();  // обновляем счётчик готовых результатов
   }
   else if (event.type === "system") {
     addLog("офис", event.text, "system");
@@ -776,6 +777,80 @@ async function intakeStartOffice() {
 intakeNext.addEventListener("click", intakeGetQuestions);
 intakeStart.addEventListener("click", intakeStartOffice);
 
+// ---- Результаты (deliverables) ----
+let deliverablesCache = [];
+
+async function loadDeliverables() {
+  try {
+    const r = await fetch("/api/deliverables");
+    const d = await r.json();
+    deliverablesCache = d.deliverables || [];
+    const badge = document.getElementById("results-badge");
+    if (badge) badge.textContent = deliverablesCache.length ? String(deliverablesCache.length) : "";
+  } catch {}
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+}
+
+function renderDeliverables() {
+  const list = document.getElementById("deliv-list");
+  list.innerHTML = "";
+  if (!deliverablesCache.length) {
+    list.innerHTML = `<div id="deliv-empty">Пока нет готовых результатов.<br>Агенты добавят их сюда по мере работы.</div>`;
+    return;
+  }
+  deliverablesCache.forEach((d, i) => {
+    const color = ROLE_COLORS[d.role] || "#888";
+    const card = document.createElement("div");
+    card.className = "deliv-card";
+    card.innerHTML = `
+      <div class="meta">
+        <span class="who" style="color:${color}">${ROLE_ICONS[d.role]||""} ${d.role} <span style="color:#555;font-weight:normal">· ${d.time||""}</span></span>
+        <button class="copy" data-i="${i}">⧉ Копировать</button>
+      </div>
+      <div class="task">${escapeHtml(d.task||"")}</div>
+      <pre>${escapeHtml(d.content||"")}</pre>
+    `;
+    list.appendChild(card);
+  });
+  list.querySelectorAll(".copy").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const d = deliverablesCache[+btn.dataset.i];
+      try { await navigator.clipboard.writeText(d.content || ""); btn.textContent = "✓ Скопировано"; setTimeout(()=>btn.textContent="⧉ Копировать", 1500); }
+      catch { btn.textContent = "ошибка"; }
+    });
+  });
+}
+
+async function openDeliverables() {
+  await loadDeliverables();
+  renderDeliverables();
+  document.getElementById("deliv-overlay").classList.remove("hidden");
+}
+
+function exportDeliverables() {
+  if (!deliverablesCache.length) return;
+  const md = deliverablesCache.map(d =>
+    `# ${d.role} — ${d.task||""} (${d.time||""})\n\n${d.content||""}\n`
+  ).join("\n---\n\n");
+  const blob = new Blob([md], {type: "text/markdown;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "ai-office-results.md";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function resetOffice() {
+  if (!confirm("Сбросить офис и начать с нового клиента? Вся история будет удалена.")) return;
+  try {
+    await fetch("/api/brief/reset", {method: "POST"});
+    location.reload();
+  } catch (e) { alert("Ошибка сброса: " + e.message); }
+}
+
 function roleFromId(id) { return (id || "").replace(/_\d+$/, ""); }
 
 function logOnly(event) {
@@ -818,7 +893,17 @@ window.addEventListener("load", () => {
   setupClickHandler();
   checkBriefStatus();
   replayHistory();
+  loadDeliverables();
   gameLoop();
+
+  document.getElementById("btn-results").addEventListener("click", openDeliverables);
+  document.getElementById("btn-reset").addEventListener("click", resetOffice);
+  document.getElementById("deliv-close").addEventListener("click", () =>
+    document.getElementById("deliv-overlay").classList.add("hidden"));
+  document.getElementById("deliv-export").addEventListener("click", exportDeliverables);
+  document.getElementById("deliv-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "deliv-overlay") e.target.classList.add("hidden");
+  });
 });
 
 window.addEventListener("resize", () => {

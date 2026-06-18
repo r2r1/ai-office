@@ -13,6 +13,7 @@ from src.agents import researcher as researcher_agent
 from src.office import questions as questions_module
 from src.office import agent_inbox
 from src.office import brief as brief_module
+from src.office import state
 
 _INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
 
@@ -181,6 +182,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             },
         )
 
+        state.save_deliverable(agent_id, role, task, result)
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})
         return result
 

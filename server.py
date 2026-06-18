@@ -143,6 +143,12 @@ async def get_history():
     }}
 
 
+@app.get("/api/deliverables")
+async def get_deliverables():
+    """Готовые результаты работы агентов — пользователь может посмотреть и скопировать."""
+    return {"deliverables": state.deliverables()}
+
+
 @app.post("/api/brief/reset")
 async def brief_reset():
     """Полный сброс: новый клиент / новая задача с чистого листа."""

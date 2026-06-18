@@ -35,7 +35,7 @@ _SYSTEM_DEEP = """Ты — ведущий исследователь AI-офис
 Формат отчёта:
 - Executive Summary (2-3 предложения)
 - Топ-3 варианта с оценкой потенциала
-- Рекомендованная стратегия и план на 90 дней
+- Рекомендованная стратегия (сроки оценивай для AI-офиса 24/7: часы/дни, а не месяцы)
 - Источники
 
 Пиши по-русски. Конкретные цифры, сроки, примеры."""
@@ -69,6 +69,8 @@ async def run_async(
 
     if save_report:
         _save_report(result, depth)
+        from src.office import state
+        state.save_deliverable(agent_id, "researcher", question[:80], result)
 
     if publish:
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})
