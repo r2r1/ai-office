@@ -15,7 +15,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from src.office import bus, registry
+from src.office import bus, registry, brief
 from src.agents import researcher, strategist, hr
 from src.agents import agent_factory
 
@@ -33,6 +33,17 @@ async def run() -> None:
 
     _hire_initial(publish)
     await asyncio.sleep(2)
+
+    # ---- ЖДЁМ БРИФ КЛИЕНТА ----
+    if not brief.is_ready():
+        await publish({"type": "system",
+                       "text": "Офис ждёт бриф клиента. Заполните форму, чтобы начать."})
+        await brief.ready.wait()
+
+    b = brief.get()
+    if b.get("summary"):
+        await publish({"type": "system",
+                       "text": f"Бриф получен: {b.get('goal', b.get('summary',''))[:80]}"})
 
     # ---- BOOTSTRAP: определяем нишу и стратегию ОДИН РАЗ ----
     strategy = _load_strategy()
@@ -69,17 +80,22 @@ async def run() -> None:
 
 async def _bootstrap(publish) -> str:
     """Разовое определение ниши: ресёрчер (deep) + стратег."""
-    await publish({"type": "system", "text": "=== BOOTSTRAP: определяем нишу (разово) ==="})
+    await publish({"type": "system", "text": "=== BOOTSTRAP: исследуем нишу клиента ==="})
 
+    question = brief.research_question() or researcher.DEFAULT_QUESTION
     try:
-        research = await researcher.deep(researcher.DEFAULT_QUESTION, publish=publish)
+        research = await researcher.deep(question, publish=publish)
         globals()["_last_research"] = research
     except Exception as e:
         await publish({"type": "error", "agent_id": "researcher_1", "text": str(e)[:100]})
         research = _last_research
 
+    # Стратег получает и бриф клиента, и исследование
+    strat_input = research
+    if brief.summary():
+        strat_input = f"БРИФ КЛИЕНТА:\n{brief.summary()}\n\nИССЛЕДОВАНИЕ РЫНКА:\n{research}"
     try:
-        strategy = await strategist.run_async(research, publish=publish)
+        strategy = await strategist.run_async(strat_input, publish=publish)
         globals()["_last_strategy"] = strategy
         _save_strategy(strategy)
     except Exception as e:

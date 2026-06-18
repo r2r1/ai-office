@@ -603,11 +603,110 @@ chatSend.addEventListener("click", sendChat);
 chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
 chatClose.addEventListener("click", closeChat);
 
+// ============================================================
+// ОНБОРДИНГ: клиент описывает задачу → офис запускается под него
+// ============================================================
+const intake = document.getElementById("intake");
+const intakeStep1 = document.getElementById("intake-step1");
+const intakeStep2 = document.getElementById("intake-step2");
+const intakeLoading = document.getElementById("intake-loading");
+const intakeLoadingText = document.getElementById("intake-loading-text");
+const intakeInput = document.getElementById("intake-input");
+const intakeNext = document.getElementById("intake-next");
+const intakeStart = document.getElementById("intake-start");
+const intakeQuestions = document.getElementById("intake-questions");
+
+let intakeClientInput = "";
+let intakeQuestionList = [];
+
+async function checkBriefStatus() {
+  try {
+    const r = await fetch("/api/brief/status");
+    const d = await r.json();
+    // Если демо или бриф уже есть — пропускаем онбординг
+    if (d.demo || d.ready) {
+      intake.classList.add("hidden");
+    } else {
+      intake.classList.remove("hidden");
+    }
+  } catch {
+    intake.classList.remove("hidden");
+  }
+}
+
+function showIntakeLoading(text) {
+  intakeStep1.classList.add("hidden");
+  intakeStep2.classList.add("hidden");
+  intakeLoading.classList.remove("hidden");
+  intakeLoadingText.textContent = text;
+}
+
+async function intakeGetQuestions() {
+  intakeClientInput = intakeInput.value.trim();
+  if (!intakeClientInput) { intakeInput.focus(); return; }
+
+  showIntakeLoading("Изучаю ваш запрос, готовлю вопросы...");
+  try {
+    const r = await fetch("/api/brief/questions", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({input: intakeClientInput}),
+    });
+    const d = await r.json();
+    intakeQuestionList = d.questions || [];
+    renderIntakeQuestions();
+    intakeLoading.classList.add("hidden");
+    intakeStep2.classList.remove("hidden");
+  } catch (e) {
+    intakeLoading.classList.add("hidden");
+    intakeStep1.classList.remove("hidden");
+    alert("Ошибка: " + e.message);
+  }
+}
+
+function renderIntakeQuestions() {
+  intakeQuestions.innerHTML = "";
+  intakeQuestionList.forEach((q, i) => {
+    const div = document.createElement("div");
+    div.className = "intake-q";
+    div.innerHTML = `<label>${q}</label><input type="text" data-i="${i}" autocomplete="off">`;
+    intakeQuestions.appendChild(div);
+  });
+}
+
+async function intakeStartOffice() {
+  const answers = intakeQuestionList.map((q, i) => {
+    const inp = intakeQuestions.querySelector(`input[data-i="${i}"]`);
+    return {q, a: inp ? inp.value.trim() : ""};
+  });
+
+  showIntakeLoading("Формирую бриф и запускаю офис... Это займёт минуту.");
+  try {
+    const r = await fetch("/api/brief/start", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({input: intakeClientInput, answers}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      intake.classList.add("hidden");  // офис стартовал, события пойдут по SSE
+    } else {
+      throw new Error(d.error || "неизвестная ошибка");
+    }
+  } catch (e) {
+    intakeLoading.classList.add("hidden");
+    intakeStep2.classList.remove("hidden");
+    alert("Ошибка запуска: " + e.message);
+  }
+}
+
+intakeNext.addEventListener("click", intakeGetQuestions);
+intakeStart.addEventListener("click", intakeStartOffice);
+
 // ---- Init ----
 window.addEventListener("load", () => {
   resize();
   connectSSE();
   setupClickHandler();
+  checkBriefStatus();
   gameLoop();
 });
 

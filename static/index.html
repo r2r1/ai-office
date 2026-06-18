@@ -85,9 +85,75 @@
   }
   #chat-send:hover { background: #3d5a8e; }
   #chat-send:disabled { opacity: 0.4; cursor: default; }
+  /* --- Онбординг --- */
+  #intake {
+    position: fixed; inset: 0; z-index: 100;
+    background: radial-gradient(circle at 50% 30%, #1a1a3e, #0a0a0f);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  #intake.hidden { display: none; }
+  #intake-card {
+    width: 100%; max-width: 560px; background: #0f0f1a;
+    border: 1px solid #2a2a4e; border-radius: 14px; padding: 32px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+  }
+  #intake-card h1 { font-size: 24px; margin-bottom: 8px; color: #4fc3f7; }
+  #intake-card .sub { color: #8888aa; font-size: 13px; margin-bottom: 18px; line-height: 1.5; }
+  #intake-input {
+    width: 100%; height: 120px; background: #131320; border: 1px solid #2a2a4e;
+    border-radius: 8px; padding: 12px; color: #e0e0e0; font-family: inherit;
+    font-size: 13px; resize: vertical; outline: none; line-height: 1.5;
+  }
+  #intake-input:focus { border-color: #4fc3f7; }
+  #intake button {
+    margin-top: 16px; width: 100%; padding: 13px; border: none; border-radius: 8px;
+    background: linear-gradient(135deg, #4fc3f7, #2d6ee0); color: #fff;
+    font-size: 14px; font-weight: bold; cursor: pointer; font-family: inherit;
+  }
+  #intake button:hover { filter: brightness(1.1); }
+  #intake button:disabled { opacity: 0.5; cursor: default; }
+  .intake-q { margin-bottom: 12px; }
+  .intake-q label { display: block; font-size: 12px; color: #b0b0d0; margin-bottom: 5px; }
+  .intake-q input {
+    width: 100%; background: #131320; border: 1px solid #2a2a4e; border-radius: 6px;
+    padding: 9px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none;
+  }
+  .intake-q input:focus { border-color: #4fc3f7; }
+  .hidden { display: none !important; }
+  .spinner {
+    width: 36px; height: 36px; margin: 20px auto 12px; border: 3px solid #2a2a4e;
+    border-top-color: #4fc3f7; border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #intake-loading { text-align: center; }
+  #intake-loading-text { color: #8888aa; font-size: 13px; }
 </style>
 </head>
 <body>
+<!-- Экран онбординга -->
+<div id="intake">
+  <div id="intake-card">
+    <h1>🏢 Запусти свой AI-офис</h1>
+    <p class="sub">Опиши свою идею, вставь ссылки на соцсети или инструкции — офис сам всё выяснит и начнёт работать.</p>
+
+    <div id="intake-step1">
+      <textarea id="intake-input" placeholder="Например: «У меня магазин handmade-свечей в Instagram @mycandles, хочу выйти на 300к/мес. Помогите с контентом и продажами»"></textarea>
+      <button id="intake-next">Продолжить →</button>
+    </div>
+
+    <div id="intake-step2" class="hidden">
+      <p class="sub">Ответьте на пару вопросов, чтобы офис понял задачу точнее:</p>
+      <div id="intake-questions"></div>
+      <button id="intake-start">🚀 Запустить офис</button>
+    </div>
+
+    <div id="intake-loading" class="hidden">
+      <div class="spinner"></div>
+      <p id="intake-loading-text">Готовлю вопросы...</p>
+    </div>
+  </div>
+</div>
+
 <div id="layout">
   <div id="game-wrap">
     <canvas id="canvas"></canvas>

@@ -14,7 +14,8 @@ from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.office import bus, registry, loop as office_loop, demo, chat
+from src.office import bus, registry, loop as office_loop, demo, chat, brief
+from src.agents import onboarding
 
 load_dotenv()
 
@@ -23,6 +24,9 @@ DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Загружаем сохранённый бриф (если был) — офис продолжит работу клиента
+    if not DEMO_MODE:
+        brief.load()
     # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
     runner = demo.run if DEMO_MODE else office_loop.run
     task = asyncio.create_task(runner())
@@ -91,6 +95,49 @@ async def get_agents():
         }
         for a in registry.all_agents()
     ]
+
+
+@app.get("/api/brief/status")
+async def brief_status():
+    """Фронт проверяет: нужен ли онбординг, или офис уже работает."""
+    return {"ready": brief.is_ready(), "demo": DEMO_MODE, "brief": brief.get()}
+
+
+@app.post("/api/brief/questions")
+async def brief_questions(request: Request):
+    """Шаг 1: клиент прислал ввод → офис задаёт уточняющие вопросы."""
+    data = await request.json()
+    client_input = (data.get("input") or "").strip()
+    if not client_input:
+        return JSONResponse({"error": "пустой ввод"}, status_code=400)
+    try:
+        questions = await onboarding.make_questions(client_input, publish=bus.publish)
+        return {"questions": questions}
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+
+@app.post("/api/brief/start")
+async def brief_start(request: Request):
+    """Шаг 2: клиент ответил на вопросы → формируем бриф и запускаем офис."""
+    data = await request.json()
+    client_input = (data.get("input") or "").strip()
+    qa_pairs = data.get("answers", [])
+    if not client_input:
+        return JSONResponse({"error": "пустой ввод"}, status_code=400)
+    try:
+        brief_data = await onboarding.build_brief(client_input, qa_pairs, publish=bus.publish)
+        brief.set_brief(brief_data)  # сигналит офису о старте
+        return {"ok": True, "brief": brief_data}
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+
+@app.post("/api/brief/reset")
+async def brief_reset():
+    """Сбросить бриф (новый клиент / новая задача)."""
+    brief.reset()
+    return {"ok": True}
 
 
 @app.post("/api/ask")
