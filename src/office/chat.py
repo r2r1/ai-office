@@ -181,3 +181,9 @@ async def ask(
 
 def clear_history(agent_id: str) -> None:
     _histories.pop(agent_id, None)
+    _save_histories()
+
+
+def clear_all() -> None:
+    _histories.clear()
+    _save_histories()

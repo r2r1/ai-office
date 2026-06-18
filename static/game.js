@@ -700,6 +700,7 @@ async function checkBriefStatus() {
     // Если демо или бриф уже есть — пропускаем онбординг
     if (d.demo || d.ready) {
       intake.classList.add("hidden");
+      showMission(d.brief);  // показываем задачу офиса — никаких пустот
     } else {
       intake.classList.remove("hidden");
     }
@@ -775,12 +776,48 @@ async function intakeStartOffice() {
 intakeNext.addEventListener("click", intakeGetQuestions);
 intakeStart.addEventListener("click", intakeStartOffice);
 
+function roleFromId(id) { return (id || "").replace(/_\d+$/, ""); }
+
+function logOnly(event) {
+  const role = roleFromId(event.agent_id);
+  if (event.type === "hired") addLog(event.agent_id, `принят как ${event.role}`, event.role);
+  else if (event.type === "speech") addLog(event.agent_id, event.text, role);
+  else if (event.type === "task_done") addLog(event.agent_id, "✓ " + (event.summary || "задача выполнена"), role);
+  else if (event.type === "system") addLog("офис", event.text, "system");
+  else if (event.type === "error") addLog(event.agent_id, "⚠ " + event.text, role);
+}
+
+async function replayHistory() {
+  try {
+    const r = await fetch("/api/history");
+    const d = await r.json();
+    const events = d.events || [];
+    if (!events.length) return;
+    for (const event of events) logOnly(event);
+    addLog("офис", `↺ Восстановлена история прошлых запусков (${events.length} событий)`, "system");
+  } catch {}
+}
+
+function showMission(brief) {
+  if (!brief || !brief.goal) return;
+  let m = document.getElementById("mission");
+  if (!m) {
+    m = document.createElement("div");
+    m.id = "mission";
+    m.style.cssText = "padding:8px 14px;background:#10101e;border-bottom:1px solid #1a1a2e;font-size:11px;color:#8fd3ff;line-height:1.4;";
+    const title = document.getElementById("sidebar-title");
+    title.insertAdjacentElement("afterend", m);
+  }
+  m.innerHTML = `🎯 <b>Задача офиса:</b><br>${brief.goal}`;
+}
+
 // ---- Init ----
 window.addEventListener("load", () => {
   resize();
   connectSSE();
   setupClickHandler();
   checkBriefStatus();
+  replayHistory();
   gameLoop();
 });
 

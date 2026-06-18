@@ -14,7 +14,7 @@ from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.office import bus, registry, loop as office_loop, demo, chat, brief
+from src.office import bus, registry, loop as office_loop, demo, chat, brief, state
 from src.agents import onboarding
 
 load_dotenv()
@@ -24,9 +24,11 @@ DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Загружаем сохранённый бриф (если был) — офис продолжит работу клиента
+    # Загружаем сохранённый бриф и историю (если были) — офис продолжит с того же места
     if not DEMO_MODE:
         brief.load()
+        state.load()
+        registry.restore(state.saved_agents())
     # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
     runner = demo.run if DEMO_MODE else office_loop.run
     task = asyncio.create_task(runner())
@@ -133,10 +135,21 @@ async def brief_start(request: Request):
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
 
+@app.get("/api/history")
+async def get_history():
+    """Лента событий из прошлых запусков — фронт показывает её при загрузке."""
+    return {"events": state.history(), "results": {
+        a.agent_id: state.result_for(a.agent_id) for a in registry.all_agents()
+    }}
+
+
 @app.post("/api/brief/reset")
 async def brief_reset():
-    """Сбросить бриф (новый клиент / новая задача)."""
+    """Полный сброс: новый клиент / новая задача с чистого листа."""
     brief.reset()
+    state.reset()
+    registry.reset()
+    chat.clear_all()
     return {"ok": True}
 
 

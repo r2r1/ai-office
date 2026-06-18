@@ -22,7 +22,7 @@ SCENARIO = [
     {"delay": 1.5, "event": {"type": "thinking", "agent_id": "researcher_1", "text": "Начинаю исследование рынка AI-агентов 2026..."}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Ищу: 'AI automation agency revenue 2026'"}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Рынок AI-агентов вырос с $5 млрд до $13 млрд за год!"}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Соло-основатели выходят на $25K MRR за 4 месяца"}},
+    {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Соло-основатели выходят на $25K MRR — узкое место не работа, а ответы клиентов"}},
     {"delay": 2.5, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Маржинальность 70-85%, накладные всего $75-150/мес"}},
     {"delay": 2, "event": {"type": "task_done", "agent_id": "researcher_1", "summary": "Вывод: AI Automation Agency — самый реалистичный путь к 1М руб."}},
 
@@ -30,8 +30,8 @@ SCENARIO = [
     {"delay": 2, "event": {"type": "thinking", "agent_id": "strategist_1", "text": "Анализирую отчёт ресёрчера, строю план..."}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Юнит-экономика: 4 ретейнера × 30,000₽ = 120,000₽/мес"}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Ниша: автоматизация для e-commerce и медклиник"}},
-    {"delay": 2.5, "event": {"type": "speech", "agent_id": "strategist_1", "text": "90 дней: фундамент → первые клиенты → масштаб"}},
-    {"delay": 2, "event": {"type": "task_done", "agent_id": "strategist_1", "summary": "План готов: 1М руб. достижим на 4-5 месяц"}},
+    {"delay": 2.5, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Этапы 24/7: фундамент (часы) → первые лиды (1-2 дня) → сделки → масштаб"}},
+    {"delay": 2, "event": {"type": "task_done", "agent_id": "strategist_1", "summary": "План готов: первый результат ~сутки, цель 1М руб. — недели (упор в скорость ответов клиентов)"}},
 
     # --- HR нанимает ---
     {"delay": 2, "event": {"type": "thinking", "agent_id": "hr_1", "text": "Анализирую команду, решаю кого нанять..."}},
