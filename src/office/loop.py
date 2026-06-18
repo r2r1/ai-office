@@ -1,78 +1,126 @@
 """
 Автономный офисный цикл — мозг системы.
-Запускает агентов по очереди, HR решает кого нанять.
+
+Логика:
+  BOOTSTRAP (один раз) — ресёрчер (deep) + стратег определяют нишу и план.
+                          Результат сохраняется в reports/strategy.md.
+  ЦИКЛЫ (повторяются)   — ниша УЖЕ выбрана. Офис развивает бизнес:
+                          HR нанимает недостающих специалистов, агенты работают,
+                          ресёрчер вызывается только on-demand (quick) для трендов.
+
+Если strategy.md уже существует — bootstrap пропускается, офис продолжает с того же места.
 """
 
 import asyncio
 import os
-from typing import Callable, Awaitable
+from pathlib import Path
 
 from src.office import bus, registry
 from src.agents import researcher, strategist, hr
 from src.agents import agent_factory
 
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "300"))  # 5 минут по умолчанию
+STRATEGY_FILE = Path("reports/strategy.md")
 
 _last_research: str = ""
 _last_strategy: str = ""
 
 
 async def run() -> None:
-    """Бесконечный цикл автономного офиса."""
+    """Автономный офис: разовый bootstrap, затем циклы развития бизнеса."""
 
     publish = bus.publish
 
-    # Регистрируем стартовых сотрудников
     _hire_initial(publish)
-
     await asyncio.sleep(2)
 
+    # ---- BOOTSTRAP: определяем нишу и стратегию ОДИН РАЗ ----
+    strategy = _load_strategy()
+    if strategy:
+        globals()["_last_strategy"] = strategy
+        await publish({"type": "system",
+                       "text": "Стратегия уже определена — продолжаю развитие бизнеса"})
+        await publish({"type": "task_done", "agent_id": "strategist_1",
+                       "summary": "Ниша выбрана ранее. План загружен из strategy.md"})
+    else:
+        strategy = await _bootstrap(publish)
+
+    # ---- ЦИКЛЫ РАЗВИТИЯ: ниша зафиксирована, офис работает ----
     cycle = 0
     while True:
         cycle += 1
-        await publish({"type": "system", "text": f"=== Цикл #{cycle} начался ==="})
+        await publish({"type": "system", "text": f"=== Рабочий цикл #{cycle} ==="})
 
-        # 1. Ресёрчер собирает данные
-        await publish({"type": "thinking", "agent_id": "researcher_1", "text": "Начинаю исследование рынка..."})
-        try:
-            research = await asyncio.to_thread(_run_researcher, publish)
-            globals()["_last_research"] = research
-        except Exception as e:
-            await publish({"type": "error", "agent_id": "researcher_1", "text": str(e)[:100]})
-            research = _last_research
-
-        # 2. Стратег строит план
-        await publish({"type": "thinking", "agent_id": "strategist_1", "text": "Анализирую отчёт, строю план..."})
-        try:
-            strategy = await asyncio.to_thread(_run_strategist, research, publish)
-            globals()["_last_strategy"] = strategy
-        except Exception as e:
-            await publish({"type": "error", "agent_id": "strategist_1", "text": str(e)[:100]})
-            strategy = _last_strategy
-
-        # 3. HR решает кого нанять
+        # HR смотрит на команду и нанимает недостающего специалиста
         if registry.count() < registry.MAX_DESKS:
             decision = await hr.decide(strategy[:1500], publish)
             if decision.get("hire"):
-                role = decision["role"]
-                task = decision.get("task", f"Выполни задачи {role}")
-                agent_id = f"{role}_{registry.count() + 1}"
-                rec = registry.register(agent_id, role, task)
-                if rec:
-                    await publish({
-                        "type": "hired",
-                        "agent_id": agent_id,
-                        "role": role,
-                        "desk": rec.desk,
-                        "task": task[:100],
-                    })
-                    # Запускаем нового агента асинхронно
-                    agent_fn = agent_factory.create(role, task, agent_id, publish)
-                    asyncio.create_task(_run_hired_agent(agent_id, agent_fn, publish))
+                await _hire_and_run(decision, publish)
+            else:
+                await publish({"type": "system",
+                               "text": "Команда укомплектована — агенты работают над задачами"})
+        else:
+            await publish({"type": "system", "text": "Все столы заняты — офис на полной мощности"})
 
-        # 4. Запускаем уже нанятых агентов если нужно
-        await publish({"type": "system", "text": f"Цикл #{cycle} завершён. Следующий через {LOOP_INTERVAL}с"})
+        await publish({"type": "system",
+                       "text": f"Цикл #{cycle} завершён. Следующий через {LOOP_INTERVAL}с"})
         await asyncio.sleep(LOOP_INTERVAL)
+
+
+async def _bootstrap(publish) -> str:
+    """Разовое определение ниши: ресёрчер (deep) + стратег."""
+    await publish({"type": "system", "text": "=== BOOTSTRAP: определяем нишу (разово) ==="})
+
+    await publish({"type": "thinking", "agent_id": "researcher_1",
+                   "text": "Глубокое исследование рынка для выбора ниши..."})
+    try:
+        research = await asyncio.to_thread(_run_researcher, publish)
+        globals()["_last_research"] = research
+    except Exception as e:
+        await publish({"type": "error", "agent_id": "researcher_1", "text": str(e)[:100]})
+        research = _last_research
+
+    await publish({"type": "thinking", "agent_id": "strategist_1",
+                   "text": "Строю стратегию на основе исследования..."})
+    try:
+        strategy = await asyncio.to_thread(_run_strategist, research, publish)
+        globals()["_last_strategy"] = strategy
+        _save_strategy(strategy)
+    except Exception as e:
+        await publish({"type": "error", "agent_id": "strategist_1", "text": str(e)[:100]})
+        strategy = _last_strategy
+
+    await publish({"type": "system",
+                   "text": "Ниша определена ✓ Больше не переисследуем — развиваем бизнес"})
+    return strategy
+
+
+async def _hire_and_run(decision: dict, publish) -> None:
+    role = decision["role"]
+    task = decision.get("task", f"Выполни задачи {role}")
+    agent_id = f"{role}_{registry.count() + 1}"
+    rec = registry.register(agent_id, role, task)
+    if rec:
+        await publish({
+            "type": "hired",
+            "agent_id": agent_id,
+            "role": role,
+            "desk": rec.desk,
+            "task": task[:100],
+        })
+        agent_fn = agent_factory.create(role, task, agent_id, publish)
+        asyncio.create_task(_run_hired_agent(agent_id, agent_fn, publish))
+
+
+def _load_strategy() -> str:
+    if STRATEGY_FILE.exists():
+        return STRATEGY_FILE.read_text(encoding="utf-8")
+    return ""
+
+
+def _save_strategy(strategy: str) -> None:
+    STRATEGY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STRATEGY_FILE.write_text(strategy, encoding="utf-8")
 
 
 def _hire_initial(publish_sync) -> None:
