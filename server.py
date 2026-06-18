@@ -13,15 +13,18 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.office import bus, registry, loop as office_loop
+from src.office import bus, registry, loop as office_loop, demo
 
 load_dotenv()
+
+DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Стартуем автономный офис в фоне
-    task = asyncio.create_task(office_loop.run())
+    # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
+    runner = demo.run if DEMO_MODE else office_loop.run
+    task = asyncio.create_task(runner())
     yield
     task.cancel()
 
