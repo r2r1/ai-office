@@ -15,9 +15,14 @@ import asyncio
 import os
 from pathlib import Path
 
-from src.office import bus, registry, brief, state
+from src.office import bus, registry, brief, state, progress
 from src.agents import researcher, strategist, hr
 from src.agents import agent_factory
+
+
+async def _set_progress(stage: int, note: str, publish) -> None:
+    data = progress.set_stage(stage, note)
+    await publish({"type": "progress", **data})
 
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "10"))  
 STRATEGY_FILE = Path("reports/strategy.md")
@@ -49,6 +54,7 @@ async def run() -> None:
     strategy = _load_strategy()
     if strategy:
         globals()["_last_strategy"] = strategy
+        await _set_progress(3, "Стратегия загружена, развиваем бизнес", publish)
         await publish({"type": "system",
                        "text": "Стратегия уже определена — продолжаю развитие бизнеса"})
         await publish({"type": "task_done", "agent_id": "strategist_1",
@@ -67,6 +73,7 @@ async def run() -> None:
         if registry.count() < registry.MAX_DESKS:
             decision = await hr.decide(strategy[:1500], publish)
             if decision.get("hire"):
+                await _set_progress(3, "Набираем команду", publish)
                 await _hire_and_run(decision, publish)
                 hired = True
 
@@ -78,6 +85,16 @@ async def run() -> None:
                 await publish({"type": "system",
                                "text": "Агенты заняты текущими задачами — ждём результатов"})
 
+        # 3) Обновляем индикатор прогресса по числу готовых результатов
+        n_results = len([d for d in state.deliverables()
+                         if d.get("role") not in ("researcher", "strategist")])
+        if n_results >= 6:
+            await _set_progress(6, "Масштабируем к цели", publish)
+        elif n_results >= 1:
+            await _set_progress(5, "Пошли первые результаты", publish)
+        elif registry.count() > 3:
+            await _set_progress(4, "Агенты развивают бизнес", publish)
+
         await publish({"type": "system",
                        "text": f"Цикл #{cycle} завершён. Следующий через {LOOP_INTERVAL}с"})
         await asyncio.sleep(LOOP_INTERVAL)
@@ -86,6 +103,7 @@ async def run() -> None:
 async def _bootstrap(publish) -> str:
     """Разовое определение ниши: ресёрчер (deep) + стратег."""
     await publish({"type": "system", "text": "=== BOOTSTRAP: исследуем нишу клиента ==="})
+    await _set_progress(1, "Исследуем рынок и тренды", publish)
 
     question = brief.research_question() or researcher.DEFAULT_QUESTION
     try:
@@ -96,6 +114,7 @@ async def _bootstrap(publish) -> str:
         research = _last_research
 
     # Стратег получает и бриф клиента, и исследование
+    await _set_progress(2, "Строим бизнес-стратегию", publish)
     strat_input = research
     if brief.summary():
         strat_input = f"БРИФ КЛИЕНТА:\n{brief.summary()}\n\nИССЛЕДОВАНИЕ РЫНКА:\n{research}"

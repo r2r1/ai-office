@@ -14,7 +14,7 @@ from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.office import bus, registry, loop as office_loop, demo, chat, brief, state
+from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
 from src.agents import onboarding
 
 load_dotenv()
@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
     if not DEMO_MODE:
         brief.load()
         state.load()
+        progress.load()
+        connections.load()
         registry.restore(state.saved_agents())
     # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
     runner = demo.run if DEMO_MODE else office_loop.run
@@ -149,6 +151,49 @@ async def get_deliverables():
     return {"deliverables": state.deliverables()}
 
 
+@app.get("/api/progress")
+async def get_progress():
+    """Текущий этап развития офиса для индикатора прогресса."""
+    return progress.get()
+
+
+@app.get("/api/agent/{agent_id}")
+async def get_agent_detail(agent_id: str):
+    """Карточка агента: что делает сейчас и что уже сделал."""
+    rec = registry.get(agent_id)
+    if rec is None:
+        return JSONResponse({"error": "агент не найден"}, status_code=404)
+    return {
+        "agent_id": rec.agent_id,
+        "role": rec.role,
+        "status": rec.status,
+        "task": rec.task,
+        "current": rec.last_message or rec.task,
+        "done": state.deliverables_for(agent_id),
+        "activity": state.events_for(agent_id),
+    }
+
+
+@app.get("/api/connections")
+async def get_connections():
+    return {"connections": connections.list_all()}
+
+
+@app.post("/api/connections")
+async def save_connection(request: Request):
+    data = await request.json()
+    if not (data.get("name") or "").strip():
+        return JSONResponse({"error": "название обязательно"}, status_code=400)
+    item = connections.save(data)
+    return {"ok": True, "connection": item}
+
+
+@app.delete("/api/connections/{cid}")
+async def delete_connection(cid: str):
+    ok = connections.delete(cid)
+    return {"ok": ok}
+
+
 @app.post("/api/brief/reset")
 async def brief_reset():
     """Полный сброс: новый клиент / новая задача с чистого листа."""
@@ -156,6 +201,7 @@ async def brief_reset():
     state.reset()
     registry.reset()
     chat.clear_all()
+    progress.reset()
     return {"ok": True}
 
 

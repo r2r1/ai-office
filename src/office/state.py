@@ -68,6 +68,17 @@ def deliverables() -> list[dict]:
     return list(reversed(_deliverables))  # новые сверху
 
 
+def deliverables_for(agent_id: str) -> list[dict]:
+    """Все готовые результаты конкретного агента, новые сверху."""
+    return [d for d in reversed(_deliverables) if d.get("agent_id") == agent_id]
+
+
+def events_for(agent_id: str, limit: int = 30) -> list[dict]:
+    """Последние события конкретного агента (что делал/говорил)."""
+    out = [e for e in _events if e.get("agent_id") == agent_id]
+    return out[-limit:]
+
+
 def saved_agents() -> list[dict]:
     return list(_agents.values())
 

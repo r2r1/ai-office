@@ -14,6 +14,7 @@ from src.office import questions as questions_module
 from src.office import agent_inbox
 from src.office import brief as brief_module
 from src.office import state
+from src.office import connections
 
 _INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
 
@@ -81,6 +82,26 @@ _READ_MESSAGES_TOOL = {
             "type": "object",
             "properties": {},
             "required": [],
+        },
+    },
+}
+
+# Инструмент: получить доступ/учётные данные к внешней платформе
+_GET_CONNECTION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_connection",
+        "description": (
+            "Получает сохранённые доступы к внешней платформе (API-ключ, логин/пароль, токен) "
+            "по названию. Используй когда нужно подключиться к сервису. "
+            "Если подключения нет — спроси пользователя через ask_user, чтобы он его добавил."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Название платформы (например: Instagram, OpenAI, Telegram)"},
+            },
+            "required": ["name"],
         },
     },
 }
@@ -161,6 +182,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         msgs = agent_inbox.read(agent_id)
         return json.dumps(msgs, ensure_ascii=False)
 
+    async def _handle_get_connection(args: dict) -> str:
+        name = args.get("name", "")
+        conn = connections.get_by_name(name)
+        if not conn:
+            available = ", ".join(connections.names()) or "нет сохранённых"
+            return (f"Подключение '{name}' не найдено. Доступные: {available}. "
+                    f"Попроси пользователя добавить его через ask_user.")
+        return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
+                          ensure_ascii=False)
+
     async def run() -> str:
         await publish({"type": "thinking", "agent_id": agent_id,
                        "text": f"Начинаю работу: {task[:80]}..."})
@@ -173,12 +204,14 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             use_search=True,
             publish=publish,
             agent_id=agent_id,
-            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL, _READ_MESSAGES_TOOL],
+            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL,
+                         _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
                 "send_message": _handle_send_message,
                 "read_messages": _handle_read_messages,
+                "get_connection": _handle_get_connection,
             },
         )
 

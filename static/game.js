@@ -288,12 +288,12 @@ function connectSSE() {
   const es = new EventSource("/events");
 
   es.onopen = () => {
-    statusBar.textContent = "● подключено";
+    statusBar.textContent = "● онлайн";
     statusBar.style.color = "#4fc3f7";
   };
 
   es.onerror = () => {
-    statusBar.textContent = "● переподключение...";
+    statusBar.textContent = "● подключение...";
     statusBar.style.color = "#f06292";
   };
 
@@ -321,9 +321,9 @@ function handleEvent(event) {
     addLog(event.agent_id, "✓ " + (event.summary||"задача выполнена").slice(0,100), getRole(event.agent_id));
     updateAgentStatus(event.agent_id, "done", (event.summary||"").slice(0,80));
     loadDeliverables();  // обновляем счётчик и рендерим результаты
-    // Мигаем вкладкой Results чтобы привлечь внимание
-    const badge = document.getElementById("results-badge");
-    if (badge) { badge.style.background="#f06292"; setTimeout(()=>badge.style.background="",2000); }
+  }
+  else if (event.type === "progress") {
+    updateProgressBar(event);
   }
   else if (event.type === "system") {
     addLog("офис", event.text, "system");
@@ -467,7 +467,7 @@ function addLog(who, text, role) {
 }
 
 function updateSidebar() {
-  const list = document.getElementById("agents-list");
+  const list = document.getElementById("agents-grid");
   const noEl = document.getElementById("no-agents");
   const keys = Object.keys(agents);
   if (noEl) noEl.style.display = keys.length ? "none" : "block";
@@ -479,7 +479,7 @@ function updateSidebar() {
       card.className = "agent-card";
       card.dataset.agent = id;
       card.style.borderLeftColor = a.color;
-      card.addEventListener("click", () => openChat(id));
+      card.addEventListener("click", () => openAgentDrawer(id));
       list.appendChild(card);
     }
     const dotClass = a.status === "thinking" ? "thinking" : a.status === "done" ? "done" : "idle";
@@ -489,9 +489,78 @@ function updateSidebar() {
         <span class="status-dot ${dotClass}">${dotIcon}</span>
         <span style="color:${a.color}">${ROLE_ICONS[a.role]||""} ${a.role}</span>
       </div>
-      <div class="ac-status">${escapeHtml((a.lastMsg || a.task || id).slice(0,80))}</div>
+      <div class="ac-status">${escapeHtml((a.lastMsg || a.task || id).slice(0,120))}</div>
     `;
   }
+  // Nav badge: number of agents
+  const badge = document.getElementById("badge-team");
+  if (badge) {
+    badge.textContent = keys.length ? String(keys.length) : "";
+    badge.style.display = keys.length ? "block" : "none";
+  }
+}
+
+// ============================================================
+// AGENT DETAIL DRAWER
+// ============================================================
+let drawerAgentId = null;
+
+async function openAgentDrawer(agentId) {
+  drawerAgentId = agentId;
+  const a = agents[agentId];
+  const drawer = document.getElementById("agent-drawer");
+  const roleEl = document.getElementById("ad-role");
+  const curEl = document.getElementById("ad-current");
+  const delivWrap = document.getElementById("ad-deliverables");
+
+  const localColor = (a && a.color) || "#4fc3f7";
+  const localRole = (a && a.role) || roleFromId(agentId);
+  roleEl.textContent = `${ROLE_ICONS[localRole] || "🤖"} ${localRole}`;
+  roleEl.style.color = localColor;
+  curEl.textContent = "Загрузка...";
+  delivWrap.innerHTML = "";
+  drawer.classList.add("open");
+
+  let data = null;
+  try {
+    const r = await fetch(`/api/agent/${encodeURIComponent(agentId)}`);
+    data = await r.json();
+  } catch {}
+
+  const status = (data && (data.status || (a && a.status))) || "idle";
+  const current = (data && (data.current || data.task)) || (a && (a.lastMsg || a.task)) || "—";
+  const statusWord = status === "thinking" ? "⟳ работает" : status === "done" ? "✓ готово" : "○ ожидает";
+  curEl.innerHTML = `<b style="color:${localColor}">${escapeHtml(statusWord)}</b><br>Сейчас делает: ${escapeHtml(current)}`;
+
+  const done = (data && data.done) || [];
+  if (!done.length) {
+    delivWrap.innerHTML = `<div style="color:#556;font-size:12px;padding:8px 0;">Пока ничего не сдал.</div>`;
+  } else {
+    done.forEach((d) => {
+      const div = document.createElement("div");
+      div.className = "ad-deliv";
+      div.innerHTML = `
+        <div class="add-task">${escapeHtml((d.task||"задача").slice(0,90))}</div>
+        <div class="add-time">${escapeHtml(d.time||"")}</div>
+        <div class="add-preview">${escapeHtml((d.content||"").slice(0,260))}</div>
+        <div class="add-actions">
+          <button class="dc-btn ad-open">↗ открыть полностью</button>
+          <button class="dc-btn ad-copy">⧉ Копировать</button>
+        </div>
+      `;
+      div.querySelector(".ad-open").addEventListener("click", () =>
+        openFullTextRaw(localRole, d.task||"", d.time||"", d.content||"", localColor));
+      div.querySelector(".ad-copy").addEventListener("click", async (e) => {
+        try { await navigator.clipboard.writeText(d.content||""); e.target.textContent="✓ Скопировано"; setTimeout(()=>e.target.textContent="⧉ Копировать",1500); } catch {}
+      });
+      delivWrap.appendChild(div);
+    });
+  }
+}
+
+function closeAgentDrawer() {
+  document.getElementById("agent-drawer").classList.remove("open");
+  drawerAgentId = null;
 }
 
 // ---- Game loop ----
@@ -793,10 +862,189 @@ function escapeHtml(s) {
   return (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 }
 
-// ---- Tabs ----
-function switchTab(name) {
-  document.querySelectorAll(".sb-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
-  document.querySelectorAll(".sb-pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + name));
+// ---- Views ----
+function switchView(name) {
+  document.querySelectorAll(".nav-item").forEach(t => t.classList.toggle("active", t.dataset.view === name));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+  if (name === "office") {
+    // Re-fit canvas now that #view-office is visible again
+    resize();
+    const {ox, oy} = getMapOffset();
+    for (const a of Object.values(agents)) {
+      const dp = DESK_POSITIONS[a.desk] || DESK_POSITIONS[0];
+      a.tx = ox + dp.tx * P + P/2;
+      a.ty = oy + dp.ty * P + P/2;
+    }
+  }
+}
+
+// ============================================================
+// PROGRESS BAR (top stepper)
+// ============================================================
+const DEFAULT_STAGES = ["Бриф","Исследование","Стратегия","Команда","Развитие","Результаты","Масштаб"];
+let progressStages = DEFAULT_STAGES.slice();
+
+function buildProgressSteps(stages) {
+  progressStages = (stages && stages.length) ? stages : progressStages;
+  const cont = document.getElementById("progress-steps");
+  // remove existing steps (keep track + fill)
+  cont.querySelectorAll(".pstep").forEach(e => e.remove());
+  progressStages.forEach((label) => {
+    const div = document.createElement("div");
+    div.className = "pstep";
+    div.innerHTML = `<div class="pdot">●</div><div class="plabel">${escapeHtml(label)}</div>`;
+    cont.appendChild(div);
+  });
+}
+
+function updateProgressBar(p) {
+  if (p.stages && p.stages.length) buildProgressSteps(p.stages);
+  const steps = document.querySelectorAll(".pstep");
+  const stage = typeof p.stage === "number" ? p.stage : 0;
+  steps.forEach((el, i) => {
+    el.classList.toggle("done", i < stage);
+    el.classList.toggle("current", i === stage);
+  });
+  const fill = document.getElementById("progress-fill");
+  const pct = typeof p.percent === "number" ? p.percent : (progressStages.length>1 ? (stage/(progressStages.length-1))*100 : 0);
+  // track spans 9%..91% (82% wide)
+  fill.style.width = (Math.max(0, Math.min(100, pct)) * 0.82) + "%";
+  const note = document.getElementById("progress-note");
+  if (note) note.textContent = p.note || (p.label ? "Этап: " + p.label : "");
+}
+
+async function loadProgress() {
+  try {
+    const r = await fetch("/api/progress");
+    const d = await r.json();
+    updateProgressBar(d);
+  } catch {}
+}
+
+// ============================================================
+// CONNECTIONS
+// ============================================================
+let connectionsCache = [];
+
+async function loadConnections() {
+  try {
+    const r = await fetch("/api/connections");
+    const d = await r.json();
+    connectionsCache = d.connections || [];
+  } catch { connectionsCache = []; }
+  renderConnections();
+}
+
+function renderConnections() {
+  const list = document.getElementById("conn-list");
+  const noEl = document.getElementById("no-conns");
+  list.querySelectorAll(".conn-card").forEach(c => c.remove());
+  if (noEl) noEl.style.display = connectionsCache.length ? "none" : "block";
+  connectionsCache.forEach((c) => {
+    const card = document.createElement("div");
+    card.className = "conn-card";
+    const fields = c.fields || {};
+    const fieldsHtml = Object.entries(fields).map(([k,v]) =>
+      `<div><span class="cf-k">${escapeHtml(k)}:</span> <span class="cf-v">${escapeHtml(String(v))}</span></div>`
+    ).join("") || `<div style="color:#556">нет полей</div>`;
+    card.innerHTML = `
+      <div class="cc-head">
+        <span class="cc-name">${escapeHtml(c.name||"Без названия")}</span>
+        <span class="cc-badge">${escapeHtml(connTypeLabel(c.type))}</span>
+      </div>
+      <div class="cc-fields">${fieldsHtml}</div>
+      ${c.note ? `<div class="cc-note">${escapeHtml(c.note)}</div>` : ""}
+      <div class="cc-actions">
+        <button class="dc-btn conn-edit">✎ Изменить</button>
+        <button class="dc-btn conn-del">🗑 Удалить</button>
+      </div>
+    `;
+    card.querySelector(".conn-edit").addEventListener("click", () => openConnForm(c));
+    card.querySelector(".conn-del").addEventListener("click", () => deleteConnection(c.id));
+    list.appendChild(card);
+  });
+}
+
+function connTypeLabel(t) {
+  return ({api:"API ключ", login:"Логин-пароль", token:"Токен", other:"Другое"})[t] || (t || "Другое");
+}
+
+function addFieldRow(k, v) {
+  const wrap = document.getElementById("cf-fields");
+  const row = document.createElement("div");
+  row.className = "cf-kv";
+  row.innerHTML = `
+    <input type="text" class="cf-k-in" placeholder="ключ" value="${escapeAttr(k||"")}">
+    <input type="text" class="cf-v-in" placeholder="значение" value="${escapeAttr(v||"")}">
+    <button class="cf-kv-del" type="button">✕</button>
+  `;
+  row.querySelector(".cf-kv-del").addEventListener("click", () => row.remove());
+  wrap.appendChild(row);
+}
+
+function escapeAttr(s) { return (s||"").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+
+function openConnForm(conn) {
+  document.getElementById("conn-box-title").textContent = conn ? "Изменить подключение" : "Новое подключение";
+  document.getElementById("cf-id").value = conn ? (conn.id||"") : "";
+  document.getElementById("cf-name").value = conn ? (conn.name||"") : "";
+  document.getElementById("cf-type").value = conn ? (conn.type||"api") : "api";
+  document.getElementById("cf-note").value = conn ? (conn.note||"") : "";
+  const fieldsWrap = document.getElementById("cf-fields");
+  fieldsWrap.innerHTML = "";
+  const fields = (conn && conn.fields) || {};
+  const entries = Object.entries(fields);
+  if (entries.length) entries.forEach(([k,v]) => addFieldRow(k, v));
+  else addFieldRow("", "");
+  document.getElementById("conn-overlay").classList.remove("hidden");
+}
+
+function closeConnForm() {
+  document.getElementById("conn-overlay").classList.add("hidden");
+}
+
+async function saveConnection() {
+  const id = document.getElementById("cf-id").value.trim();
+  const name = document.getElementById("cf-name").value.trim();
+  const type = document.getElementById("cf-type").value;
+  const note = document.getElementById("cf-note").value.trim();
+  const fields = {};
+  document.querySelectorAll("#cf-fields .cf-kv").forEach(row => {
+    const k = row.querySelector(".cf-k-in").value.trim();
+    const v = row.querySelector(".cf-v-in").value.trim();
+    if (k) fields[k] = v;
+  });
+  if (!name) { alert("Укажите название"); return; }
+  const body = {name, type, fields, note};
+  if (id) body.id = id;
+  try {
+    await fetch("/api/connections", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    closeConnForm();
+    loadConnections();
+  } catch (e) { alert("Ошибка сохранения: " + e.message); }
+}
+
+async function deleteConnection(id) {
+  if (!id) return;
+  if (!confirm("Удалить это подключение?")) return;
+  try {
+    await fetch(`/api/connections/${encodeURIComponent(id)}`, {method: "DELETE"});
+    loadConnections();
+  } catch (e) { alert("Ошибка: " + e.message); }
+}
+
+function setupConnections() {
+  document.getElementById("btn-add-conn").addEventListener("click", () => openConnForm(null));
+  document.getElementById("cf-add-field").addEventListener("click", () => addFieldRow("", ""));
+  document.getElementById("conn-box-save").addEventListener("click", saveConnection);
+  document.getElementById("conn-box-close").addEventListener("click", closeConnForm);
+  document.getElementById("conn-box-cancel").addEventListener("click", closeConnForm);
+  document.getElementById("conn-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "conn-overlay") closeConnForm();
+  });
 }
 
 // ---- Результаты (deliverables) ----
@@ -808,10 +1056,10 @@ async function loadDeliverables() {
     const r = await fetch("/api/deliverables");
     const d = await r.json();
     deliverablesCache = d.deliverables || [];
-    const badge = document.getElementById("results-badge");
+    const badge = document.getElementById("badge-results");
     if (badge) {
       badge.textContent = deliverablesCache.length ? String(deliverablesCache.length) : "";
-      badge.style.display = deliverablesCache.length ? "inline" : "none";
+      badge.style.display = deliverablesCache.length ? "block" : "none";
     }
     renderResultsPane();
   } catch {}
@@ -861,11 +1109,23 @@ function openFullText(i) {
   ftCurrentIdx = i;
   const d = deliverablesCache[i];
   if (!d) return;
+  ftRawContent = d.content || "";
   const color = ROLE_COLORS[d.role] || "#888";
   document.getElementById("ft-who").innerHTML = `<span style="color:${color}">${ROLE_ICONS[d.role]||""} ${escapeHtml(d.role)}</span> — ${escapeHtml(d.task||"")} <span style="color:#444;font-size:10px">${d.time||""}</span>`;
   document.getElementById("fulltext-body").textContent = d.content || "";
   document.getElementById("fulltext-overlay").classList.remove("hidden");
 }
+
+// Open fulltext modal for arbitrary content (used by agent drawer)
+function openFullTextRaw(role, task, time, content, color) {
+  ftCurrentIdx = -1;
+  ftRawContent = content || "";
+  color = color || ROLE_COLORS[role] || "#888";
+  document.getElementById("ft-who").innerHTML = `<span style="color:${color}">${ROLE_ICONS[role]||""} ${escapeHtml(role)}</span> — ${escapeHtml(task||"")} <span style="color:#444;font-size:10px">${time||""}</span>`;
+  document.getElementById("fulltext-body").textContent = content || "";
+  document.getElementById("fulltext-overlay").classList.remove("hidden");
+}
+let ftRawContent = "";
 
 function exportDeliverables() {
   if (!deliverablesCache.length) return;
@@ -912,7 +1172,7 @@ async function replayHistory() {
 }
 
 function showMission(brief) {
-  const m = document.getElementById("sb-mission");
+  const m = document.getElementById("team-mission");
   if (!m || !brief) return;
   const text = brief.goal || brief.summary || "";
   m.textContent = text ? "🎯 " + text : "";
@@ -928,11 +1188,6 @@ window.addEventListener("load", () => {
   loadDeliverables();
   gameLoop();
 
-  // Tabs
-  document.querySelectorAll(".sb-tab").forEach(tab => {
-    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
-  });
-
   // Reset
   document.getElementById("btn-reset").addEventListener("click", resetOffice);
 
@@ -946,15 +1201,37 @@ window.addEventListener("load", () => {
     if (e.target.id === "fulltext-overlay") e.target.classList.add("hidden");
   });
   document.getElementById("ft-copy").addEventListener("click", async () => {
-    const d = deliverablesCache[ftCurrentIdx];
-    if (!d) return;
-    try { await navigator.clipboard.writeText(d.content||""); document.getElementById("ft-copy").textContent="✓ Скопировано"; setTimeout(()=>document.getElementById("ft-copy").textContent="⧉ Копировать",1500); }
+    const content = ftCurrentIdx >= 0 ? (deliverablesCache[ftCurrentIdx]||{}).content : ftRawContent;
+    try { await navigator.clipboard.writeText(content||""); document.getElementById("ft-copy").textContent="✓ Скопировано"; setTimeout(()=>document.getElementById("ft-copy").textContent="⧉ Копировать",1500); }
     catch {}
   });
   document.getElementById("ft-export").addEventListener("click", () => {
-    const d = deliverablesCache[ftCurrentIdx];
-    if (d) downloadText(d.content||"", `${d.role}-${(d.task||"result").slice(0,30)}.md`);
+    if (ftCurrentIdx >= 0) {
+      const d = deliverablesCache[ftCurrentIdx];
+      if (d) downloadText(d.content||"", `${d.role}-${(d.task||"result").slice(0,30)}.md`);
+    } else if (ftRawContent) {
+      downloadText(ftRawContent, "result.md");
+    }
   });
+
+  // Nav switching
+  document.querySelectorAll(".nav-item").forEach(item => {
+    item.addEventListener("click", () => switchView(item.dataset.view));
+  });
+
+  // Agent drawer
+  document.getElementById("ad-close").addEventListener("click", closeAgentDrawer);
+  document.getElementById("ad-chat-btn").addEventListener("click", () => {
+    if (drawerAgentId) { openChat(drawerAgentId); closeAgentDrawer(); switchView("office"); }
+  });
+
+  // Progress bar
+  buildProgressSteps();
+  loadProgress();
+
+  // Connections
+  setupConnections();
+  loadConnections();
 });
 
 window.addEventListener("resize", () => {
