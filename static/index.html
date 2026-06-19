@@ -63,6 +63,20 @@ button { font-family: inherit; }
   border: 1px solid #2a2a3e; color: #998; background: #100e0a;
 }
 #btn-reset:hover { border-color: #f06292; color: #f06292; }
+#model-switcher {
+  display: flex; align-items: center; gap: 4px;
+  background: #0e0e1c; border: 1px solid #2a2a4e; border-radius: 6px;
+  padding: 2px 4px 2px 8px;
+}
+.ms-label { font-size: 13px; }
+#model-input {
+  background: transparent; border: none; outline: none; color: #8ab; font-family: inherit;
+  font-size: 11px; width: 140px;
+}
+#model-save {
+  background: transparent; border: none; cursor: pointer; color: #4a8; font-size: 13px; padding: 2px 4px;
+}
+#model-save:hover { color: #8fd; }
 
 /* ─────────────── SHELL ─────────────── */
 #shell { flex: 1; display: flex; min-height: 0; }
@@ -393,6 +407,11 @@ canvas { display: block; image-rendering: pixelated; }
     </div>
     <div id="tb-right">
       <span id="status-bar">● ожидание...</span>
+      <div id="model-switcher">
+        <span class="ms-label">🤖</span>
+        <input id="model-input" type="text" placeholder="модель..." autocomplete="off" spellcheck="false">
+        <button id="model-save">✓</button>
+      </div>
       <button id="btn-reset">↺ Новый клиент</button>
     </div>
   </div>

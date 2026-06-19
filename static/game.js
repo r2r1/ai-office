@@ -344,16 +344,29 @@ async function loadQuestions() {
   try {
     const r = await fetch("/api/questions");
     const d = await r.json();
-    const wrap = document.getElementById("questions-wrap");
-    wrap.innerHTML = "";
     const qs = d.questions || [];
     const badge = document.getElementById("badge-questions");
     badge.textContent = qs.length || "";
-    if (!qs.length) {
-      wrap.innerHTML = '<div class="empty-note" id="no-questions">Нет ожидающих вопросов</div>';
-      return;
-    }
+
+    // Add only new cards — don't wipe existing ones (preserves typed text)
     for (const q of qs) addQuestionCard(q, false);
+
+    // Remove cards that are no longer pending
+    const wrap = document.getElementById("questions-wrap");
+    const activeIds = new Set(qs.map(q => q.question_id));
+    wrap.querySelectorAll(".q-card").forEach(card => {
+      const qid = card.id.replace("qcard-", "");
+      if (!activeIds.has(qid)) card.remove();
+    });
+
+    if (!wrap.querySelectorAll(".q-card").length) {
+      if (!document.getElementById("no-questions")) {
+        const note = document.createElement("div");
+        note.className = "empty-note"; note.id = "no-questions";
+        note.textContent = "Нет ожидающих вопросов";
+        wrap.appendChild(note);
+      }
+    }
   } catch (e) { console.error("loadQuestions:", e); }
 }
 
@@ -1261,7 +1274,44 @@ window.addEventListener("load", () => {
 
   // Questions
   loadQuestions();
+
+  // Model switcher
+  setupModelSwitcher();
 });
+
+// ============================================================
+// MODEL SWITCHER
+// ============================================================
+async function setupModelSwitcher() {
+  try {
+    const r = await fetch("/api/model");
+    const d = await r.json();
+    document.getElementById("model-input").value = d.model || "";
+  } catch (e) {}
+
+  async function saveModel() {
+    const model = (document.getElementById("model-input").value || "").trim();
+    if (!model) return;
+    try {
+      const r = await fetch("/api/model", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model}),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        const btn = document.getElementById("model-save");
+        btn.textContent = "✓";
+        btn.style.color = "#4fc3f7";
+        setTimeout(() => { btn.textContent = "✓"; btn.style.color = "#4a8"; }, 1500);
+      }
+    } catch (e) { console.error("model save:", e); }
+  }
+
+  document.getElementById("model-save").addEventListener("click", saveModel);
+  document.getElementById("model-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") saveModel();
+  });
+}
 
 window.addEventListener("resize", () => {
   resize();

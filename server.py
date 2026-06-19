@@ -15,7 +15,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
+from src.office import memory
 from src.agents import onboarding
+from src.core import llm as llm_core
 
 load_dotenv()
 
@@ -30,6 +32,7 @@ async def lifespan(app: FastAPI):
         state.load()
         progress.load()
         connections.load()
+        memory.load()
         registry.restore(state.saved_agents())
     # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
     runner = demo.run if DEMO_MODE else office_loop.run
@@ -202,7 +205,29 @@ async def brief_reset():
     registry.reset()
     chat.clear_all()
     progress.reset()
+    memory.reset()
     return {"ok": True}
+
+
+@app.get("/api/memory")
+async def get_memory():
+    """Все сохранённые ответы пользователя."""
+    return {"entries": memory.all_entries()}
+
+
+@app.get("/api/model")
+async def get_model():
+    return {"model": llm_core.DEFAULT_MODEL}
+
+
+@app.post("/api/model")
+async def set_model(request: Request):
+    data = await request.json()
+    model = (data.get("model") or "").strip()
+    if not model:
+        return JSONResponse({"error": "model обязателен"}, status_code=400)
+    llm_core.DEFAULT_MODEL = model
+    return {"ok": True, "model": model}
 
 
 @app.get("/api/questions")

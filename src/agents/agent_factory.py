@@ -15,6 +15,7 @@ from src.office import agent_inbox
 from src.office import brief as brief_module
 from src.office import state
 from src.office import connections
+from src.office import memory as memory_module
 
 _INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
 
@@ -152,7 +153,8 @@ def _brief_context() -> str:
 def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]]):
     """Возвращает async-функцию, запускающую агента."""
     base = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.")
-    system = base + _brief_context() + _INTER_AGENT_SUFFIX
+    # Собираем системный промпт: роль + бриф + память (ответы пользователя) + межагентный суффикс
+    system = base + _brief_context() + memory_module.context_block() + _INTER_AGENT_SUFFIX
 
     async def _handle_request_research(args: dict) -> str:
         question = args.get("question", "")
@@ -164,10 +166,23 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         )
 
     async def _handle_ask_user(args: dict) -> str:
+        import asyncio
         question_text = args.get("question", "")
+        # Проверяем память — вдруг на этот вопрос уже отвечали
+        cached = memory_module.lookup(question_text)
+        if cached:
+            await publish({"type": "speech", "agent_id": agent_id,
+                           "text": f"💭 (из памяти): {question_text[:50]} → {cached[:60]}"})
+            return cached
         qid, fut = questions_module.ask(question_text, publish, agent_id=agent_id)
         await publish({"type": "question", "agent_id": agent_id, "question_id": qid, "text": question_text})
-        answer = await fut
+        try:
+            answer = await asyncio.wait_for(fut, timeout=300)  # 5 мин макс
+        except asyncio.TimeoutError:
+            questions_module.answer(qid, "")
+            return "Пользователь не ответил — продолжай без этих данных."
+        if answer:
+            memory_module.remember(question_text, answer)
         return answer
 
     async def _handle_send_message(args: dict) -> str:
