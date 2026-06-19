@@ -252,7 +252,7 @@ function drawIsoTile(col, row) {
   // Desk labels (numbers)
   const di = DESK_POSITIONS.findIndex(d => d.tx === col && d.ty === row);
   if (di >= 0) {
-    ctx.font = `${8 * isoScale}px Courier New`;
+    ctx.font = `${8 * isoScale}px Inter, system-ui, sans-serif`;
     ctx.fillStyle = 'rgba(150,130,200,0.5)';
     ctx.textAlign = 'center';
     ctx.fillText(`#${di}`, cx, cy - sh_desk - th - 3 * isoScale);
@@ -342,7 +342,7 @@ function drawIsoCharacter(cx, cy, color, role, status) {
   ctx.fillRect(bx + bodyW * 0.62, by + bodyH * 0.14, bodyW * 0.08, bodyH * 0.05);
 
   // Role icon
-  ctx.font = `${11 * sc}px serif`;
+  ctx.font = `${11 * sc}px Inter, system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.fillText(ROLE_ICONS[role] || '🤖', cx, by - 2 * sc);
 
@@ -362,7 +362,7 @@ function drawIsoCharacter(cx, cy, color, role, status) {
 // ---- Bubble drawing ----
 function drawBubble(text, x, y, alpha) {
   const maxW = 190;
-  ctx.font = "10px Courier New";
+  ctx.font = "10px Inter, system-ui, sans-serif";
   const words = text.split(" ");
   const lines = [];
   let line = "";
@@ -415,7 +415,7 @@ function drawBubble(text, x, y, alpha) {
   ctx.fill();
 
   ctx.fillStyle = "#e0e0e8";
-  ctx.font = "10px Courier New";
+  ctx.font = "10px Inter, system-ui, sans-serif";
   ctx.textAlign = "left";
   lines.forEach((l, i) => ctx.fillText(l, bx + 8, by + 15 + i * 14));
   ctx.globalAlpha = 1;
@@ -679,7 +679,7 @@ function showToast(msg, type = "ok") {
   t.textContent = msg;
   t.style.cssText = `
     position:fixed; bottom:24px; right:24px; z-index:9000;
-    padding:10px 18px; border-radius:8px; font-size:12px; font-family:'Courier New',monospace;
+    padding:10px 18px; border-radius:8px; font-size:12px; font-family:'Inter, system-ui, sans-serif',monospace;
     color:#fff; max-width:360px; box-shadow:0 4px 20px rgba(0,0,0,.5);
     background:${type==="ok" ? "#1a3a1a" : "#3a1a1a"};
     border:1px solid ${type==="ok" ? "#4a8a4a" : "#8a3a3a"};
@@ -896,6 +896,49 @@ function findAgentAt(px, py) {
 function setupClickHandler() {
   let downX = 0, downY = 0, moved = false;
 
+  // ---- Zoom with mouse wheel (zoom toward cursor) ----
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const wrap = document.getElementById("game-wrap");
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const oldScale = isoScale;
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    isoScale = Math.max(0.25, Math.min(3.5, isoScale * factor));
+
+    // The base origin (camX=0, camY=0) maps tile midpoint to canvas center.
+    // When scale changes, we shift camX/camY so the world-point under the
+    // cursor stays fixed on screen.
+    // Screen position of any world-tile = f(scale, camX, camY).
+    // We need: f(newScale, newCam) = f(oldScale, oldCam) for the cursor tile.
+    // Simplification: the screen coords scale linearly around the base origin.
+    // base_x = W/2 - midDX * tw;  screen_x = base_x + camX + col*tw - row*tw
+    // After scale change, base_x changes by (newScale-oldScale)*(-midDX*ISO_W/2 + (col-row)*ISO_W/2)
+    // Easier: just keep the pixel under cursor fixed by noting:
+    //   screenX(tile) = baseX(scale) + camX + (col-row)*tw
+    // We want screenX unchanged ⟹ camX_new = camX + (baseX(old) - baseX(new))
+    // baseX = W/2 - midDX * scale * ISO_W/2
+    const midDX = (COLS - ROWS) / 2;
+    const midSum = (COLS - 1 + ROWS - 1) / 2;
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    const baseXOld = W / 2 - midDX * (oldScale * ISO_W / 2);
+    const baseYOld = H / 2 - midSum * (oldScale * ISO_H / 2) + WALL_H * oldScale * 0.5;
+    const baseXNew = W / 2 - midDX * (isoScale * ISO_W / 2);
+    const baseYNew = H / 2 - midSum * (isoScale * ISO_H / 2) + WALL_H * isoScale * 0.5;
+    // Point under cursor in old coords: (mx - baseXOld - camX) = (col-row)*tw_old → world_x
+    // We want: baseXNew + camXNew + world_x * (isoScale/oldScale) * ... hmm, let's use ratio:
+    // Equivalent simple approach: camX adjusts so point mx stays fixed:
+    //   mx = baseXOld + camX + world_x_offset   →  world_x_offset = mx - baseXOld - camX
+    //   mx = baseXNew + camXNew + world_x_offset * (isoScale/oldScale)
+    const wxOffset = mx - baseXOld - camX;
+    const wyOffset = my - baseYOld - camY;
+    camX = mx - baseXNew - wxOffset * (isoScale / oldScale);
+    camY = my - baseYNew - wyOffset * (isoScale / oldScale);
+    syncAgentTargets();
+  }, { passive: false });
+
+  // ---- Pan ----
   canvas.addEventListener("mousedown", (e) => {
     _panActive = true;
     moved = false;
@@ -903,23 +946,32 @@ function setupClickHandler() {
     _panStartCamX = camX; _panStartCamY = camY;
     downX = e.clientX; downY = e.clientY;
   });
-  window.addEventListener("mousemove", (e) => {
-    if (!_panActive) return;
-    const dx = e.clientX - _panStartX;
-    const dy = e.clientY - _panStartY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-    camX = _panStartCamX + dx;
-    camY = _panStartCamY + dy;
-    syncAgentTargets();
-    canvas.style.cursor = "grabbing";
+
+  // ---- Hover cursor ----
+  canvas.addEventListener("mousemove", (e) => {
+    if (_panActive) {
+      const dx = e.clientX - _panStartX;
+      const dy = e.clientY - _panStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      camX = _panStartCamX + dx;
+      camY = _panStartCamY + dy;
+      syncAgentTargets();
+      canvas.style.cursor = "grabbing";
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    canvas.style.cursor = findAgentAt(px, py) ? "pointer" : "grab";
   });
+
   window.addEventListener("mouseup", (e) => {
     _panActive = false;
-    canvas.style.cursor = "default";
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    canvas.style.cursor = findAgentAt(px, py) ? "pointer" : "grab";
     if (!moved) {
-      const rect = canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
       const id = findAgentAt(px, py);
       if (id) openChat(id);
     }
