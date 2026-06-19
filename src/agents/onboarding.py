@@ -45,9 +45,11 @@ async def make_questions(
         await publish({"type": "thinking", "agent_id": "onboarding_1",
                        "text": "Изучаю ваш запрос, готовлю вопросы..."})
 
+    from src.office import models as models_module
     raw = await llm.run_agent(
         system=_QUESTIONS_SYSTEM,
         user=f"Ввод клиента:\n{client_input[:3000]}",
+        model=models_module.get_default(),
         max_tokens=500,
         use_search=False,
         agent_id="onboarding_1",
@@ -76,9 +78,11 @@ async def build_brief(
         await publish({"type": "thinking", "agent_id": "onboarding_1",
                        "text": "Формирую бриф для офиса..."})
 
+    from src.office import models as models_module
     raw = await llm.run_agent(
         system=_BRIEF_SYSTEM,
         user=user,
+        model=models_module.get_default(),
         max_tokens=800,
         use_search=False,
         agent_id="onboarding_1",

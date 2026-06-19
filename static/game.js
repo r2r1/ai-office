@@ -598,6 +598,9 @@ async function openAgentDrawer(agentId) {
   const statusWord = status === "thinking" ? "⟳ работает" : status === "done" ? "✓ готово" : "○ ожидает";
   curEl.innerHTML = `<b style="color:${localColor}">${escapeHtml(statusWord)}</b><br>Сейчас делает: ${escapeHtml(current)}`;
 
+  // Модель этого агента
+  setupAgentModelSelector(agentId, data && data.model, data && data.model_custom);
+
   const done = (data && data.done) || [];
   if (!done.length) {
     delivWrap.innerHTML = `<div style="color:#556;font-size:12px;padding:8px 0;">Пока ничего не сдал.</div>`;
@@ -867,6 +870,9 @@ function showIntakeLoading(text) {
 async function intakeGetQuestions() {
   intakeClientInput = intakeInput.value.trim();
   if (!intakeClientInput) { intakeInput.focus(); return; }
+
+  // Сохраняем выбранную на старте модель
+  await saveIntakeModel();
 
   showIntakeLoading("Изучаю ваш запрос, готовлю вопросы...");
   try {
@@ -1296,19 +1302,64 @@ window.addEventListener("load", () => {
   // Questions
   loadQuestions();
 
-  // Model switcher
+  // Model switcher (topbar global) + onboarding model picker
   setupModelSwitcher();
+  setupIntakeModel();
 });
 
 // ============================================================
-// MODEL SWITCHER
+// MODEL MANAGEMENT — глобальная модель + индивидуальные по агентам
 // ============================================================
-async function setupModelSwitcher() {
+const CUSTOM_OPT = "__custom__";
+let _modelPresets = [];   // [{id,label}]
+let _modelDefault = "";
+
+async function loadModelsConfig() {
   try {
-    const r = await fetch("/api/model");
+    const r = await fetch("/api/models");
     const d = await r.json();
-    document.getElementById("model-input").value = d.model || "";
-  } catch (e) {}
+    _modelPresets = d.presets || [];
+    _modelDefault = d.default || "";
+  } catch (e) { console.error("loadModelsConfig:", e); }
+}
+
+/**
+ * Заполняет <select> пресетами + опцией «своя модель».
+ * current — текущее значение; если его нет среди пресетов, включаем кастомное поле.
+ * Возвращает выбранную модель через колбэк onPick(model).
+ */
+function fillModelSelect(selectEl, customEl, current) {
+  selectEl.innerHTML = "";
+  for (const p of _modelPresets) {
+    const opt = document.createElement("option");
+    opt.value = p.id; opt.textContent = p.label;
+    selectEl.appendChild(opt);
+  }
+  const customOpt = document.createElement("option");
+  customOpt.value = CUSTOM_OPT; customOpt.textContent = "✏️ Своя модель…";
+  selectEl.appendChild(customOpt);
+
+  const known = _modelPresets.some(p => p.id === current);
+  if (current && !known) {
+    selectEl.value = CUSTOM_OPT;
+    customEl.style.display = "block";
+    customEl.value = current;
+  } else {
+    selectEl.value = current || (_modelPresets[0] && _modelPresets[0].id) || "";
+    customEl.style.display = "none";
+    customEl.value = "";
+  }
+}
+
+function readModelSelect(selectEl, customEl) {
+  if (selectEl.value === CUSTOM_OPT) return (customEl.value || "").trim();
+  return selectEl.value;
+}
+
+// ---- Топбар: глобальная модель (input) ----
+async function setupModelSwitcher() {
+  await loadModelsConfig();
+  document.getElementById("model-input").value = _modelDefault || "";
 
   async function saveModel() {
     const model = (document.getElementById("model-input").value || "").trim();
@@ -1320,10 +1371,10 @@ async function setupModelSwitcher() {
       });
       const d = await r.json();
       if (d.ok) {
+        _modelDefault = model;
         const btn = document.getElementById("model-save");
-        btn.textContent = "✓";
-        btn.style.color = "#4fc3f7";
-        setTimeout(() => { btn.textContent = "✓"; btn.style.color = "#4a8"; }, 1500);
+        btn.textContent = "✓"; btn.style.color = "#4fc3f7";
+        setTimeout(() => { btn.style.color = "#4a8"; }, 1500);
       }
     } catch (e) { console.error("model save:", e); }
   }
@@ -1332,6 +1383,65 @@ async function setupModelSwitcher() {
   document.getElementById("model-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") saveModel();
   });
+}
+
+// ---- Онбординг: выбор модели на первом запуске ----
+async function setupIntakeModel() {
+  await loadModelsConfig();
+  const sel = document.getElementById("intake-model");
+  const custom = document.getElementById("intake-model-custom");
+  if (!sel) return;
+  fillModelSelect(sel, custom, _modelDefault);
+  sel.addEventListener("change", () => {
+    custom.style.display = sel.value === CUSTOM_OPT ? "block" : "none";
+    if (sel.value === CUSTOM_OPT) custom.focus();
+  });
+}
+
+async function saveIntakeModel() {
+  const sel = document.getElementById("intake-model");
+  const custom = document.getElementById("intake-model-custom");
+  if (!sel) return;
+  const model = readModelSelect(sel, custom);
+  if (!model) return;
+  try {
+    await fetch("/api/model", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({model}),
+    });
+    _modelDefault = model;
+  } catch (e) { console.error("saveIntakeModel:", e); }
+}
+
+// ---- Карточка агента: индивидуальная модель ----
+function setupAgentModelSelector(agentId, current, isCustom) {
+  const sel = document.getElementById("ad-model");
+  const custom = document.getElementById("ad-model-custom");
+  if (!sel) return;
+  if (!_modelPresets.length) {
+    // на случай если конфиг ещё не загружен
+    loadModelsConfig().then(() => fillModelSelect(sel, custom, current || _modelDefault));
+  } else {
+    fillModelSelect(sel, custom, current || _modelDefault);
+  }
+
+  async function save() {
+    const model = readModelSelect(sel, custom);
+    try {
+      await fetch(`/api/agent/${encodeURIComponent(agentId)}/model`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model}),
+      });
+      addLog("офис", `Модель агента ${agentId} → ${model}. Он войдёт в курс дела по сохранённому контексту.`, "system");
+    } catch (e) { console.error("agent model save:", e); }
+  }
+
+  sel.onchange = () => {
+    if (sel.value === CUSTOM_OPT) { custom.style.display = "block"; custom.focus(); }
+    else { custom.style.display = "none"; save(); }
+  };
+  custom.onkeydown = (e) => { if (e.key === "Enter") save(); };
+  custom.onblur = () => { if (custom.value.trim()) save(); };
 }
 
 window.addEventListener("resize", () => {

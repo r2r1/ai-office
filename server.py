@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
 from src.office import memory
+from src.office import models as models_module
 from src.agents import onboarding
 from src.core import llm as llm_core
 
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
         progress.load()
         connections.load()
         memory.load()
+        models_module.load()
         registry.restore(state.saved_agents())
     # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
     runner = demo.run if DEMO_MODE else office_loop.run
@@ -181,6 +183,8 @@ async def get_agent_detail(agent_id: str):
         "current": rec.last_message or rec.task,
         "done": state.deliverables_for(agent_id),
         "activity": state.events_for(agent_id),
+        "model": models_module.for_agent(agent_id),
+        "model_custom": agent_id in models_module.assignments(),
     }
 
 
@@ -213,6 +217,7 @@ async def brief_reset():
     chat.clear_all()
     progress.reset()
     memory.reset()
+    models_module.reset()  # сбрасываем индивидуальные модели, глобальную оставляем
     return {"ok": True}
 
 
@@ -222,19 +227,39 @@ async def get_memory():
     return {"entries": memory.all_entries()}
 
 
+@app.get("/api/models")
+async def get_models():
+    """Текущая глобальная модель, индивидуальные назначения и подсказки."""
+    return {
+        "default": models_module.get_default(),
+        "per_agent": models_module.assignments(),
+        "presets": models_module.PRESETS,
+    }
+
+
 @app.get("/api/model")
 async def get_model():
-    return {"model": llm_core.DEFAULT_MODEL}
+    return {"model": models_module.get_default()}
 
 
 @app.post("/api/model")
 async def set_model(request: Request):
+    """Сменить глобальную модель офиса."""
     data = await request.json()
     model = (data.get("model") or "").strip()
     if not model:
         return JSONResponse({"error": "model обязателен"}, status_code=400)
-    llm_core.DEFAULT_MODEL = model
+    models_module.set_default(model)
     return {"ok": True, "model": model}
+
+
+@app.post("/api/agent/{agent_id}/model")
+async def set_agent_model(agent_id: str, request: Request):
+    """Назначить агенту индивидуальную модель (пустая — вернуть к общей)."""
+    data = await request.json()
+    model = (data.get("model") or "").strip()
+    models_module.set_for_agent(agent_id, model)
+    return {"ok": True, "agent_id": agent_id, "model": models_module.for_agent(agent_id)}
 
 
 @app.get("/api/questions")

@@ -16,6 +16,7 @@ from src.office import brief as brief_module
 from src.office import state
 from src.office import connections
 from src.office import memory as memory_module
+from src.office import models as models_module
 
 _INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
 
@@ -208,12 +209,14 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                           ensure_ascii=False)
 
     async def run() -> str:
+        model = models_module.for_agent(agent_id)
         await publish({"type": "thinking", "agent_id": agent_id,
                        "text": f"Начинаю работу: {task[:80]}..."})
 
         result = await llm.run_agent(
             system=system,
             user=task,
+            model=model,
             max_tokens=3000,
             max_iterations=8,
             use_search=True,

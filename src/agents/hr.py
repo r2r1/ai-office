@@ -49,9 +49,11 @@ async def decide(
         await publish({"type": "thinking", "agent_id": "hr_1",
                        "text": "Анализирую команду, решаю кого нанять..."})
 
+    from src.office import models as models_module
     raw = await llm.run_agent(
         system=SYSTEM_PROMPT,
         user=user_msg,
+        model=models_module.for_agent("hr_1"),
         max_tokens=300,
         use_search=False,
         agent_id="hr_1",

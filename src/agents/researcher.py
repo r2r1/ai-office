@@ -57,9 +57,11 @@ async def run_async(
         await publish({"type": "thinking", "agent_id": agent_id,
                        "text": f"[{depth}] Исследую: {question[:80]}..."})
 
+    from src.office import models as models_module
     result = await llm.run_agent(
         system=system,
         user=question,
+        model=models_module.for_agent(agent_id),
         max_tokens=_MAX_TOKENS[depth],
         max_iterations=_MAX_ITERS[depth],
         use_search=True,

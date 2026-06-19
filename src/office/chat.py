@@ -10,6 +10,7 @@ from typing import Optional, Callable, Awaitable
 from src.core import llm
 from src.office import registry, agent_inbox
 from src.office import brief as brief_module
+from src.office import models as models_module
 
 HISTORY_FILE = Path("reports/chat_histories.json")
 
@@ -154,6 +155,7 @@ async def ask(
     reply = await llm.run_agent(
         system=system,
         user=message,
+        model=models_module.for_agent(agent_id),
         history=history,
         max_tokens=1500,
         max_iterations=5,

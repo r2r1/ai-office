@@ -52,9 +52,11 @@ async def run_async(
         await publish({"type": "thinking", "agent_id": agent_id,
                        "text": "Анализирую отчёт, строю план..."})
 
+    from src.office import models as models_module
     result = await llm.run_agent(
         system=SYSTEM_PROMPT,
         user=user,
+        model=models_module.for_agent(agent_id),
         max_tokens=6000,
         max_iterations=10,
         use_search=True,
