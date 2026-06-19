@@ -15,7 +15,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from src.office import bus, registry, brief
+from src.office import bus, registry, brief, state
 from src.agents import researcher, strategist, hr
 from src.agents import agent_factory
 
@@ -56,23 +56,27 @@ async def run() -> None:
     else:
         strategy = await _bootstrap(publish)
 
-    # ---- ЦИКЛЫ РАЗВИТИЯ: ниша зафиксирована, офис работает ----
+    # ---- ЦИКЛЫ РАЗВИТИЯ: ниша зафиксирована, офис непрерывно работает ----
     cycle = 0
     while True:
         cycle += 1
         await publish({"type": "system", "text": f"=== Рабочий цикл #{cycle} ==="})
 
-        # HR смотрит на команду и нанимает недостающего специалиста
+        # 1) HR добирает недостающие роли (если есть свободные столы и пустые роли)
+        hired = False
         if registry.count() < registry.MAX_DESKS:
             decision = await hr.decide(strategy[:1500], publish)
             if decision.get("hire"):
                 await _hire_and_run(decision, publish)
-            else:
+                hired = True
+
+        # 2) Команда укомплектована → двигаем работу дальше:
+        #    даём свободному агенту НОВЫЙ конкретный шаг к цели (round-robin)
+        if not hired:
+            advanced = await _advance_work(strategy, publish)
+            if not advanced:
                 await publish({"type": "system",
-                               "text": "Команда укомплектована — агенты работают над задачами"})
-        else:
-            await publish({"type": "system", "text": "Все столы заняты — переназначаю задачи агентам"})
-            await _reassign_existing_agents(strategy, publish)
+                               "text": "Агенты заняты текущими задачами — ждём результатов"})
 
         await publish({"type": "system",
                        "text": f"Цикл #{cycle} завершён. Следующий через {LOOP_INTERVAL}с"})
@@ -166,15 +170,48 @@ def _hire_initial(publish_sync) -> None:
             }))
 
 
-async def _reassign_existing_agents(strategy: str, publish) -> None:
-    """Re-run agents that are done or idle (not researcher/strategist/hr)."""
-    skip_roles = {"researcher", "strategist", "hr"}
-    for agent in registry.all_agents():
-        if agent.role in skip_roles:
-            continue
-        if agent.status in ("done", "idle"):
-            agent_fn = agent_factory.create(agent.role, agent.task, agent.agent_id, publish)
-            asyncio.create_task(_run_hired_agent(agent.agent_id, agent_fn, publish))
+_WORKER_SKIP = {"researcher", "strategist", "hr"}
+_rr_index = 0
+
+
+async def _advance_work(strategy: str, publish) -> bool:
+    """Даёт одному свободному рабочему агенту НОВЫЙ конкретный шаг к цели.
+
+    Round-robin: за цикл двигаем одного агента, чтобы офис непрерывно
+    производил результаты, но не сжигал токены на всех сразу.
+    Возвращает True, если кого-то запустили.
+    """
+    global _rr_index
+
+    workers = [a for a in registry.all_agents()
+               if a.role not in _WORKER_SKIP and a.status in ("done", "idle")]
+    if not workers:
+        return False
+
+    # round-robin выбор следующего свободного агента
+    workers.sort(key=lambda a: a.agent_id)
+    agent = workers[_rr_index % len(workers)]
+    _rr_index += 1
+
+    goal = brief.get().get("goal", "") or brief.summary()
+    prev = state.result_for(agent.agent_id)
+    next_task = (
+        f"Цель офиса: {goal}\n"
+        f"Стратегия (кратко): {strategy[:700]}\n"
+        f"Твоя роль: {agent.role}. Исходная задача: {agent.task}\n"
+        f"Что ты уже сделал в прошлый раз: {prev[:500] or 'ещё не было результата'}\n\n"
+        f"Сделай СЛЕДУЮЩИЙ конкретный шаг и выдай НОВЫЙ готовый результат "
+        f"(не повторяй прошлое), который реально двигает офис к цели. "
+        f"Если нужна свежая информация — используй web_search или request_research. "
+        f"Если не хватает данных от клиента (доступы, ключи, решения) — спроси через ask_user. "
+        f"Можешь делегировать коллеге через send_message."
+    )
+
+    await publish({"type": "system",
+                   "text": f"{agent.role} продолжает работу — следующий шаг к цели"})
+    agent_fn = agent_factory.create(agent.role, next_task, agent.agent_id, publish)
+    asyncio.create_task(_run_hired_agent(agent.agent_id, agent_fn, publish))
+    return True
 
 
 async def _run_hired_agent(agent_id: str, agent_fn, publish) -> None:
