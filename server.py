@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
 from src.office import memory
+from src.office import milestones
 from src.office import models as models_module
 from src.agents import onboarding
 from src.core import llm as llm_core
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
         brief.load()
         state.load()
         progress.load()
+        milestones.load()
         connections.load()
         memory.load()
         models_module.load()
@@ -157,6 +159,74 @@ async def get_history():
     }}
 
 
+@app.get("/api/logs")
+async def get_logs():
+    """Полный текстовый лог работы офиса — можно скачать и прислать на анализ."""
+    from datetime import datetime
+    import time as _time
+
+    lines = []
+    lines.append("=" * 60)
+    lines.append("AI OFFICE — ЛОГ РАБОТЫ")
+    lines.append(f"Сформирован: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
+    lines.append("=" * 60)
+
+    # Бриф
+    b = brief.get()
+    if b:
+        lines.append("\n## БРИФ КЛИЕНТА")
+        for k, v in b.items():
+            lines.append(f"  {k}: {v}")
+
+    # Модели
+    lines.append("\n## МОДЕЛИ")
+    lines.append(f"  по умолчанию: {models_module.get_default()}")
+    for aid, m in models_module.assignments().items():
+        lines.append(f"  {aid}: {m}")
+
+    # Команда
+    lines.append("\n## КОМАНДА")
+    for a in registry.all_agents():
+        lines.append(f"  [{a.status}] {a.agent_id} ({a.role}) — {a.task[:80]}")
+        if a.last_message:
+            lines.append(f"      последнее: {a.last_message[:120]}")
+
+    # Этапы
+    lines.append("\n## ЭТАПЫ ПУТИ")
+    for s in milestones.all_stages():
+        lines.append(f"  [{s['status']}] {s['title']} (id={s['id']}, записей: {len(s['items'])})")
+        if s["summary"]:
+            lines.append(f"      сводка: {s['summary'][:200]}")
+
+    # Лента событий
+    lines.append("\n## ЛЕНТА СОБЫТИЙ")
+    for e in state.history():
+        etype = e.get("type", "")
+        who = e.get("agent_id", "")
+        txt = e.get("text") or e.get("summary") or ""
+        lines.append(f"  [{etype}] {who}: {txt[:200]}")
+
+    # Готовые результаты (полные)
+    lines.append("\n## ГОТОВЫЕ РЕЗУЛЬТАТЫ (полный текст)")
+    for d in state.deliverables():
+        lines.append(f"\n  --- {d.get('role')} / {d.get('task','')[:60]} ({d.get('time','')}) ---")
+        lines.append(d.get("content", ""))
+
+    # Память (ответы пользователя)
+    lines.append("\n## ПАМЯТЬ (ответы пользователя)")
+    for m in memory.all_entries():
+        lines.append(f"  В: {m.get('question','')}")
+        lines.append(f"  О: {m.get('answer','')}")
+
+    text = "\n".join(lines)
+    fname = f"ai-office-log-{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    return StreamingResponse(
+        iter([text]),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @app.get("/api/deliverables")
 async def get_deliverables():
     """Готовые результаты работы агентов — пользователь может посмотреть и скопировать."""
@@ -165,8 +235,23 @@ async def get_deliverables():
 
 @app.get("/api/progress")
 async def get_progress():
-    """Текущий этап развития офиса для индикатора прогресса."""
-    return progress.get()
+    """Текущий этап развития офиса для индикатора прогресса (динамические этапы)."""
+    return milestones.progress_payload()
+
+
+@app.get("/api/milestones")
+async def get_milestones():
+    """Полный список этапов со сводками и записями проделанной работы."""
+    return {"stages": milestones.all_stages()}
+
+
+@app.get("/api/milestone/{stage_id}")
+async def get_milestone(stage_id: str):
+    """Детали одного этапа: сводка + что уже сделано."""
+    m = milestones.get(stage_id)
+    if m is None:
+        return JSONResponse({"error": "этап не найден"}, status_code=404)
+    return m
 
 
 @app.get("/api/agent/{agent_id}")
@@ -216,8 +301,14 @@ async def brief_reset():
     registry.reset()
     chat.clear_all()
     progress.reset()
+    milestones.reset()
     memory.reset()
     models_module.reset()  # сбрасываем индивидуальные модели, глобальную оставляем
+    # удаляем сохранённую стратегию, чтобы офис прошёл bootstrap заново
+    from pathlib import Path as _P
+    sf = _P("reports/strategy.md")
+    if sf.exists():
+        sf.unlink()
     return {"ok": True}
 
 

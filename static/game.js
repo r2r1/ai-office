@@ -10,6 +10,7 @@ const P = TILE * SCALE;   // размер тайла на экране
 
 // Цвета ролей
 const ROLE_COLORS = {
+  orchestrator: "#ffd54f",
   researcher: "#4fc3f7",
   strategist: "#81c784",
   hr:         "#ffb74d",
@@ -21,8 +22,14 @@ const ROLE_COLORS = {
 
 // Иконки ролей (emoji -> рисуем текстом)
 const ROLE_ICONS = {
-  researcher: "🔍", strategist: "📋", hr: "👔",
+  orchestrator: "🧭", researcher: "🔍", strategist: "📋", hr: "👔",
   salesman: "💰", developer: "💻", marketer: "📢", analyst: "📊",
+};
+
+// Человекочитаемые названия ролей
+const ROLE_NAMES = {
+  orchestrator: "Директор", researcher: "Ресёрчер", strategist: "Стратег", hr: "HR",
+  salesman: "Продажник", developer: "Разработчик", marketer: "Маркетолог", analyst: "Аналитик",
 };
 
 // ---- Карта офиса (0=пол, 1=стена, 2=стол, 3=окно, 4=растение) ---
@@ -990,46 +997,65 @@ function switchView(name) {
 }
 
 // ============================================================
-// PROGRESS BAR (top stepper)
+// PROGRESS BAR (динамические кликабельные этапы)
 // ============================================================
-const DEFAULT_STAGES = ["Бриф","Исследование","Стратегия","Команда","Развитие","Результаты","Масштаб"];
-let progressStages = DEFAULT_STAGES.slice();
+// Этапы приходят с бэка: {stages:[{id,title,status,summary,item_count}], current, percent, note}
+let _stageData = [];
 
-function buildProgressSteps(stages) {
-  progressStages = (stages && stages.length) ? stages : progressStages;
+function renderProgress(p) {
+  _stageData = (p.stages && p.stages.length) ? p.stages : _stageData;
   const cont = document.getElementById("progress-steps");
-  // remove existing steps (keep track + fill)
   cont.querySelectorAll(".pstep").forEach(e => e.remove());
-  progressStages.forEach((label) => {
+
+  _stageData.forEach((s) => {
     const div = document.createElement("div");
-    div.className = "pstep";
-    div.innerHTML = `<div class="pdot">●</div><div class="plabel">${escapeHtml(label)}</div>`;
+    div.className = "pstep" + (s.status === "done" ? " done" : s.status === "active" ? " current" : "");
+    const badge = s.item_count ? `<span class="pstep-cnt">${s.item_count}</span>` : "";
+    div.innerHTML = `<div class="pdot">${s.status==="done"?"✓":"●"}</div><div class="plabel">${escapeHtml(s.title)}${badge}</div>`;
+    div.title = "Нажмите, чтобы посмотреть сводку этапа";
+    div.addEventListener("click", () => openMilestone(s.id));
     cont.appendChild(div);
   });
-}
 
-function updateProgressBar(p) {
-  if (p.stages && p.stages.length) buildProgressSteps(p.stages);
-  const steps = document.querySelectorAll(".pstep");
-  const stage = typeof p.stage === "number" ? p.stage : 0;
-  steps.forEach((el, i) => {
-    el.classList.toggle("done", i < stage);
-    el.classList.toggle("current", i === stage);
-  });
   const fill = document.getElementById("progress-fill");
-  const pct = typeof p.percent === "number" ? p.percent : (progressStages.length>1 ? (stage/(progressStages.length-1))*100 : 0);
-  // track spans 9%..91% (82% wide)
+  const pct = typeof p.percent === "number" ? p.percent : 0;
   fill.style.width = (Math.max(0, Math.min(100, pct)) * 0.82) + "%";
   const note = document.getElementById("progress-note");
-  if (note) note.textContent = p.note || (p.label ? "Этап: " + p.label : "");
+  if (note && (p.note !== undefined)) note.textContent = p.note || "";
 }
+// обратная совместимость со старым именем
+function updateProgressBar(p) { renderProgress(p); }
+function buildProgressSteps() { /* этапы строятся из данных бэка */ }
 
 async function loadProgress() {
   try {
     const r = await fetch("/api/progress");
-    const d = await r.json();
-    updateProgressBar(d);
+    renderProgress(await r.json());
   } catch {}
+}
+
+async function openMilestone(stageId) {
+  try {
+    const r = await fetch(`/api/milestone/${encodeURIComponent(stageId)}`);
+    if (!r.ok) return;
+    const m = await r.json();
+    ftCurrentIdx = -1;
+    ftRawContent = (m.summary || "") + "\n\n" + (m.items||[]).map(it => `- ${it.text||""}`).join("\n");
+    const statusWord = m.status === "done" ? "✓ завершён" : m.status === "active" ? "⟳ в работе" : "○ впереди";
+    const items = (m.items || []).slice().reverse().map(it => {
+      const role = ROLE_NAMES[it.role] || it.role || "";
+      const icon = ROLE_ICONS[it.role] || "•";
+      return `<div class="ms-item"><div class="ms-item-who">${icon} ${escapeHtml(role)}</div><div class="ms-item-text">${escapeHtml(it.text||"")}</div></div>`;
+    }).join("") || `<div style="color:#667;padding:8px 0;">Пока нет записей по этому этапу.</div>`;
+
+    document.getElementById("ft-who").innerHTML =
+      `🧭 Этап: <b>${escapeHtml(m.title)}</b> <span style="color:#888;font-size:11px">(${statusWord})</span>`;
+    const body = document.getElementById("fulltext-body");
+    body.innerHTML =
+      (m.summary ? `<div class="ms-summary"><b>Сводка:</b><br>${escapeHtml(m.summary)}</div>` : "") +
+      `<div class="ms-items-head">Что сделано (${(m.items||[]).length}):</div>` + items;
+    document.getElementById("fulltext-overlay").classList.remove("hidden");
+  } catch (e) { console.error("openMilestone:", e); }
 }
 
 // ============================================================
@@ -1293,6 +1319,12 @@ window.addEventListener("load", () => {
 
   // Reset
   document.getElementById("btn-reset").addEventListener("click", resetOffice);
+
+  // Скачать логи работы офиса
+  document.getElementById("btn-logs").addEventListener("click", () => {
+    window.location.href = "/api/logs";
+    showToast("📥 Лог скачивается — можно прислать на анализ", "ok");
+  });
 
   // Export all
   document.getElementById("btn-export-all").addEventListener("click", exportDeliverables);

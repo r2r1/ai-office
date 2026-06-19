@@ -8,6 +8,7 @@ from typing import Optional
 MAX_DESKS = 8
 
 ROLE_COLORS = {
+    "orchestrator": "#ffd54f",
     "researcher": "#4fc3f7",
     "strategist": "#81c784",
     "hr": "#ffb74d",
