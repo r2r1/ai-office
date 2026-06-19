@@ -19,7 +19,7 @@ from src.office import bus, registry, brief, state
 from src.agents import researcher, strategist, hr
 from src.agents import agent_factory
 
-LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "300"))  # 5 минут по умолчанию
+LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "10"))  
 STRATEGY_FILE = Path("reports/strategy.md")
 
 _last_research: str = ""
