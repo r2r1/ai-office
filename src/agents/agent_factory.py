@@ -18,7 +18,11 @@ from src.office import connections
 from src.office import memory as memory_module
 from src.office import models as models_module
 
-_INTER_AGENT_SUFFIX = "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
+_INTER_AGENT_SUFFIX = (
+    "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
+    "\nЕсли нужны данные для подключения к платформе — сначала проверь get_connection, затем если нет — спроси через ask_user."
+    "\nЕсли подключение не работает (ошибка API, неверный ключ) — опиши ошибку конкретно: что пробовал, какой ответ получил."
+)
 
 ROLE_PROMPTS = {
     "salesman": (
@@ -130,6 +134,72 @@ _REQUEST_RESEARCH_TOOL = {
 }
 
 
+_CRED_KEYWORDS = {
+    "api", "key", "ключ", "token", "токен", "secret", "пароль", "password",
+    "логин", "login", "access", "доступ", "credentials", "учётные", "oauth",
+    "telegram", "instagram", "vk", "вконтакте", "openai", "anthropic",
+    "notion", "airtable", "google", "youtube", "tiktok", "facebook",
+}
+
+_PLATFORM_WORDS = {
+    "telegram", "instagram", "vk", "вконтакте", "openai", "anthropic",
+    "google", "youtube", "tiktok", "facebook", "notion", "airtable",
+    "twitter", "linkedin", "whatsapp", "viber", "discord", "slack",
+    "github", "gitlab", "stripe", "yandex", "яндекс", "авито", "avito",
+    "wildberries", "wb", "ozon", "озон", "bitrix", "bitrix24",
+}
+
+_CRED_TYPES = {"key", "ключ", "token", "токен", "secret"} | {"password", "пароль"} | {"login", "логин"}
+
+
+def _try_extract_connection(question: str, answer: str) -> dict | None:
+    """
+    Если вопрос звучит как запрос учётных данных — собираем структуру подключения.
+    Возвращает dict для connections.save() или None если не похоже на учётные данные.
+    """
+    if not answer.strip():
+        return None
+    q_lower = question.lower()
+    words = set(q_lower.replace(":", " ").replace("?", " ").replace(".", " ").split())
+
+    # Нужен хотя бы один кред-ключевик
+    if not (words & _CRED_KEYWORDS):
+        return None
+
+    # Определяем название платформы (первое совпадение из известных)
+    platform = next((w.capitalize() for w in words if w in _PLATFORM_WORDS), None)
+    if not platform:
+        # Ищем слово после "для" / "к" / "of" / "for"
+        import re
+        m = re.search(r'(?:для|к|for|of)\s+([a-zа-я0-9_\-]+)', q_lower)
+        platform = m.group(1).capitalize() if m else "Сервис"
+
+    # Тип подключения
+    if words & {"password", "пароль", "login", "логин"}:
+        conn_type = "login"
+        # Пробуем разобрать "login: X password: Y" или "логин: X пароль: Y"
+        import re
+        l = re.search(r'(?:login|логин)[:\s]+([^\s,]+)', answer, re.I)
+        p = re.search(r'(?:password|пароль)[:\s]+([^\s,]+)', answer, re.I)
+        if l and p:
+            fields = {"login": l.group(1), "password": p.group(1)}
+        else:
+            fields = {"value": answer.strip()}
+    else:
+        conn_type = "api"
+        fields = {"key": answer.strip()}
+
+    # Не дублируем уже существующее подключение с тем же именем и тем же значением
+    existing = connections.get_by_name(platform)
+    if existing:
+        ev = existing.get("fields", {})
+        if ev.get("key") == answer.strip() or ev.get("value") == answer.strip():
+            return None  # уже есть, не создаём дубль
+
+    return {"name": platform, "type": conn_type, "fields": fields,
+            "note": f"Автосохранено от агента {role} при ответе на вопрос"}
+
+
 def _brief_context() -> str:
     """Формирует блок с брифом клиента для вставки в системный промпт."""
     b = brief_module.get()
@@ -184,6 +254,15 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             return "Пользователь не ответил — продолжай без этих данных."
         if answer:
             memory_module.remember(question_text, answer)
+            # Автосохранение в подключения если вопрос про учётные данные
+            conn = _try_extract_connection(question_text, answer)
+            if conn:
+                saved = connections.save(conn)
+                await publish({"type": "connection_added", "connection": saved,
+                               "agent_id": agent_id,
+                               "text": f"🔌 Доступ '{saved['name']}' сохранён в подключения"})
+                await publish({"type": "speech", "agent_id": agent_id,
+                               "text": f"✅ Доступ к {saved['name']} сохранён — буду использовать в следующий раз автоматически"})
         return answer
 
     async def _handle_send_message(args: dict) -> str:
@@ -203,10 +282,21 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         conn = connections.get_by_name(name)
         if not conn:
             available = ", ".join(connections.names()) or "нет сохранённых"
-            return (f"Подключение '{name}' не найдено. Доступные: {available}. "
-                    f"Попроси пользователя добавить его через ask_user.")
+            return (
+                f"Подключение '{name}' не найдено. Доступные: {available}. "
+                f"Используй ask_user чтобы запросить у пользователя API-ключ или логин/пароль — "
+                f"они автоматически сохранятся в подключения."
+            )
         return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
                           ensure_ascii=False)
+
+    async def _report_connection_error(platform: str, error: str) -> None:
+        """Публикует событие ошибки подключения чтобы пользователь видел в интерфейсе."""
+        await publish({"type": "connection_error", "agent_id": agent_id,
+                       "platform": platform, "error": error,
+                       "text": f"❌ Ошибка подключения к {platform}: {error}"})
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"❌ Не могу подключиться к {platform}: {error[:100]}"})
 
     async def run() -> str:
         model = models_module.for_agent(agent_id)

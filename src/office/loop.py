@@ -79,7 +79,16 @@ async def run() -> None:
 
         # 2) Команда укомплектована → двигаем работу дальше:
         #    даём свободному агенту НОВЫЙ конкретный шаг к цели (round-robin)
+        #    Первый цикл после рестарта — только помечаем флаг, не запускаем агентов,
+        #    чтобы восстановленные агенты не стартовали немедленно.
+        global _first_cycle_done
         if not hired:
+            if not _first_cycle_done:
+                _first_cycle_done = True
+                await publish({"type": "system",
+                               "text": "Офис восстановлен. Агенты продолжат работу в следующем цикле."})
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
             advanced = await _advance_work(strategy, publish)
             if not advanced:
                 await publish({"type": "system",
@@ -192,10 +201,14 @@ def _hire_initial(publish_sync) -> None:
 _WORKER_SKIP = {"researcher", "strategist", "hr"}
 _rr_index = 0
 
-# Минимальная пауза между задачами агента (в секундах).
-# Агент, завершивший задачу менее MIN_IDLE_SECONDS назад, не получит новую.
-# Это предотвращает немедленный перезапуск при рестарте сервера.
-MIN_IDLE_SECONDS = LOOP_INTERVAL * 2
+# После перезапуска агенты не запускаются сразу — только через 1 полный цикл.
+# Это предотвращает немедленный рестарт уже завершённых задач.
+# Флаг снимается после первого полного цикла без найма.
+_first_cycle_done = False
+
+# Минимальный промежуток между задачами ОДНОГО агента.
+# Если агент завершил задачу менее AGENT_COOLDOWN_SECS назад — пропускаем его.
+AGENT_COOLDOWN_SECS = 3600  # 1 час — не гонять агента чаще раза в час
 
 
 async def _advance_work(strategy: str, publish) -> bool:
@@ -214,7 +227,7 @@ async def _advance_work(strategy: str, publish) -> bool:
         if a.role not in _WORKER_SKIP
         and a.status in ("done", "idle")
         # не трогаем агента, если он завершил задачу совсем недавно
-        and (now - state.last_run_for(a.agent_id)) >= MIN_IDLE_SECONDS
+        and (now - state.last_run_for(a.agent_id)) >= AGENT_COOLDOWN_SECS
     ]
     if not workers:
         return False

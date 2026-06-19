@@ -13,7 +13,7 @@ STATE_FILE = Path("reports/state.json")
 MAX_EVENTS = 800  # храним последние N событий, чтобы файл не рос бесконечно
 
 # Какие события стоит запоминать в ленту истории
-RECORD_TYPES = {"hired", "speech", "task_done", "system", "error"}
+RECORD_TYPES = {"hired", "speech", "task_done", "system", "error", "connection_added", "connection_error"}
 
 _events: list[dict] = []
 _agents: dict[str, dict] = {}  # agent_id -> {agent_id, role, desk, task}

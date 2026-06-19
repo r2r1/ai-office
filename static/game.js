@@ -348,6 +348,15 @@ function handleEvent(event) {
       switchView("questions");
     }
   }
+  else if (event.type === "connection_added") {
+    if (!hist) {
+      loadConnections();  // обновляем вкладку Доступы
+      showToast(`🔌 Доступ «${event.connection && event.connection.name}» сохранён`, "ok");
+    }
+  }
+  else if (event.type === "connection_error") {
+    if (!hist) showToast(`❌ ${event.platform}: ${event.error}`, "err");
+  }
   else if (event.type === "question_answered") {
     removeQuestionCard(event.question_id);
   }
@@ -506,6 +515,21 @@ function updateAgentStatus(agent_id, status, message) {
 }
 
 let _historyDividerAdded = false;
+
+function showToast(msg, type = "ok") {
+  const t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = `
+    position:fixed; bottom:24px; right:24px; z-index:9000;
+    padding:10px 18px; border-radius:8px; font-size:12px; font-family:'Courier New',monospace;
+    color:#fff; max-width:360px; box-shadow:0 4px 20px rgba(0,0,0,.5);
+    background:${type==="ok" ? "#1a3a1a" : "#3a1a1a"};
+    border:1px solid ${type==="ok" ? "#4a8a4a" : "#8a3a3a"};
+    transition: opacity 0.4s;
+  `;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 400); }, 3500);
+}
 
 function addLog(who, text, role, historical = false) {
   const color = historical ? "#333355" : (ROLE_COLORS[role] || "#556");
