@@ -345,7 +345,15 @@ function handleEvent(event) {
   else if (event.type === "question") {
     if (!hist) {
       addQuestionCard(event);
-      switchView("questions");
+      // Auto-switch only from the office canvas; elsewhere just pulse the badge
+      if (_currentView === "office") {
+        switchView("questions");
+      } else {
+        const badge = document.getElementById("badge-questions");
+        badge.classList.add("badge-pulse");
+        setTimeout(() => badge.classList.remove("badge-pulse"), 2000);
+        showToast("❓ Агент задал вопрос — см. вкладку «Вопросы»", "ok");
+      }
     }
   }
   else if (event.type === "connection_added") {
@@ -369,6 +377,7 @@ async function loadQuestions() {
     const qs = d.questions || [];
     const badge = document.getElementById("badge-questions");
     badge.textContent = qs.length || "";
+    badge.style.display = qs.length ? "block" : "none";
 
     // Add only new cards — don't wipe existing ones (preserves typed text)
     for (const q of qs) addQuestionCard(q, false);
@@ -447,6 +456,7 @@ function addQuestionCard(event, updateBadge = true) {
     const badge = document.getElementById("badge-questions");
     const cur = parseInt(badge.textContent || "0");
     badge.textContent = cur + 1;
+    badge.style.display = "block";
   }
 }
 
@@ -457,6 +467,7 @@ function removeQuestionCard(qid) {
   const remaining = wrap.querySelectorAll(".q-card").length;
   const badge = document.getElementById("badge-questions");
   badge.textContent = remaining || "";
+  badge.style.display = remaining ? "block" : "none";
   if (!remaining) {
     const note = document.createElement("div");
     note.className = "empty-note";
@@ -959,7 +970,9 @@ function escapeHtml(s) {
 }
 
 // ---- Views ----
+let _currentView = "office";
 function switchView(name) {
+  _currentView = name;
   document.querySelectorAll(".nav-item").forEach(t => t.classList.toggle("active", t.dataset.view === name));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   if (name === "office") {

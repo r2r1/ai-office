@@ -6,6 +6,7 @@
 """
 
 import json
+import re
 from typing import Callable, Awaitable
 
 from src.core import llm
@@ -170,7 +171,6 @@ def _try_extract_connection(question: str, answer: str) -> dict | None:
     platform = next((w.capitalize() for w in words if w in _PLATFORM_WORDS), None)
     if not platform:
         # Ищем слово после "для" / "к" / "of" / "for"
-        import re
         m = re.search(r'(?:для|к|for|of)\s+([a-zа-я0-9_\-]+)', q_lower)
         platform = m.group(1).capitalize() if m else "Сервис"
 
@@ -178,7 +178,6 @@ def _try_extract_connection(question: str, answer: str) -> dict | None:
     if words & {"password", "пароль", "login", "логин"}:
         conn_type = "login"
         # Пробуем разобрать "login: X password: Y" или "логин: X пароль: Y"
-        import re
         l = re.search(r'(?:login|логин)[:\s]+([^\s,]+)', answer, re.I)
         p = re.search(r'(?:password|пароль)[:\s]+([^\s,]+)', answer, re.I)
         if l and p:
@@ -197,7 +196,7 @@ def _try_extract_connection(question: str, answer: str) -> dict | None:
             return None  # уже есть, не создаём дубль
 
     return {"name": platform, "type": conn_type, "fields": fields,
-            "note": f"Автосохранено от агента {role} при ответе на вопрос"}
+            "note": "Автосохранено агентом при ответе на вопрос"}
 
 
 def _brief_context() -> str:
@@ -251,6 +250,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             answer = await asyncio.wait_for(fut, timeout=300)  # 5 мин макс
         except asyncio.TimeoutError:
             questions_module.answer(qid, "")
+            await publish({"type": "question_answered", "question_id": qid})
             return "Пользователь не ответил — продолжай без этих данных."
         if answer:
             memory_module.remember(question_text, answer)

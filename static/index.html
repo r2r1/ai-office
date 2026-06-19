@@ -99,6 +99,8 @@ button { font-family: inherit; }
   position: absolute; top: 6px; right: 12px; background: #f06292; color: #fff;
   border-radius: 9px; padding: 0 5px; font-size: 9px; line-height: 1.5; display: none;
 }
+.badge-pulse { animation: badge-pop 0.4s ease 0s 3 alternate; }
+@keyframes badge-pop { 0% { transform: scale(1); } 100% { transform: scale(1.6); background: #ff4081; } }
 
 /* Main */
 #main { flex: 1; min-width: 0; position: relative; }
