@@ -29,11 +29,19 @@ def save(conn: dict) -> dict:
         "fields": conn.get("fields") or {},
         "note": (conn.get("note") or "").strip(),
     }
+    # Update by ID if provided
     for i, c in enumerate(_conns):
         if c["id"] == item["id"]:
             _conns[i] = item
             _persist()
             return item
+    # Dedup by name + field values to prevent duplicate API keys
+    new_vals = sorted(str(v) for v in item["fields"].values())
+    for c in _conns:
+        if c["name"].lower() == item["name"].lower():
+            existing_vals = sorted(str(v) for v in c.get("fields", {}).values())
+            if existing_vals == new_vals:
+                return c  # identical connection already saved
     _conns.append(item)
     _persist()
     return item

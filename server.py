@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
 from src.office import memory
 from src.office import milestones
+from src.office import office_channel
 from src.office import models as models_module
 from src.agents import onboarding
 from src.core import llm as llm_core
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
         milestones.load()
         connections.load()
         memory.load()
+        office_channel.load()
         models_module.load()
         registry.restore(state.saved_agents())
     # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
@@ -303,6 +305,7 @@ async def brief_reset():
     progress.reset()
     milestones.reset()
     memory.reset()
+    office_channel.reset()
     models_module.reset()  # сбрасываем индивидуальные модели, глобальную оставляем
     # удаляем сохранённую стратегию, чтобы офис прошёл bootstrap заново
     from pathlib import Path as _P
@@ -390,3 +393,22 @@ async def ask_agent(request: Request):
         return {"agent_id": agent_id, "reply": reply}
     except Exception as e:
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+
+@app.get("/api/chat")
+async def get_chat():
+    """Последние сообщения общего канала офиса."""
+    return {"messages": office_channel.recent(100)}
+
+
+@app.post("/api/chat")
+async def post_chat(request: Request):
+    """Пользователь пишет сообщение всем агентам в общий канал офиса."""
+    data = await request.json()
+    text = (data.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text обязателен"}, status_code=400)
+    msg = office_channel.post("user", "user", text)
+    await bus.publish({"type": "office_chat", "from": "user", "role": "user",
+                       "text": text, "id": msg["id"]})
+    return {"ok": True, "message": msg}

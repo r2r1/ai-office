@@ -36,28 +36,42 @@ button { font-family: inherit; }
 #tb-logo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-/* Progress stepper */
-#progress { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 0 8px; }
-#progress-steps { display: flex; align-items: center; position: relative; }
-.pstep { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; z-index: 2; cursor: pointer; }
-.pstep:hover .plabel { color: #cfe3ff; }
-.pstep:hover .pdot { border-color: var(--accent); }
-.pstep-cnt { display: inline-block; margin-left: 4px; background: #28284a; color: #9fb3e0; border-radius: 8px; padding: 0 5px; font-size: 8px; }
-.pstep .pdot {
-  width: 18px; height: 18px; border-radius: 50%; background: #16162a;
-  border: 2px solid #28284a; display: flex; align-items: center; justify-content: center;
-  font-size: 9px; color: #555; transition: all 0.25s;
-}
-.pstep .plabel { font-size: 9px; color: #4a4a68; margin-top: 3px; white-space: nowrap; transition: color 0.25s; }
-.pstep.done .pdot { background: #1b3a2a; border-color: #3a7a52; color: #81c784; }
-.pstep.current .pdot { background: var(--accent); border-color: var(--accent); color: #04121d; box-shadow: 0 0 10px rgba(79,195,247,0.6); }
-.pstep.current .plabel { color: var(--accent); font-weight: bold; }
-.pstep.done .plabel { color: #6a9a80; }
-#progress-track {
-  position: absolute; top: 8px; left: 9%; right: 9%; height: 2px; background: #22223e; z-index: 1;
-}
-#progress-fill { position: absolute; top: 8px; left: 9%; height: 2px; background: linear-gradient(90deg,#3a7a52,var(--accent)); z-index: 1; width: 0; transition: width 0.4s; }
-#progress-note { font-size: 10px; color: var(--muted); text-align: center; height: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Progress slim bar */
+#progress { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 0 8px; max-width: 320px; }
+#progress-bar-row { position: relative; height: 4px; border-radius: 2px; overflow: hidden; background: #22223e; }
+#progress-fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg,#3a7a52,var(--accent)); border-radius: 2px; width: 0; transition: width 0.4s; }
+#progress-note { font-size: 10px; color: var(--muted); text-align: left; height: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* ── Progress tab ── */
+#progress-stages-list { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.ps-stage { background: var(--panel2); border: 1px solid var(--border); border-left: 3px solid #333; border-radius: 8px; padding: 12px 16px; cursor: pointer; transition: border-color 0.15s; }
+.ps-stage:hover { border-color: #3a3a6e; }
+.ps-stage.done { border-left-color: #3a7a52; }
+.ps-stage.active { border-left-color: var(--accent); }
+.ps-stage .pss-head { display: flex; align-items: center; gap: 8px; }
+.ps-stage .pss-dot { width: 10px; height: 10px; border-radius: 50%; background: #333; flex-shrink: 0; }
+.ps-stage.done .pss-dot { background: #3a7a52; }
+.ps-stage.active .pss-dot { background: var(--accent); box-shadow: 0 0 6px rgba(79,195,247,0.8); animation: pulse 2s infinite; }
+.ps-stage .pss-title { font-weight: bold; font-size: 13px; flex: 1; }
+.ps-stage .pss-count { font-size: 10px; color: #9fb3e0; background: #1e2a3a; border-radius: 8px; padding: 1px 7px; }
+.ps-stage .pss-summary { font-size: 11px; color: #667; margin-top: 6px; line-height: 1.5; }
+
+/* ── Chat tab ── */
+#chat-feed { flex: 1; overflow-y: auto; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
+.cf-msg { display: flex; gap: 10px; align-items: flex-start; }
+.cf-msg.user-msg { flex-direction: row-reverse; }
+.cf-msg .cf-avatar { width: 28px; height: 28px; border-radius: 50%; background: #1e2a3a; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.cf-msg .cf-body { max-width: 72%; }
+.cf-msg .cf-who { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+.cf-msg.user-msg .cf-who { text-align: right; }
+.cf-msg .cf-text { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #d0d0e8; line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
+.cf-msg.user-msg .cf-text { background: #1e3558; border-color: #2a4a78; color: #c8e0f8; }
+.cf-msg.system-msg .cf-text { background: #0e1a0e; border-color: #1e3a1e; color: #6a9a6a; font-style: italic; }
+#chat-compose { display: flex; padding: 10px 18px; gap: 8px; border-top: 1px solid var(--border); flex-shrink: 0; }
+#chat-compose-input { flex: 1; background: #0f0f20; border: 1px solid var(--border2); border-radius: 6px; padding: 9px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none; }
+#chat-compose-input:focus { border-color: var(--accent); }
+#chat-compose-send { background: #1e3558; border: none; border-radius: 6px; color: #8fd3ff; padding: 0 16px; cursor: pointer; font-size: 14px; }
+#chat-compose-send:hover { background: #2a4a78; }
 
 #tb-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 #status-bar { font-size: 11px; color: #3a3a5a; white-space: nowrap; }
@@ -448,10 +462,8 @@ canvas { display: block; image-rendering: pixelated; }
   <div id="topbar">
     <div id="tb-logo"><span class="dot"></span><span>AI OFFICE</span></div>
     <div id="progress">
-      <div id="progress-steps">
-        <div id="progress-track"></div>
+      <div id="progress-bar-row">
         <div id="progress-fill"></div>
-        <!-- steps injected by JS -->
       </div>
       <div id="progress-note"></div>
     </div>
@@ -477,6 +489,8 @@ canvas { display: block; image-rendering: pixelated; }
       <div class="nav-item" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
       <div class="nav-item" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">События</span></div>
       <div class="nav-item" data-view="questions"><span class="ni-icon">❓</span><span class="ni-label">Вопросы</span><span class="ni-badge" id="badge-questions"></span></div>
+      <div class="nav-item" data-view="progress"><span class="ni-icon">📈</span><span class="ni-label">Этапы</span></div>
+      <div class="nav-item" data-view="chat"><span class="ni-icon">💬</span><span class="ni-label">Чат</span><span class="ni-badge" id="badge-chat"></span></div>
     </div>
 
     <!-- Main -->
@@ -555,6 +569,26 @@ canvas { display: block; image-rendering: pixelated; }
         </div>
         <div id="questions-wrap">
           <div class="empty-note" id="no-questions">Нет ожидающих вопросов</div>
+        </div>
+      </div>
+
+      <!-- Progress view -->
+      <div class="view" id="view-progress">
+        <div class="view-head"><h2>📈 Этапы проекта</h2></div>
+        <div id="progress-stages-list">
+          <div class="empty-note" id="no-stages">Этапы появятся после запуска офиса</div>
+        </div>
+      </div>
+
+      <!-- Chat view -->
+      <div class="view" id="view-chat">
+        <div class="view-head"><h2>💬 Общий чат офиса</h2></div>
+        <div id="chat-feed">
+          <div class="empty-note" id="no-chat-msgs">Здесь появятся сообщения агентов и ваши трансляции</div>
+        </div>
+        <div id="chat-compose">
+          <input id="chat-compose-input" type="text" placeholder="Написать всем агентам..." autocomplete="off">
+          <button id="chat-compose-send">▶</button>
         </div>
       </div>
 

@@ -60,12 +60,27 @@ const DESK_POSITIONS = [
   {tx:6, ty:8},  // desk 5
   {tx:10,ty:8},  // desk 6
   {tx:14,ty:8},  // desk 7
+  // overflow: дополнительные позиции (агенты стоят свободнее)
+  {tx:4, ty:5},
+  {tx:8, ty:5},
+  {tx:12,ty:5},
+  {tx:16,ty:5},
+  {tx:4, ty:10},
+  {tx:8, ty:10},
+  {tx:12,ty:10},
+  {tx:16,ty:10},
 ];
+
+function getDeskPosition(n) {
+  return DESK_POSITIONS[n % DESK_POSITIONS.length];
+}
 
 // ---- Состояние игры ----
 const agents = {};        // agent_id -> {role, desk, x, y, tx, ty, bubble, color, status}
 const bubbles = [];       // активные речевые пузыри
 let logEntries = [];
+let camX = 0, camY = 0;
+let _panActive = false, _panStartX = 0, _panStartY = 0, _panStartCamX = 0, _panStartCamY = 0;
 
 // ---- Canvas setup ----
 const canvas = document.getElementById("canvas");
@@ -183,99 +198,145 @@ function drawMap(offsetX, offsetY) {
 }
 
 // ---- Pixel character drawing ----
+// Цвет волос по роли — чтобы персонажи различались
+const HAIR_COLORS = {
+  orchestrator: "#8a6d00", researcher: "#1a4a6a", strategist: "#2a5a3a", hr: "#7a4a10",
+  salesman: "#7a2a4a", developer: "#5a2a6a", marketer: "#2a5a55", analyst: "#6a6a10",
+};
+
+function shade(hex, amt) {
+  // затемнить/осветлить hex-цвет на amt (-255..255)
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) + amt, g = ((n >> 8) & 0xff) + amt, b = (n & 0xff) + amt;
+  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+  return `rgb(${r},${g},${b})`;
+}
+
 function drawCharacter(x, y, color, role, status) {
   const S = 4; // размер 1 пикселя в спрайте
   const ox = Math.floor(x) - 8;
   const oy = Math.floor(y) - 20;
+  const now = Date.now();
 
-  // Тело (туловище)
+  // Тень под персонажем
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath();
+  ctx.ellipse(ox + 4*S, oy + 10*S + 2, 4*S, 1.4*S, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Ноги
+  ctx.fillStyle = "#2a2a38";
+  ctx.fillRect(ox+2*S, oy+8*S, 2*S-2, 2*S);
+  ctx.fillRect(ox+4*S+2, oy+8*S, 2*S-2, 2*S);
+
+  // Тело (туловище) — с лёгким объёмом
   ctx.fillStyle = color;
   ctx.fillRect(ox+2*S, oy+4*S, 4*S, 4*S);
-
-  // Голова
-  ctx.fillStyle = "#f5c5a3";
-  ctx.fillRect(ox+2*S, oy+1*S, 4*S, 3*S);
-  // Глаза
-  ctx.fillStyle = "#222";
-  ctx.fillRect(ox+3*S, oy+2*S, S, S);
-  ctx.fillRect(ox+5*S, oy+2*S, S, S);
-
-  // Ноги (анимация ходьбы)
-  const legPhase = (Date.now() / 200) % 2 < 1;
-  ctx.fillStyle = "#333";
-  if (status === "thinking") {
-    // стоит на месте
-    ctx.fillRect(ox+2*S, oy+8*S, 2*S, 2*S);
-    ctx.fillRect(ox+4*S, oy+8*S, 2*S, 2*S);
-  } else if (legPhase) {
-    ctx.fillRect(ox+2*S, oy+8*S, 2*S, 3*S);
-    ctx.fillRect(ox+4*S, oy+8*S+S, 2*S, 2*S);
-  } else {
-    ctx.fillRect(ox+2*S, oy+8*S+S, 2*S, 2*S);
-    ctx.fillRect(ox+4*S, oy+8*S, 2*S, 3*S);
-  }
+  ctx.fillStyle = shade(typeof color === "string" && color[0] === "#" ? color : "#aaaaaa", -40);
+  ctx.fillRect(ox+2*S, oy+7*S, 4*S, S); // нижняя тень рубашки
+  ctx.fillStyle = "rgba(255,255,255,0.15)";
+  ctx.fillRect(ox+2*S, oy+4*S, 4*S, S); // блик сверху
 
   // Руки
   ctx.fillStyle = color;
   ctx.fillRect(ox+S, oy+4*S, S, 3*S);
   ctx.fillRect(ox+6*S, oy+4*S, S, 3*S);
+  // Кисти
+  ctx.fillStyle = "#f5c5a3";
+  ctx.fillRect(ox+S, oy+7*S-2, S, S);
+  ctx.fillRect(ox+6*S, oy+7*S-2, S, S);
+
+  // Голова
+  ctx.fillStyle = "#f5c5a3";
+  ctx.fillRect(ox+2*S, oy+1*S, 4*S, 3*S);
+  // Волосы (цвет по роли)
+  ctx.fillStyle = HAIR_COLORS[role] || "#3a2a1a";
+  ctx.fillRect(ox+2*S, oy+1*S-2, 4*S, S+2);
+  ctx.fillRect(ox+2*S, oy+1*S, S, S);
+  ctx.fillRect(ox+5*S, oy+1*S, S, S);
+  // Глаза (с белками)
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(ox+3*S-1, oy+2*S, S, S);
+  ctx.fillRect(ox+5*S-1, oy+2*S, S, S);
+  ctx.fillStyle = "#222";
+  ctx.fillRect(ox+3*S, oy+2*S, S-2, S-1);
+  ctx.fillRect(ox+5*S, oy+2*S, S-2, S-1);
 
   // Иконка роли над головой
   ctx.font = "12px serif";
   ctx.textAlign = "center";
-  ctx.fillText(ROLE_ICONS[role] || "🤖", ox + 4*S, oy);
+  ctx.fillText(ROLE_ICONS[role] || "🤖", ox + 4*S, oy - 2);
 
-  // Статус-индикатор
-  if (status === "thinking") {
-    ctx.fillStyle = "#ffff00";
-    ctx.fillRect(ox + 7*S, oy + S, 2, 2);
-    ctx.fillRect(ox + 7*S + 3, oy + S - 1, 2, 2);
-    ctx.fillRect(ox + 7*S + 1, oy, 2, 2);
-  }
+  // Статус-точка (пульсирующая)
+  const dotColor = status === "thinking" ? "#ffd54f" : status === "done" ? "#81c784" : "#5a5a78";
+  const pulse = status === "thinking" ? 0.5 + 0.5*Math.sin(now/250) : 1;
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = dotColor;
+  ctx.beginPath();
+  ctx.arc(ox + 7*S, oy + 1*S, 3, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
 }
 
 // ---- Bubble drawing ----
 function drawBubble(text, x, y, alpha) {
-  const maxW = 160;
+  const maxW = 190;
   ctx.font = "10px Courier New";
   const words = text.split(" ");
   const lines = [];
   let line = "";
   for (const w of words) {
     const test = line + (line ? " " : "") + w;
-    if (ctx.measureText(test).width > maxW - 10) {
+    if (ctx.measureText(test).width > maxW - 16) {
       if (line) lines.push(line);
       line = w;
     } else line = test;
   }
   if (line) lines.push(line);
 
-  const bw = maxW;
-  const bh = lines.length * 13 + 10;
-  const bx = x - bw / 2;
-  const by = y - bh - 30;
+  // ширина по самой длинной строке
+  let bw = 0;
+  for (const l of lines) bw = Math.max(bw, ctx.measureText(l).width);
+  bw = Math.min(maxW, bw + 16);
+  const bh = lines.length * 14 + 12;
+  let bx = x - bw / 2;
+  let by = y - bh - 34;
+  // удерживаем пузырь внутри канваса
+  bx = Math.max(6, Math.min(canvas.width - bw - 6, bx));
+  by = Math.max(6, by);
 
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = "rgba(10, 10, 20, 0.95)";
-  ctx.strokeStyle = "rgba(100, 200, 255, 0.6)";
+  // тень
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+  ctx.fillStyle = "rgba(14, 16, 26, 0.97)";
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 7);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.strokeStyle = "rgba(79, 195, 247, 0.5)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.roundRect(bx, by, bw, bh, 4);
-  ctx.fill();
+  ctx.roundRect(bx, by, bw, bh, 7);
   ctx.stroke();
 
-  // Хвостик пузыря
-  ctx.fillStyle = "rgba(10, 10, 20, 0.95)";
+  // Хвостик пузыря (только если он указывает в пределах пузыря)
+  const tailX = Math.max(bx + 8, Math.min(bx + bw - 8, x));
+  ctx.fillStyle = "rgba(14, 16, 26, 0.97)";
   ctx.beginPath();
-  ctx.moveTo(x - 5, by + bh);
-  ctx.lineTo(x + 5, by + bh);
-  ctx.lineTo(x, by + bh + 6);
+  ctx.moveTo(tailX - 5, by + bh - 1);
+  ctx.lineTo(tailX + 5, by + bh - 1);
+  ctx.lineTo(tailX, by + bh + 7);
   ctx.fill();
 
-  ctx.fillStyle = "#e0e0e0";
+  ctx.fillStyle = "#e0e0e8";
   ctx.font = "10px Courier New";
   ctx.textAlign = "left";
-  lines.forEach((l, i) => ctx.fillText(l, bx + 5, by + 14 + i * 13));
+  lines.forEach((l, i) => ctx.fillText(l, bx + 8, by + 15 + i * 14));
   ctx.globalAlpha = 1;
 }
 
@@ -284,8 +345,8 @@ function getMapOffset() {
   const wrap = document.getElementById("game-wrap");
   const mapW = COLS * P;
   const mapH = ROWS * P;
-  const ox = Math.max(0, (wrap.clientWidth - mapW) / 2);
-  const oy = Math.max(0, (wrap.clientHeight - mapH) / 2);
+  const ox = Math.max(0, (wrap.clientWidth - mapW) / 2) + camX;
+  const oy = Math.max(0, (wrap.clientHeight - mapH) / 2) + camY;
   return {ox, oy};
 }
 
@@ -325,7 +386,11 @@ function handleEvent(event) {
   else if (event.type === "speech") {
     if (!hist) addBubble(event.agent_id, event.text);
     addLog(event.agent_id, event.text, getRole(event.agent_id), hist);
+    addToChatFeed({from: event.agent_id, role: getRole(event.agent_id), text: event.text}, hist);
     if (!hist) updateAgentStatus(event.agent_id, "thinking", event.text);
+  }
+  else if (event.type === "office_chat") {
+    addToChatFeed({from: event.from, role: event.role, text: event.text}, hist);
   }
   else if (event.type === "thinking") {
     if (!hist) {
@@ -490,7 +555,7 @@ function getRole(agent_id) {
 
 function spawnAgent(agent_id, role, desk, task) {
   if (agents[agent_id]) return;
-  const dp = DESK_POSITIONS[desk] || DESK_POSITIONS[0];
+  const dp = getDeskPosition(desk);
   const {ox, oy} = getMapOffset();
   const startX = ox + COLS/2 * P;
   const startY = oy + ROWS/2 * P;
@@ -762,13 +827,45 @@ function findAgentAt(px, py) {
 }
 
 function setupClickHandler() {
-  canvas.addEventListener("click", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    const id = findAgentAt(px, py);
-    if (id) openChat(id);
+  let downX = 0, downY = 0, moved = false;
+
+  canvas.addEventListener("mousedown", (e) => {
+    _panActive = true;
+    moved = false;
+    _panStartX = e.clientX; _panStartY = e.clientY;
+    _panStartCamX = camX; _panStartCamY = camY;
+    downX = e.clientX; downY = e.clientY;
   });
+  window.addEventListener("mousemove", (e) => {
+    if (!_panActive) return;
+    const dx = e.clientX - _panStartX;
+    const dy = e.clientY - _panStartY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+    camX = _panStartCamX + dx;
+    camY = _panStartCamY + dy;
+    syncAgentTargets();
+    canvas.style.cursor = "grabbing";
+  });
+  window.addEventListener("mouseup", (e) => {
+    _panActive = false;
+    canvas.style.cursor = "default";
+    if (!moved) {
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const id = findAgentAt(px, py);
+      if (id) openChat(id);
+    }
+  });
+}
+
+function syncAgentTargets() {
+  const {ox, oy} = getMapOffset();
+  for (const a of Object.values(agents)) {
+    const dp = getDeskPosition(a.desk);
+    a.tx = ox + dp.tx * P + P/2;
+    a.ty = oy + dp.ty * P + P/2;
+  }
 }
 
 // ---- Чат-окно ----
@@ -986,13 +1083,21 @@ function switchView(name) {
     resize();
     const {ox, oy} = getMapOffset();
     for (const a of Object.values(agents)) {
-      const dp = DESK_POSITIONS[a.desk] || DESK_POSITIONS[0];
+      const dp = getDeskPosition(a.desk);
       a.tx = ox + dp.tx * P + P/2;
       a.ty = oy + dp.ty * P + P/2;
     }
   }
   if (name === "questions") {
     loadQuestions();
+  }
+  if (name === "progress") {
+    loadProgress();
+  }
+  if (name === "chat") {
+    loadChatFeed();
+    const badge = document.getElementById("badge-chat");
+    if (badge) { badge.textContent = ""; badge.style.display = "none"; }
   }
 }
 
@@ -1004,24 +1109,40 @@ let _stageData = [];
 
 function renderProgress(p) {
   _stageData = (p.stages && p.stages.length) ? p.stages : _stageData;
-  const cont = document.getElementById("progress-steps");
-  cont.querySelectorAll(".pstep").forEach(e => e.remove());
 
-  _stageData.forEach((s) => {
-    const div = document.createElement("div");
-    div.className = "pstep" + (s.status === "done" ? " done" : s.status === "active" ? " current" : "");
-    const badge = s.item_count ? `<span class="pstep-cnt">${s.item_count}</span>` : "";
-    div.innerHTML = `<div class="pdot">${s.status==="done"?"✓":"●"}</div><div class="plabel">${escapeHtml(s.title)}${badge}</div>`;
-    div.title = "Нажмите, чтобы посмотреть сводку этапа";
-    div.addEventListener("click", () => openMilestone(s.id));
-    cont.appendChild(div);
-  });
-
+  // Слим-полоса в топбаре
   const fill = document.getElementById("progress-fill");
   const pct = typeof p.percent === "number" ? p.percent : 0;
-  fill.style.width = (Math.max(0, Math.min(100, pct)) * 0.82) + "%";
+  if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + "%";
   const note = document.getElementById("progress-note");
-  if (note && (p.note !== undefined)) note.textContent = p.note || "";
+  const cur = _stageData.find(s => s.status === "active");
+  if (note) {
+    const noteText = (p.note !== undefined && p.note) ? p.note : (cur ? `▸ ${cur.title}` : "");
+    note.textContent = noteText;
+  }
+
+  // Подробные этапы во вкладке «Этапы»
+  const list = document.getElementById("progress-stages-list");
+  if (!list) return;
+  const noStages = document.getElementById("no-stages");
+  if (noStages) noStages.style.display = _stageData.length ? "none" : "block";
+  list.querySelectorAll(".ps-stage").forEach(e => e.remove());
+  _stageData.forEach((s) => {
+    const div = document.createElement("div");
+    div.className = "ps-stage" + (s.status === "done" ? " done" : s.status === "active" ? " active" : "");
+    const count = s.item_count ? `<span class="pss-count">${s.item_count}</span>` : "";
+    div.innerHTML = `
+      <div class="pss-head">
+        <span class="pss-dot"></span>
+        <span class="pss-title">${escapeHtml(s.title)}</span>
+        ${count}
+      </div>
+      ${s.summary ? `<div class="pss-summary">${escapeHtml(s.summary.slice(0,160))}</div>` : ""}
+    `;
+    div.title = "Нажмите, чтобы посмотреть сводку этапа";
+    div.addEventListener("click", () => openMilestone(s.id));
+    list.appendChild(div);
+  });
 }
 // обратная совместимость со старым именем
 function updateProgressBar(p) { renderProgress(p); }
@@ -1056,6 +1177,79 @@ async function openMilestone(stageId) {
       `<div class="ms-items-head">Что сделано (${(m.items||[]).length}):</div>` + items;
     document.getElementById("fulltext-overlay").classList.remove("hidden");
   } catch (e) { console.error("openMilestone:", e); }
+}
+
+// ============================================================
+// ОБЩИЙ ЧАТ ОФИСА (двусторонний)
+// ============================================================
+const _chatSeen = new Set();
+
+function addToChatFeed(msg, historical = false) {
+  const feed = document.getElementById("chat-feed");
+  if (!feed) return;
+  const no = document.getElementById("no-chat-msgs");
+  if (no) no.remove();
+
+  const from = msg.from || "agent";
+  const role = msg.role || roleFromId(from);
+  const isUser = from === "user" || role === "user";
+  const isSystem = from === "system" || role === "system";
+
+  const wrap = document.createElement("div");
+  wrap.className = "cf-msg" + (isUser ? " user-msg" : isSystem ? " system-msg" : "");
+  const icon = isUser ? "🧑" : isSystem ? "🏢" : (ROLE_ICONS[role] || "🤖");
+  const who = isUser ? "Вы" : isSystem ? "Офис" : `${ROLE_NAMES[role] || role}`;
+  wrap.innerHTML = `
+    <div class="cf-avatar">${icon}</div>
+    <div class="cf-body">
+      <div class="cf-who">${escapeHtml(who)}</div>
+      <div class="cf-text">${escapeHtml(msg.text || "")}</div>
+    </div>
+  `;
+  feed.appendChild(wrap);
+  feed.scrollTop = feed.scrollHeight;
+
+  // Бейдж непрочитанного, если мы не на вкладке чата
+  if (!historical && _currentView !== "chat" && !isUser) {
+    const badge = document.getElementById("badge-chat");
+    if (badge) {
+      const cur = parseInt(badge.textContent || "0") + 1;
+      badge.textContent = cur;
+      badge.style.display = "block";
+    }
+  }
+}
+
+async function loadChatFeed() {
+  try {
+    const r = await fetch("/api/chat");
+    const d = await r.json();
+    const msgs = d.messages || [];
+    const feed = document.getElementById("chat-feed");
+    if (feed) feed.querySelectorAll(".cf-msg").forEach(c => c.remove());
+    for (const m of msgs) addToChatFeed(m, true);
+  } catch (e) { /* чат может быть недоступен */ }
+}
+
+async function sendChatBroadcast() {
+  const inp = document.getElementById("chat-compose-input");
+  const text = (inp.value || "").trim();
+  if (!text) return;
+  inp.value = "";
+  addToChatFeed({from: "user", role: "user", text}, true);
+  try {
+    await fetch("/api/chat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text}),
+    });
+  } catch (e) { showToast("❌ Не удалось отправить сообщение", "err"); }
+}
+
+function setupChat() {
+  const sendBtn = document.getElementById("chat-compose-send");
+  const inp = document.getElementById("chat-compose-input");
+  if (sendBtn) sendBtn.addEventListener("click", sendChatBroadcast);
+  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChatBroadcast(); });
 }
 
 // ============================================================
@@ -1370,6 +1564,10 @@ window.addEventListener("load", () => {
 
   // Questions
   loadQuestions();
+
+  // Общий чат
+  setupChat();
+  loadChatFeed();
 
   // Model switcher (topbar global) + onboarding model picker
   setupModelSwitcher();

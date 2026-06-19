@@ -18,6 +18,7 @@ from src.office import state
 from src.office import connections
 from src.office import memory as memory_module
 from src.office import models as models_module
+from src.office import office_channel
 
 _AUTONOMY_RULES = """
 
@@ -134,6 +135,25 @@ _GET_CONNECTION_TOOL = {
                 "name": {"type": "string", "description": "Название платформы (например: Instagram, OpenAI, Telegram)"},
             },
             "required": ["name"],
+        },
+    },
+}
+
+# Инструмент: читать общий чат офиса
+_READ_OFFICE_CHAT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_office_chat",
+        "description": (
+            "Читает последние сообщения из общего чата офиса — там пишут другие агенты и пользователь. "
+            "Проверяй перед ask_user: вдруг нужный API-ключ уже получен другим агентом."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer", "description": "Количество последних сообщений (по умолчанию 20)", "default": 20},
+            },
+            "required": [],
         },
     },
 }
@@ -289,6 +309,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                                "text": f"🔌 Доступ '{saved['name']}' сохранён в подключения"})
                 await publish({"type": "speech", "agent_id": agent_id,
                                "text": f"✅ Доступ к {saved['name']} сохранён — буду использовать в следующий раз автоматически"})
+                # Оповещаем всех агентов через общий канал
+                office_channel.post(
+                    "system", "system",
+                    f"🔑 API-ключ для '{saved['name']}' получен и сохранён. "
+                    f"Все агенты могут использовать get_connection('{saved['name']}') — "
+                    f"не спрашивайте пользователя повторно."
+                )
         return answer
 
     async def _handle_send_message(args: dict) -> str:
@@ -302,6 +329,14 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
     async def _handle_read_messages(args: dict) -> str:
         msgs = agent_inbox.read(agent_id)
         return json.dumps(msgs, ensure_ascii=False)
+
+    async def _handle_read_office_chat(args: dict) -> str:
+        n = args.get("n", 20)
+        msgs = office_channel.recent(n)
+        if not msgs:
+            return "Общий чат пуст."
+        lines = [f"[{m['from']}]: {m['text']}" for m in msgs]
+        return "\n".join(lines)
 
     async def _handle_get_connection(args: dict) -> str:
         name = args.get("name", "")
@@ -324,10 +359,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"❌ Не могу подключиться к {platform}: {error[:100]}"})
 
+    async def _publish_and_log(event: dict) -> None:
+        """Обёртка над publish: speech-события агентов дублируются в общий канал."""
+        await publish(event)
+        if event.get("type") == "speech" and event.get("agent_id") == agent_id:
+            office_channel.post(agent_id, role, event.get("text", ""))
+
     async def run() -> str:
         model = models_module.for_agent(agent_id)
-        await publish({"type": "thinking", "agent_id": agent_id,
-                       "text": f"Начинаю работу: {task[:80]}..."})
+        await _publish_and_log({"type": "thinking", "agent_id": agent_id,
+                                 "text": f"Начинаю работу: {task[:80]}..."})
 
         result = await llm.run_agent(
             system=system,
@@ -336,15 +377,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             max_tokens=3000,
             max_iterations=8,
             use_search=True,
-            publish=publish,
+            publish=_publish_and_log,
             agent_id=agent_id,
             extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL,
-                         _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL],
+                         _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
                 "send_message": _handle_send_message,
                 "read_messages": _handle_read_messages,
+                "read_office_chat": _handle_read_office_chat,
                 "get_connection": _handle_get_connection,
             },
         )
