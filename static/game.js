@@ -26,8 +26,12 @@ function tileToScreen(col, row) {
   if (!wrap) return { x: 400, y: 200 };
   const tw = ISO_W * isoScale / 2;
   const th = ISO_H * isoScale / 2;
-  const ox = wrap.clientWidth / 2 + camX;
-  const oy = wrap.clientHeight * 0.44 + camY;
+  // Центр изометрической сетки: смещаем так, чтобы вся карта была по центру.
+  const midDX = (COLS - ROWS) / 2;       // середина диапазона (col - row)
+  const midSum = (COLS - 1 + ROWS - 1) / 2; // середина диапазона (col + row)
+  const ox = wrap.clientWidth / 2 - midDX * tw + camX;
+  // чуть выше центра — стены тянутся вверх, оставляем им место
+  const oy = wrap.clientHeight / 2 - midSum * th + WALL_H * isoScale * 0.5 + camY;
   return {
     x: ox + (col - row) * tw,
     y: oy + (col + row) * th,
