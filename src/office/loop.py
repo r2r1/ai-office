@@ -24,12 +24,13 @@ import time
 from pathlib import Path
 
 from src.office import bus, registry, brief, state, milestones
-from src.agents import researcher, strategist, orchestrator
+from src.agents import researcher, strategist, orchestrator, architect
 from src.agents import agent_factory
 
 
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "10"))
 STRATEGY_FILE = Path("reports/strategy.md")
+TECH_DESIGN_FILE = Path("reports/tech_design.md")
 
 _last_research: str = ""
 _last_strategy: str = ""
@@ -74,7 +75,7 @@ async def run() -> None:
         await publish({"type": "system",
                        "text": f"Бриф получен: {b.get('goal', b.get('summary',''))[:80]}"})
 
-    # ---- BOOTSTRAP: ниша, стратегия, этапы ----
+    # ---- BOOTSTRAP: ниша, стратегия, этапы, ТЗ ----
     strategy = _load_strategy()
     if strategy:
         globals()["_last_strategy"] = strategy
@@ -86,6 +87,21 @@ async def run() -> None:
                        "summary": "Ниша выбрана ранее. План загружен из strategy.md"})
     else:
         strategy = await _bootstrap(publish)
+
+    # ---- Архитектор формирует ТЗ (если ещё не сформировано) ----
+    tech_design = architect.load()
+    if not tech_design:
+        goal = brief.get().get("goal", "") or brief.summary()
+        await publish({"type": "system", "text": "Архитектор проектирует техническое решение..."})
+        try:
+            tech_design = await architect.run_async(strategy, goal, publish)
+        except Exception as e:
+            await publish({"type": "error", "agent_id": "architect_1", "text": str(e)[:100]})
+            tech_design = ""
+    else:
+        await publish({"type": "system", "text": "ТЗ уже готово — архитектор не нужен"})
+        await publish({"type": "task_done", "agent_id": "architect_1",
+                       "summary": "ТЗ загружено из tech_design.md"})
 
     # ---- Директор формирует этапы пути (если ещё не сформированы) ----
     if not milestones.has_business_stages():
@@ -111,12 +127,14 @@ async def run() -> None:
             await asyncio.sleep(LOOP_INTERVAL)
             continue
 
-        await _orchestrate(strategy, publish)
+        # Обновляем ТЗ из файла (архитектор мог обновить его)
+        tech_design = architect.load()
+        await _orchestrate(strategy, publish, tech_design=tech_design)
 
         await asyncio.sleep(LOOP_INTERVAL)
 
 
-async def _orchestrate(strategy: str, publish) -> None:
+async def _orchestrate(strategy: str, publish, tech_design: str = "") -> None:
     """Один ход директора: принять решение и исполнить его."""
     global _current_milestone_id
 
@@ -135,7 +153,8 @@ async def _orchestrate(strategy: str, publish) -> None:
             "cooldown_secs": int(cooldown_left),
         }
 
-    decision = await orchestrator.decide(goal, strategy, ms, publish, agent_availability)
+    decision = await orchestrator.decide(goal, strategy, ms, publish, agent_availability,
+                                         tech_design=tech_design)
 
     thought = decision.get("thought", "")
     if thought:
@@ -216,14 +235,17 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "")
 
 
 def _task_with_context(role: str, task: str, skill: str = "") -> str:
-    """Обогащает задачу контекстом цели и текущего этапа."""
+    """Обогащает задачу контекстом цели, текущего этапа и ТЗ архитектора."""
     goal = brief.get().get("goal", "") or brief.summary()
     cur = milestones.get(_current_milestone_id)
     stage = f"Текущий этап: {cur['title']}\n" if cur else ""
     skill_line = f"Твоя специализация: {skill}\n" if skill else ""
+    tdd = architect.load()
+    tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА ===\n{tdd[:2000]}\n" if tdd else ""
     return (
         f"Цель офиса: {goal}\n{stage}{skill_line}"
-        f"Твоя задача от директора: {task}\n\n"
+        f"Твоя задача от директора: {task}\n"
+        f"{tdd_section}\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
         f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
     )
@@ -306,6 +328,7 @@ def _hire_initial(publish_sync) -> None:
         ("orchestrator_1", "orchestrator", "Управление офисом и постановка задач"),
         ("researcher_1", "researcher", "Исследование рынка и трендов"),
         ("strategist_1", "strategist", "Построение бизнес-стратегии"),
+        ("architect_1", "architect", "Техническое проектирование решения"),
         ("hr_1", "hr", "Найм новых агентов"),
     ]
     for aid, role, task in starters:

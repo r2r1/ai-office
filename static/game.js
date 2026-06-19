@@ -2,17 +2,44 @@
 // AI OFFICE — Pixel Game Engine
 // ============================================================
 
-const TILE = 32;          // размер тайла в пикселях
-const COLS = 20;          // ширина карты в тайлах
-const ROWS = 14;          // высота карты в тайлах
-const SCALE = 2;          // масштаб пикселей (pixel art)
-const P = TILE * SCALE;   // размер тайла на экране
+const COLS = 20;   // ширина карты в тайлах
+const ROWS = 14;   // высота карты в тайлах
+const ISO_W = 52;  // ширина изометрического тайла (пикс при scale=1)
+const ISO_H = 26;  // высота изометрического тайла (ISO_W/2)
+const WALL_H = 36; // высота стен в пикселях
+const DESK_H = 16; // высота столов
+let isoScale = 1.0;
+
+// Auto-fit scale so the entire map fits the game-wrap div
+function updateScale() {
+  const wrap = document.getElementById("game-wrap");
+  if (!wrap) return;
+  const mapW = (COLS + ROWS) * ISO_W / 2;
+  const mapH = (COLS + ROWS) * ISO_H / 2 + WALL_H + 60;
+  const s = Math.min(wrap.clientWidth / mapW, wrap.clientHeight / mapH) * 0.90;
+  isoScale = Math.max(0.5, Math.min(s, 1.8));
+}
+
+// Convert tile (col, row) to screen (x, y) — center of tile's top diamond
+function tileToScreen(col, row) {
+  const wrap = document.getElementById("game-wrap");
+  if (!wrap) return { x: 400, y: 200 };
+  const tw = ISO_W * isoScale / 2;
+  const th = ISO_H * isoScale / 2;
+  const ox = wrap.clientWidth / 2 + camX;
+  const oy = wrap.clientHeight * 0.44 + camY;
+  return {
+    x: ox + (col - row) * tw,
+    y: oy + (col + row) * th,
+  };
+}
 
 // Цвета ролей
 const ROLE_COLORS = {
   orchestrator: "#ffd54f",
   researcher: "#4fc3f7",
   strategist: "#81c784",
+  architect:  "#b39ddb",
   hr:         "#ffb74d",
   salesman:   "#f06292",
   developer:  "#ce93d8",
@@ -22,13 +49,13 @@ const ROLE_COLORS = {
 
 // Иконки ролей (emoji -> рисуем текстом)
 const ROLE_ICONS = {
-  orchestrator: "🧭", researcher: "🔍", strategist: "📋", hr: "👔",
+  orchestrator: "🧭", researcher: "🔍", strategist: "📋", architect: "🏗️", hr: "👔",
   salesman: "💰", developer: "💻", marketer: "📢", analyst: "📊",
 };
 
 // Человекочитаемые названия ролей
 const ROLE_NAMES = {
-  orchestrator: "Директор", researcher: "Ресёрчер", strategist: "Стратег", hr: "HR",
+  orchestrator: "Директор", researcher: "Ресёрчер", strategist: "Стратег", architect: "Архитектор", hr: "HR",
   salesman: "Продажник", developer: "Разработчик", marketer: "Маркетолог", analyst: "Аналитик",
 };
 
@@ -91,190 +118,240 @@ function resize() {
   canvas.width = wrap.clientWidth;
   canvas.height = wrap.clientHeight;
 }
-window.addEventListener("resize", resize);
 resize();
 
-// ---- Draw helpers ----
-function drawPixelRect(x, y, w, h, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, w, h);
+// ---- Isometric drawing primitives ----
+function isoFloor(cx, cy, fillColor, strokeColor) {
+  const tw = ISO_W * isoScale / 2, th = ISO_H * isoScale / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - th);
+  ctx.lineTo(cx + tw, cy);
+  ctx.lineTo(cx, cy + th);
+  ctx.lineTo(cx - tw, cy);
+  ctx.closePath();
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  if (strokeColor) { ctx.strokeStyle = strokeColor; ctx.lineWidth = 0.5; ctx.stroke(); }
 }
 
-function drawText(text, x, y, size=11, color="#fff", align="left") {
-  ctx.font = `${size}px "Courier New", monospace`;
-  ctx.fillStyle = color;
-  ctx.textAlign = align;
-  ctx.fillText(text, x, y);
+function isoBox(cx, cy, sh, topC, leftC, rightC, outlineC) {
+  const tw = ISO_W * isoScale / 2, th = ISO_H * isoScale / 2;
+  // Left face
+  ctx.beginPath();
+  ctx.moveTo(cx - tw, cy); ctx.lineTo(cx, cy + th);
+  ctx.lineTo(cx, cy + th - sh); ctx.lineTo(cx - tw, cy - sh);
+  ctx.closePath(); ctx.fillStyle = leftC; ctx.fill();
+  // Right face
+  ctx.beginPath();
+  ctx.moveTo(cx + tw, cy); ctx.lineTo(cx, cy + th);
+  ctx.lineTo(cx, cy + th - sh); ctx.lineTo(cx + tw, cy - sh);
+  ctx.closePath(); ctx.fillStyle = rightC; ctx.fill();
+  // Top face (diamond shifted up)
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - th - sh); ctx.lineTo(cx + tw, cy - sh);
+  ctx.lineTo(cx, cy + th - sh); ctx.lineTo(cx - tw, cy - sh);
+  ctx.closePath(); ctx.fillStyle = topC; ctx.fill();
+  if (outlineC) {
+    ctx.strokeStyle = outlineC; ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - th - sh); ctx.lineTo(cx + tw, cy - sh);
+    ctx.lineTo(cx, cy + th - sh); ctx.lineTo(cx - tw, cy - sh);
+    ctx.closePath(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - tw, cy); ctx.lineTo(cx - tw, cy - sh);
+    ctx.moveTo(cx + tw, cy); ctx.lineTo(cx + tw, cy - sh);
+    ctx.moveTo(cx, cy + th); ctx.lineTo(cx, cy + th - sh);
+    ctx.stroke();
+  }
 }
 
-// ---- Map drawing ----
-const TILE_COLORS = {
-  0: "#1a1a2a",   // пол
-  1: "#2d1b4e",   // стена
-  2: "#2a1a3a",   // стол
-  3: "#1a2a3a",   // окно
-  4: "#1a2a1a",   // растение
-};
+function drawIsoTile(col, row) {
+  const tile = MAP[row][col];
+  const { x: cx, y: cy } = tileToScreen(col, row);
+  const tw = ISO_W * isoScale / 2, th = ISO_H * isoScale / 2;
+  const isAlt = (col + row) % 2 === 0;
+  const sh_wall = WALL_H * isoScale, sh_desk = DESK_H * isoScale;
 
-function drawMap(offsetX, offsetY) {
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      const tile = MAP[row][col];
-      const px = offsetX + col * P;
-      const py = offsetY + row * P;
-
-      // Пол
-      drawPixelRect(px, py, P, P, TILE_COLORS[tile]);
-
-      // Детали тайлов
-      if (tile === 1) {
-        // Стена — паттерн кирпичей
-        ctx.fillStyle = "#3d2b5e";
-        for (let by = 0; by < P; by += 8) {
-          const offset = (Math.floor(by/8) % 2) * 16;
-          for (let bx = offset; bx < P; bx += 32) {
-            ctx.fillRect(px + bx, py + by, 28, 6);
-          }
-        }
-        ctx.fillStyle = "#1a0a2e";
-        for (let by = 0; by < P; by += 8) ctx.fillRect(px, py + by, P, 1);
-      }
-
-      if (tile === 2) {
-        // Стол — деревянная столешница
-        ctx.fillStyle = "#3d2200";
-        ctx.fillRect(px+2, py+2, P-4, P/2);
-        ctx.fillStyle = "#5a3300";
-        ctx.fillRect(px+4, py+4, P-8, P/2-4);
-        // Монитор
-        ctx.fillStyle = "#111";
-        ctx.fillRect(px+P/2-6, py+4, 12, 9);
-        ctx.fillStyle = "#4fc3f7";
-        ctx.fillRect(px+P/2-5, py+5, 10, 7);
-        // Ножки
-        ctx.fillStyle = "#2a1500";
-        ctx.fillRect(px+4, py+P/2+2, 4, P/2-4);
-        ctx.fillRect(px+P-8, py+P/2+2, 4, P/2-4);
-      }
-
-      if (tile === 3) {
-        // Окно
-        ctx.fillStyle = "#0a2040";
-        ctx.fillRect(px+4, py+4, P-8, P-8);
-        ctx.fillStyle = "#1a4060";
-        ctx.fillRect(px+6, py+6, P-12, P-12);
-        // Рама
-        ctx.fillStyle = "#5a4020";
-        ctx.fillRect(px+P/2-1, py+4, 2, P-8);
-        ctx.fillRect(px+4, py+P/2-1, P-8, 2);
-        // Блики
-        ctx.fillStyle = "rgba(100,200,255,0.2)";
-        ctx.fillRect(px+7, py+7, 8, 5);
-      }
-
-      if (tile === 4) {
-        // Растение
-        ctx.fillStyle = "#1a3a00";
-        ctx.fillRect(px+P/2-4, py+P/2, 8, P/2-4);
-        ctx.fillStyle = "#2a5a00";
-        for (let i = 0; i < 5; i++) {
-          const angle = (i / 5) * Math.PI * 2;
-          const rx = Math.cos(angle) * 12 + px + P/2;
-          const ry = Math.sin(angle) * 8 + py + P/2 - 4;
-          ctx.fillRect(rx-4, ry-4, 8, 8);
-        }
-        ctx.fillStyle = "#3a7a00";
-        ctx.fillRect(px+P/2-6, py+P/2-10, 12, 10);
-      }
+  if (tile === 0) {
+    // Floor with subtle checkerboard
+    isoFloor(cx, cy, isAlt ? '#1c1a2c' : '#201e34', 'rgba(56,44,88,0.25)');
+  }
+  else if (tile === 1) {
+    // Wall — 3D block with brick hints
+    isoFloor(cx, cy, '#161424');
+    isoBox(cx, cy, sh_wall, '#3d2660', '#28184a', '#1c1038', '#4e3270');
+    // Subtle light stripe on top
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.beginPath();
+    ctx.moveTo(cx - tw * 0.4, cy - sh_wall - th * 0.2);
+    ctx.lineTo(cx + tw * 0.4, cy - sh_wall - th * 0.2);
+    ctx.lineTo(cx + tw * 0.1, cy - sh_wall + th * 0.2);
+    ctx.lineTo(cx - tw * 0.7, cy - sh_wall + th * 0.2);
+    ctx.closePath(); ctx.fill();
+  }
+  else if (tile === 2) {
+    // Desk — 3D wooden box with glowing monitor
+    isoFloor(cx, cy, '#1c1a2c', null);
+    isoBox(cx, cy, sh_desk, '#6e3e1c', '#422410', '#2c180a', '#8a5020');
+    // Monitor screen on desk top
+    const mx = cx + tw * 0.12, my = cy - sh_desk - th * 0.55;
+    const ms = isoScale * 0.72;
+    isoBox(mx, my, 9 * ms, '#141420', '#0e0e18', '#090914', null);
+    // Screen glow (cyan)
+    ctx.shadowColor = '#4fc3f7'; ctx.shadowBlur = 5 * isoScale;
+    ctx.fillStyle = 'rgba(79,195,247,0.65)';
+    const sw = ISO_W * ms / 2 * 0.7, sh2 = ISO_H * ms / 2 * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(mx, my - sh2 - 9 * ms); ctx.lineTo(mx + sw, my - 9 * ms);
+    ctx.lineTo(mx, my + sh2 - 9 * ms); ctx.lineTo(mx - sw, my - 9 * ms);
+    ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+  }
+  else if (tile === 3) {
+    // Window — tall glass block
+    isoFloor(cx, cy, '#161424');
+    isoBox(cx, cy, sh_wall, '#183858', '#0e2440', '#081828', null);
+    // Glass shimmer
+    ctx.fillStyle = 'rgba(79,195,247,0.22)';
+    ctx.beginPath();
+    ctx.moveTo(cx - tw * 0.6, cy - sh_wall * 0.4);
+    ctx.lineTo(cx - tw * 0.1, cy - sh_wall * 0.7);
+    ctx.lineTo(cx + tw * 0.1, cy - sh_wall * 0.6);
+    ctx.lineTo(cx - tw * 0.4, cy - sh_wall * 0.3);
+    ctx.closePath(); ctx.fill();
+    // Reflection stripe
+    ctx.fillStyle = 'rgba(180,230,255,0.08)';
+    ctx.beginPath();
+    ctx.moveTo(cx - tw * 0.2, cy - sh_wall * 0.9);
+    ctx.lineTo(cx + tw * 0.1, cy - sh_wall * 0.75);
+    ctx.lineTo(cx, cy - sh_wall * 0.65);
+    ctx.lineTo(cx - tw * 0.3, cy - sh_wall * 0.8);
+    ctx.closePath(); ctx.fill();
+  }
+  else if (tile === 4) {
+    // Plant
+    isoFloor(cx, cy, '#1c1a2c');
+    isoBox(cx, cy, 8 * isoScale, '#3c2010', '#241408', '#180e06', null);
+    const leafY = cy - 26 * isoScale, r = 7 * isoScale;
+    const lc = ['#1e5810', '#2a7018', '#358a20', '#1a6212', '#2c7a18'];
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.4;
+      ctx.fillStyle = lc[i];
+      ctx.beginPath();
+      ctx.ellipse(cx + Math.cos(a) * r * 1.1, leafY + Math.sin(a) * r * 0.55, r, r * 0.65, a, 0, Math.PI * 2);
+      ctx.fill();
     }
+    ctx.fillStyle = '#38941e';
+    ctx.beginPath(); ctx.arc(cx, leafY - 3 * isoScale, 6 * isoScale, 0, Math.PI * 2); ctx.fill();
   }
 
-  // Подписи столов
-  DESK_POSITIONS.forEach((d, i) => {
-    const px = offsetX + d.tx * P + P/2;
-    const py = offsetY + (d.ty - 1) * P + P - 6;
-    drawText(`#${i}`, px, py, 9, "#555", "center");
-  });
+  // Desk labels (numbers)
+  const di = DESK_POSITIONS.findIndex(d => d.tx === col && d.ty === row);
+  if (di >= 0) {
+    ctx.font = `${8 * isoScale}px Courier New`;
+    ctx.fillStyle = 'rgba(150,130,200,0.5)';
+    ctx.textAlign = 'center';
+    ctx.fillText(`#${di}`, cx, cy - sh_desk - th - 3 * isoScale);
+  }
 }
 
-// ---- Pixel character drawing ----
-// Цвет волос по роли — чтобы персонажи различались
+function drawIsoMap() {
+  updateScale();
+  // Diagonal strip rendering — back to front
+  for (let d = 0; d < COLS + ROWS - 1; d++) {
+    for (let col = Math.max(0, d - ROWS + 1); col <= Math.min(d, COLS - 1); col++) {
+      const row = d - col;
+      if (row < 0 || row >= ROWS) continue;
+      drawIsoTile(col, row);
+    }
+  }
+}
+
+// ---- Colors/helpers for characters ----
 const HAIR_COLORS = {
   orchestrator: "#8a6d00", researcher: "#1a4a6a", strategist: "#2a5a3a", hr: "#7a4a10",
   salesman: "#7a2a4a", developer: "#5a2a6a", marketer: "#2a5a55", analyst: "#6a6a10",
+  architect: "#4a3a6a",
 };
 
-function shade(hex, amt) {
-  // затемнить/осветлить hex-цвет на amt (-255..255)
-  const n = parseInt(hex.slice(1), 16);
-  let r = (n >> 16) + amt, g = ((n >> 8) & 0xff) + amt, b = (n & 0xff) + amt;
-  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
-  return `rgb(${r},${g},${b})`;
-}
-
-function drawCharacter(x, y, color, role, status) {
-  const S = 4; // размер 1 пикселя в спрайте
-  const ox = Math.floor(x) - 8;
-  const oy = Math.floor(y) - 20;
+function drawIsoCharacter(cx, cy, color, role, status) {
   const now = Date.now();
+  const sc = isoScale;
+  const tw = ISO_W * sc / 2, th = ISO_H * sc / 2;
+  const bodyH = 30 * sc, bodyW = 13 * sc;
+  const bx = cx - bodyW / 2, by = cy - bodyH;
 
-  // Тень под персонажем
-  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  // Floor shadow (ellipse)
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.beginPath();
-  ctx.ellipse(ox + 4*S, oy + 10*S + 2, 4*S, 1.4*S, 0, 0, Math.PI*2);
+  ctx.ellipse(cx, cy, 11 * sc, 5 * sc, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Ноги
-  ctx.fillStyle = "#2a2a38";
-  ctx.fillRect(ox+2*S, oy+8*S, 2*S-2, 2*S);
-  ctx.fillRect(ox+4*S+2, oy+8*S, 2*S-2, 2*S);
+  // Legs
+  ctx.fillStyle = '#1e1e32';
+  ctx.fillRect(bx + bodyW * 0.15, by + bodyH * 0.62, bodyW * 0.28, bodyH * 0.38);
+  ctx.fillRect(bx + bodyW * 0.57, by + bodyH * 0.62, bodyW * 0.28, bodyH * 0.38);
+  // Shoes
+  ctx.fillStyle = '#0e0e1c';
+  ctx.fillRect(bx + bodyW * 0.12, by + bodyH * 0.90, bodyW * 0.32, bodyH * 0.10);
+  ctx.fillRect(bx + bodyW * 0.54, by + bodyH * 0.90, bodyW * 0.32, bodyH * 0.10);
 
-  // Тело (туловище) — с лёгким объёмом
+  // Body / shirt
   ctx.fillStyle = color;
-  ctx.fillRect(ox+2*S, oy+4*S, 4*S, 4*S);
-  ctx.fillStyle = shade(typeof color === "string" && color[0] === "#" ? color : "#aaaaaa", -40);
-  ctx.fillRect(ox+2*S, oy+7*S, 4*S, S); // нижняя тень рубашки
-  ctx.fillStyle = "rgba(255,255,255,0.15)";
-  ctx.fillRect(ox+2*S, oy+4*S, 4*S, S); // блик сверху
+  ctx.beginPath();
+  ctx.roundRect(bx + bodyW * 0.08, by + bodyH * 0.34, bodyW * 0.84, bodyH * 0.30, 3 * sc);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; // light reflection
+  ctx.fillRect(bx + bodyW * 0.12, by + bodyH * 0.36, bodyW * 0.76, bodyH * 0.06);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; // bottom shadow
+  ctx.fillRect(bx + bodyW * 0.08, by + bodyH * 0.58, bodyW * 0.84, bodyH * 0.06);
 
-  // Руки
+  // Arms
   ctx.fillStyle = color;
-  ctx.fillRect(ox+S, oy+4*S, S, 3*S);
-  ctx.fillRect(ox+6*S, oy+4*S, S, 3*S);
-  // Кисти
-  ctx.fillStyle = "#f5c5a3";
-  ctx.fillRect(ox+S, oy+7*S-2, S, S);
-  ctx.fillRect(ox+6*S, oy+7*S-2, S, S);
+  ctx.fillRect(bx - bodyW * 0.02, by + bodyH * 0.34, bodyW * 0.12, bodyH * 0.22);
+  ctx.fillRect(bx + bodyW * 0.90, by + bodyH * 0.34, bodyW * 0.12, bodyH * 0.22);
+  // Hands
+  ctx.fillStyle = '#f0c090';
+  ctx.fillRect(bx - bodyW * 0.02, by + bodyH * 0.54, bodyW * 0.12, bodyH * 0.09);
+  ctx.fillRect(bx + bodyW * 0.90, by + bodyH * 0.54, bodyW * 0.12, bodyH * 0.09);
 
-  // Голова
-  ctx.fillStyle = "#f5c5a3";
-  ctx.fillRect(ox+2*S, oy+1*S, 4*S, 3*S);
-  // Волосы (цвет по роли)
-  ctx.fillStyle = HAIR_COLORS[role] || "#3a2a1a";
-  ctx.fillRect(ox+2*S, oy+1*S-2, 4*S, S+2);
-  ctx.fillRect(ox+2*S, oy+1*S, S, S);
-  ctx.fillRect(ox+5*S, oy+1*S, S, S);
-  // Глаза (с белками)
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(ox+3*S-1, oy+2*S, S, S);
-  ctx.fillRect(ox+5*S-1, oy+2*S, S, S);
-  ctx.fillStyle = "#222";
-  ctx.fillRect(ox+3*S, oy+2*S, S-2, S-1);
-  ctx.fillRect(ox+5*S, oy+2*S, S-2, S-1);
+  // Neck
+  ctx.fillStyle = '#f0c090';
+  ctx.fillRect(bx + bodyW * 0.38, by + bodyH * 0.26, bodyW * 0.24, bodyH * 0.10);
 
-  // Иконка роли над головой
-  ctx.font = "12px serif";
-  ctx.textAlign = "center";
-  ctx.fillText(ROLE_ICONS[role] || "🤖", ox + 4*S, oy - 2);
+  // Head
+  ctx.fillStyle = '#f5c9a0';
+  ctx.beginPath();
+  ctx.roundRect(bx + bodyW * 0.14, by + bodyH * 0.03, bodyW * 0.72, bodyH * 0.26, 4 * sc);
+  ctx.fill();
+  // Hair
+  ctx.fillStyle = HAIR_COLORS[role] || '#3a2a1a';
+  ctx.fillRect(bx + bodyW * 0.14, by + bodyH * 0.03, bodyW * 0.72, bodyH * 0.10);
+  ctx.fillRect(bx + bodyW * 0.14, by + bodyH * 0.03, bodyW * 0.10, bodyH * 0.20);
+  ctx.fillRect(bx + bodyW * 0.76, by + bodyH * 0.03, bodyW * 0.10, bodyH * 0.20);
+  // Eyes (whites + pupils)
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(bx + bodyW * 0.28, by + bodyH * 0.12, bodyW * 0.16, bodyH * 0.08);
+  ctx.fillRect(bx + bodyW * 0.57, by + bodyH * 0.12, bodyW * 0.16, bodyH * 0.08);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(bx + bodyW * 0.33, by + bodyH * 0.14, bodyW * 0.08, bodyH * 0.05);
+  ctx.fillRect(bx + bodyW * 0.62, by + bodyH * 0.14, bodyW * 0.08, bodyH * 0.05);
 
-  // Статус-точка (пульсирующая)
-  const dotColor = status === "thinking" ? "#ffd54f" : status === "done" ? "#81c784" : "#5a5a78";
-  const pulse = status === "thinking" ? 0.5 + 0.5*Math.sin(now/250) : 1;
+  // Role icon
+  ctx.font = `${11 * sc}px serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(ROLE_ICONS[role] || '🤖', cx, by - 2 * sc);
+
+  // Status pulsing dot
+  const dotColor = status === 'thinking' ? '#ffd54f' : status === 'done' ? '#81c784' : '#4a4a68';
+  const pulse = status === 'thinking' ? 0.5 + 0.5 * Math.sin(now / 280) : 1;
   ctx.globalAlpha = pulse;
   ctx.fillStyle = dotColor;
+  if (status === 'thinking') { ctx.shadowColor = dotColor; ctx.shadowBlur = 4 * sc; }
   ctx.beginPath();
-  ctx.arc(ox + 7*S, oy + 1*S, 3, 0, Math.PI*2);
+  ctx.arc(bx + bodyW * 0.92 + 2 * sc, by + bodyH * 0.08, 3 * sc, 0, Math.PI * 2);
   ctx.fill();
+  ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
   ctx.globalAlpha = 1;
 }
 
@@ -342,12 +419,9 @@ function drawBubble(text, x, y, alpha) {
 
 // ---- Layout ----
 function getMapOffset() {
-  const wrap = document.getElementById("game-wrap");
-  const mapW = COLS * P;
-  const mapH = ROWS * P;
-  const ox = Math.max(0, (wrap.clientWidth - mapW) / 2) + camX;
-  const oy = Math.max(0, (wrap.clientHeight - mapH) / 2) + camY;
-  return {ox, oy};
+  // Isometric mode: use tileToScreen() for all positioning.
+  // This stub is kept for any legacy reference.
+  return { ox: 0, oy: 0 };
 }
 
 // ---- SSE ----
@@ -556,16 +630,13 @@ function getRole(agent_id) {
 function spawnAgent(agent_id, role, desk, task) {
   if (agents[agent_id]) return;
   const dp = getDeskPosition(desk);
-  const {ox, oy} = getMapOffset();
-  const startX = ox + COLS/2 * P;
-  const startY = oy + ROWS/2 * P;
-  const targetX = ox + dp.tx * P + P/2;
-  const targetY = oy + dp.ty * P + P/2;
+  const center = tileToScreen(Math.floor(COLS / 2), Math.floor(ROWS / 2));
+  const target = tileToScreen(dp.tx, dp.ty);
 
   agents[agent_id] = {
     role, desk, task,
-    x: startX, y: startY,
-    tx: targetX, ty: targetY,
+    x: center.x, y: center.y,
+    tx: target.x, ty: target.y,
     color: ROLE_COLORS[role] || "#aaaaaa",
     status: "idle",
     bubble: null,
@@ -756,32 +827,33 @@ function update() {
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Фон
-  ctx.fillStyle = "#0a0a0f";
+  // Background gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#0c0a18');
+  grad.addColorStop(1, '#080610');
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const {ox, oy} = getMapOffset();
+  // Isometric map
+  drawIsoMap();
 
-  // Карта
-  drawMap(ox, oy);
-
-  // Агенты
+  // Agents (draw all chars after map so they appear on top)
   const now = Date.now();
   for (const [id, a] of Object.entries(agents)) {
-    // Подсветка выбранного агента
+    // Selection ring
     if (id === selectedAgentId) {
       ctx.beginPath();
-      ctx.arc(a.x, a.y - 8, 22, 0, Math.PI * 2);
+      ctx.ellipse(a.x, a.y, 14 * isoScale, 7 * isoScale, 0, 0, Math.PI * 2);
       ctx.strokeStyle = a.color;
       ctx.lineWidth = 2;
       ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 300);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    drawCharacter(a.x, a.y, a.color, a.role, a.status);
+    drawIsoCharacter(a.x, a.y, a.color, a.role, a.status);
   }
 
-  // Пузыри
+  // Speech bubbles
   for (let i = bubbles.length - 1; i >= 0; i--) {
     const b = bubbles[i];
     const age = now - b.born;
@@ -789,19 +861,10 @@ function render() {
     const agent = agents[b.agent_id];
     if (!agent) { bubbles.splice(i, 1); continue; }
     const alpha = age < b.duration - 800 ? 1 : (b.duration - age) / 800;
-    drawBubble(b.text, agent.x, agent.y, alpha);
+    // bubbles appear above head
+    const bodyH = 30 * isoScale;
+    drawBubble(b.text, agent.x, agent.y - bodyH - 10, alpha);
   }
-
-  // Заголовок
-  ctx.font = "bold 11px Courier New";
-  ctx.fillStyle = "#222";
-  ctx.textAlign = "left";
-  ctx.fillText("AI OFFICE — автономный бизнес-офис", ox + 4, oy + 14);
-
-  // Время
-  ctx.textAlign = "right";
-  ctx.fillStyle = "#333";
-  ctx.fillText(new Date().toLocaleString("ru"), ox + COLS*P - 4, oy + 14);
 }
 
 function gameLoop() {
@@ -860,11 +923,10 @@ function setupClickHandler() {
 }
 
 function syncAgentTargets() {
-  const {ox, oy} = getMapOffset();
   for (const a of Object.values(agents)) {
     const dp = getDeskPosition(a.desk);
-    a.tx = ox + dp.tx * P + P/2;
-    a.ty = oy + dp.ty * P + P/2;
+    const t = tileToScreen(dp.tx, dp.ty);
+    a.tx = t.x; a.ty = t.y;
   }
 }
 
@@ -1081,12 +1143,7 @@ function switchView(name) {
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   if (name === "office") {
     resize();
-    const {ox, oy} = getMapOffset();
-    for (const a of Object.values(agents)) {
-      const dp = getDeskPosition(a.desk);
-      a.tx = ox + dp.tx * P + P/2;
-      a.ty = oy + dp.ty * P + P/2;
-    }
+    syncAgentTargets();
   }
   if (name === "questions") {
     loadQuestions();
@@ -1713,11 +1770,6 @@ function setupAgentModelSelector(agentId, current, isCustom) {
 
 window.addEventListener("resize", () => {
   resize();
-  // Обновляем целевые позиции агентов при ресайзе
-  const {ox, oy} = getMapOffset();
-  for (const [id, a] of Object.entries(agents)) {
-    const dp = DESK_POSITIONS[a.desk] || DESK_POSITIONS[0];
-    a.tx = ox + dp.tx * P + P/2;
-    a.ty = oy + dp.ty * P + P/2;
-  }
+  updateScale();
+  syncAgentTargets();
 });

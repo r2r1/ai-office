@@ -24,6 +24,7 @@ from src.core import llm
 from src.office import registry, models as models_module
 
 HIREABLE_ROLES = {"salesman", "developer", "marketer", "analyst"}
+MAX_PER_ROLE = 3  # максимум агентов одной роли
 
 _MILESTONES_SYSTEM = """Ты — директор автономного AI-офиса. На основе бизнес-стратегии
 раздели путь к цели клиента на 4-6 последовательных этапов (вех). Каждый этап — это
@@ -53,7 +54,8 @@ _DECIDE_SYSTEM = """Ты — директор автономного AI-офис
 - Назначай задачу агенту строго по его зоне ответственности (role).
 - ВАЖНО: смотри колонку "занят/кулдаун" — НЕ назначай задачу агенту, у которого on_cooldown=true или status=thinking. Выбери другого.
 - Если нужной роли нет в команде — найми (только из доступных ролей).
-- Если все нужные агенты заняты — найми ещё одного агента той же роли или подожди.
+- Если все нужные агенты заняты — найми ещё одного агента той же роли (если их < 3) или подожди.
+- КРИТИЧНО: Все API-ключи и подключения доступны ЛЮБОМУ агенту через get_connection(). НЕ выбирай конкретного агента потому что "он получил ключ" — любой свободный агент той же роли подходит.
 - Если текущий этап достигнут — пометь его выполненным и опиши, что сделано.
 - При найме (action=hire) — указывай конкретный skill агента: что именно он будет делать в этом проекте. Это его специализация на весь проект.
 
@@ -125,6 +127,7 @@ async def decide(
     milestones: list[dict],
     publish: Optional[Callable[[dict], Awaitable[None]]] = None,
     agent_availability: Optional[dict] = None,
+    tech_design: str = "",
 ) -> dict:
     """
     Главное решение директора: кому что поручить дальше.
@@ -134,7 +137,11 @@ async def decide(
     agents = registry.all_agents()
     avail = agent_availability or {}
 
-    # Роли, которых ещё нет в команде (+ допускаем найм дополнительных экземпляров)
+    # Подсчёт агентов по ролям
+    role_counts = {}
+    for a in agents:
+        role_counts[a.role] = role_counts.get(a.role, 0) + 1
+
     existing_roles = {a.role for a in agents if a.role in HIREABLE_ROLES}
     hireable_missing = HIREABLE_ROLES - existing_roles
 
@@ -156,18 +163,21 @@ async def decide(
     ms_lines = [f"- [{m['status']}] {m['id']}: {m['title']}" for m in milestones]
     ms_text = "\n".join(ms_lines) or "этапы ещё не заданы"
 
-    # Можно нанять любую роль: либо отсутствующую, либо вторую копию занятой
+    # Можно нанять роль: либо отсутствующую, либо вторую копию занятой (но не более MAX_PER_ROLE)
     busy_hireable = {a.role for a in agents if a.role in HIREABLE_ROLES
-                     and avail.get(a.agent_id, {}).get("on_cooldown")}
+                     and avail.get(a.agent_id, {}).get("on_cooldown")
+                     and role_counts.get(a.role, 0) < MAX_PER_ROLE}
     available_to_hire = hireable_missing | busy_hireable  # нет роли ИЛИ все её носители заняты
 
     if publish:
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Анализирую команду и решаю, что делать дальше..."})
 
+    tdd_section = f"\nТехническое задание архитектора:\n{tech_design[:1500]}\n" if tech_design else ""
     user = (
         f"Цель: {goal}\n\n"
-        f"Стратегия (кратко):\n{strategy[:1200]}\n\n"
+        f"Стратегия (кратко):\n{strategy[:1000]}\n"
+        f"{tdd_section}\n"
         f"Этапы пути:\n{ms_text}\n\n"
         f"Команда сейчас (статус и доступность):\n{roster}\n\n"
         f"Роли доступные для найма: {', '.join(sorted(available_to_hire)) or 'нет (все роли укомплектованы)'}\n\n"
@@ -195,6 +205,9 @@ async def decide(
         if role not in HIREABLE_ROLES:
             decision["action"] = "wait"
             decision["thought"] = f"Роль {role} не подходит для найма — жду"
+        elif role_counts.get(role, 0) >= MAX_PER_ROLE:
+            decision["action"] = "wait"
+            decision["thought"] = f"Уже {role_counts.get(role, 0)} агентов роли {role} — жду освобождения"
 
     elif action == "assign":
         aid = decision.get("agent_id", "")
@@ -221,13 +234,13 @@ async def decide(
             if free:
                 decision["agent_id"] = free.agent_id
             else:
-                # все агенты этой роли заняты — лучше нанять ещё одного
-                if role in HIREABLE_ROLES:
+                # все агенты этой роли заняты — нанять ещё одного если лимит не исчерпан
+                if role in HIREABLE_ROLES and role_counts.get(role, 0) < MAX_PER_ROLE:
                     decision["action"] = "hire"
                     decision["role"] = role
                     decision["thought"] = f"Все {role} заняты — нанимаю ещё одного"
                 else:
                     decision["action"] = "wait"
-                    decision["thought"] = f"Все {role} заняты — жду"
+                    decision["thought"] = f"Все {role} заняты или лимит достигнут — жду"
 
     return decision
