@@ -4,3 +4,4 @@ __pycache__/
 reports/*.md
 reports/*.json
 !reports/.gitkeep
+.claude/
