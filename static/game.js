@@ -318,8 +318,12 @@ function handleEvent(event) {
     updateAgentStatus(event.agent_id, "thinking", event.text);
   }
   else if (event.type === "task_done") {
-    addLog(event.agent_id, "✓ задача выполнена", getRole(event.agent_id));
-    updateAgentStatus(event.agent_id, "done", event.summary || "");
+    addLog(event.agent_id, "✓ " + (event.summary||"задача выполнена").slice(0,100), getRole(event.agent_id));
+    updateAgentStatus(event.agent_id, "done", (event.summary||"").slice(0,80));
+    loadDeliverables();  // обновляем счётчик и рендерим результаты
+    // Мигаем вкладкой Results чтобы привлечь внимание
+    const badge = document.getElementById("results-badge");
+    if (badge) { badge.style.background="#f06292"; setTimeout(()=>badge.style.background="",2000); }
   }
   else if (event.type === "system") {
     addLog("офис", event.text, "system");
@@ -452,32 +456,41 @@ function updateAgentStatus(agent_id, status, message) {
 }
 
 function addLog(who, text, role) {
-  const color = ROLE_COLORS[role] || "#888";
-  const entry = {who, text: text.slice(0, 120), color, time: new Date().toLocaleTimeString("ru", {hour:"2-digit",minute:"2-digit"})};
-  logEntries.unshift(entry);
-  if (logEntries.length > 100) logEntries.pop();
-
-  const log = document.getElementById("log");
+  const color = ROLE_COLORS[role] || "#556";
+  const time = new Date().toLocaleTimeString("ru", {hour:"2-digit",minute:"2-digit"});
+  const logWrap = document.getElementById("log-wrap");
   const div = document.createElement("div");
   div.className = "log-entry";
-  div.innerHTML = `<span class="who" style="color:${color}">${entry.time} ${who}</span>: ${entry.text}`;
-  log.prepend(div);
-  if (log.children.length > 100) log.removeChild(log.lastChild);
+  div.innerHTML = `<span class="lt">${time}</span><span class="lw" style="color:${color}">${who}</span>: ${escapeHtml(text.slice(0,160))}`;
+  logWrap.prepend(div);
+  if (logWrap.children.length > 150) logWrap.removeChild(logWrap.lastChild);
 }
 
 function updateSidebar() {
   const list = document.getElementById("agents-list");
-  list.innerHTML = "";
+  const noEl = document.getElementById("no-agents");
+  const keys = Object.keys(agents);
+  if (noEl) noEl.style.display = keys.length ? "none" : "block";
+  // Update or create cards
   for (const [id, a] of Object.entries(agents)) {
-    const card = document.createElement("div");
-    card.className = "agent-card";
-    card.style.borderLeftColor = a.color;
-    const statusDot = a.status === "thinking" ? "⚡" : a.status === "done" ? "✓" : "○";
+    let card = list.querySelector(`[data-agent="${id}"]`);
+    if (!card) {
+      card = document.createElement("div");
+      card.className = "agent-card";
+      card.dataset.agent = id;
+      card.style.borderLeftColor = a.color;
+      card.addEventListener("click", () => openChat(id));
+      list.appendChild(card);
+    }
+    const dotClass = a.status === "thinking" ? "thinking" : a.status === "done" ? "done" : "idle";
+    const dotIcon = a.status === "thinking" ? "⟳" : a.status === "done" ? "✓" : "○";
     card.innerHTML = `
-      <div class="name" style="color:${a.color}">${statusDot} ${ROLE_ICONS[a.role]||""} ${a.role}</div>
-      <div class="task">${a.task || id}</div>
+      <div class="ac-name">
+        <span class="status-dot ${dotClass}">${dotIcon}</span>
+        <span style="color:${a.color}">${ROLE_ICONS[a.role]||""} ${a.role}</span>
+      </div>
+      <div class="ac-status">${escapeHtml((a.lastMsg || a.task || id).slice(0,80))}</div>
     `;
-    list.appendChild(card);
   }
 }
 
@@ -776,13 +789,113 @@ async function intakeStartOffice() {
 intakeNext.addEventListener("click", intakeGetQuestions);
 intakeStart.addEventListener("click", intakeStartOffice);
 
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+}
+
+// ---- Tabs ----
+function switchTab(name) {
+  document.querySelectorAll(".sb-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  document.querySelectorAll(".sb-pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + name));
+}
+
+// ---- Результаты (deliverables) ----
+let deliverablesCache = [];
+let ftCurrentIdx = -1;
+
+async function loadDeliverables() {
+  try {
+    const r = await fetch("/api/deliverables");
+    const d = await r.json();
+    deliverablesCache = d.deliverables || [];
+    const badge = document.getElementById("results-badge");
+    if (badge) {
+      badge.textContent = deliverablesCache.length ? String(deliverablesCache.length) : "";
+      badge.style.display = deliverablesCache.length ? "inline" : "none";
+    }
+    renderResultsPane();
+  } catch {}
+}
+
+function renderResultsPane() {
+  const wrap = document.getElementById("results-wrap");
+  const noEl = document.getElementById("no-results");
+  if (!deliverablesCache.length) {
+    if (noEl) noEl.style.display = "block";
+    return;
+  }
+  if (noEl) noEl.style.display = "none";
+  // Remove old cards, keep #no-results
+  wrap.querySelectorAll(".deliv-card").forEach(c => c.remove());
+  deliverablesCache.forEach((d, i) => {
+    const color = ROLE_COLORS[d.role] || "#888";
+    const card = document.createElement("div");
+    card.className = "deliv-card";
+    card.innerHTML = `
+      <div class="dc-head">
+        <span class="dc-who" style="color:${color}">${ROLE_ICONS[d.role]||""} ${escapeHtml(d.role)}</span>
+        <span class="dc-time">${d.time||""}</span>
+      </div>
+      <div class="dc-task">${escapeHtml((d.task||"").slice(0,80))}</div>
+      <div class="dc-preview">${escapeHtml((d.content||"").slice(0,200))}</div>
+      <div class="dc-actions">
+        <button class="dc-btn expand-btn" data-i="${i}">↗ Открыть полностью</button>
+        <button class="dc-btn copy-btn" data-i="${i}">⧉ Копировать</button>
+      </div>
+    `;
+    wrap.appendChild(card);
+  });
+  wrap.querySelectorAll(".expand-btn").forEach(btn => {
+    btn.addEventListener("click", () => openFullText(+btn.dataset.i));
+  });
+  wrap.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const d = deliverablesCache[+btn.dataset.i];
+      try { await navigator.clipboard.writeText(d.content||""); btn.textContent="✓ Скопировано"; setTimeout(()=>btn.textContent="⧉ Копировать",1500); }
+      catch { btn.textContent="ошибка"; }
+    });
+  });
+}
+
+function openFullText(i) {
+  ftCurrentIdx = i;
+  const d = deliverablesCache[i];
+  if (!d) return;
+  const color = ROLE_COLORS[d.role] || "#888";
+  document.getElementById("ft-who").innerHTML = `<span style="color:${color}">${ROLE_ICONS[d.role]||""} ${escapeHtml(d.role)}</span> — ${escapeHtml(d.task||"")} <span style="color:#444;font-size:10px">${d.time||""}</span>`;
+  document.getElementById("fulltext-body").textContent = d.content || "";
+  document.getElementById("fulltext-overlay").classList.remove("hidden");
+}
+
+function exportDeliverables() {
+  if (!deliverablesCache.length) return;
+  const md = deliverablesCache.map(d =>
+    `# ${d.role} — ${d.task||""} (${d.time||""})\n\n${d.content||""}\n`
+  ).join("\n---\n\n");
+  downloadText(md, "ai-office-results.md");
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob([text], {type:"text/markdown;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function resetOffice() {
+  if (!confirm("Сбросить офис и начать с нового клиента?\nВся история будет удалена.")) return;
+  await fetch("/api/brief/reset", {method: "POST"}).catch(()=>{});
+  location.reload();
+}
+
 function roleFromId(id) { return (id || "").replace(/_\d+$/, ""); }
 
 function logOnly(event) {
   const role = roleFromId(event.agent_id);
   if (event.type === "hired") addLog(event.agent_id, `принят как ${event.role}`, event.role);
   else if (event.type === "speech") addLog(event.agent_id, event.text, role);
-  else if (event.type === "task_done") addLog(event.agent_id, "✓ " + (event.summary || "задача выполнена"), role);
+  else if (event.type === "task_done") addLog(event.agent_id, "✓ " + (event.summary||"задача выполнена"), role);
   else if (event.type === "system") addLog("офис", event.text, "system");
   else if (event.type === "error") addLog(event.agent_id, "⚠ " + event.text, role);
 }
@@ -793,22 +906,16 @@ async function replayHistory() {
     const d = await r.json();
     const events = d.events || [];
     if (!events.length) return;
-    for (const event of events) logOnly(event);
-    addLog("офис", `↺ Восстановлена история прошлых запусков (${events.length} событий)`, "system");
+    for (const ev of events) logOnly(ev);
+    addLog("офис", `↺ История восстановлена (${events.length} событий)`, "system");
   } catch {}
 }
 
 function showMission(brief) {
-  if (!brief || !brief.goal) return;
-  let m = document.getElementById("mission");
-  if (!m) {
-    m = document.createElement("div");
-    m.id = "mission";
-    m.style.cssText = "padding:8px 14px;background:#10101e;border-bottom:1px solid #1a1a2e;font-size:11px;color:#8fd3ff;line-height:1.4;";
-    const title = document.getElementById("sidebar-title");
-    title.insertAdjacentElement("afterend", m);
-  }
-  m.innerHTML = `🎯 <b>Задача офиса:</b><br>${brief.goal}`;
+  const m = document.getElementById("sb-mission");
+  if (!m || !brief) return;
+  const text = brief.goal || brief.summary || "";
+  m.textContent = text ? "🎯 " + text : "";
 }
 
 // ---- Init ----
@@ -818,7 +925,36 @@ window.addEventListener("load", () => {
   setupClickHandler();
   checkBriefStatus();
   replayHistory();
+  loadDeliverables();
   gameLoop();
+
+  // Tabs
+  document.querySelectorAll(".sb-tab").forEach(tab => {
+    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+  });
+
+  // Reset
+  document.getElementById("btn-reset").addEventListener("click", resetOffice);
+
+  // Export all
+  document.getElementById("btn-export-all").addEventListener("click", exportDeliverables);
+
+  // Full-text modal
+  document.getElementById("ft-close").addEventListener("click", () =>
+    document.getElementById("fulltext-overlay").classList.add("hidden"));
+  document.getElementById("fulltext-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "fulltext-overlay") e.target.classList.add("hidden");
+  });
+  document.getElementById("ft-copy").addEventListener("click", async () => {
+    const d = deliverablesCache[ftCurrentIdx];
+    if (!d) return;
+    try { await navigator.clipboard.writeText(d.content||""); document.getElementById("ft-copy").textContent="✓ Скопировано"; setTimeout(()=>document.getElementById("ft-copy").textContent="⧉ Копировать",1500); }
+    catch {}
+  });
+  document.getElementById("ft-export").addEventListener("click", () => {
+    const d = deliverablesCache[ftCurrentIdx];
+    if (d) downloadText(d.content||"", `${d.role}-${(d.task||"result").slice(0,30)}.md`);
+  });
 });
 
 window.addEventListener("resize", () => {
