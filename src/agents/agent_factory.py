@@ -165,7 +165,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
 
     async def _handle_ask_user(args: dict) -> str:
         question_text = args.get("question", "")
-        qid, fut = questions_module.ask(question_text, publish)
+        qid, fut = questions_module.ask(question_text, publish, agent_id=agent_id)
         await publish({"type": "question", "agent_id": agent_id, "question_id": qid, "text": question_text})
         answer = await fut
         return answer

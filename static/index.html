@@ -158,6 +158,29 @@ canvas { display: block; image-rendering: pixelated; }
 .conn-card .cc-note { font-size: 11px; color: #667; margin-bottom: 8px; font-style: italic; }
 .conn-card .cc-actions { display: flex; gap: 8px; }
 
+/* ── Questions view ── */
+#questions-wrap { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.q-card {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 16px;
+  border-left: 3px solid #ffd54f;
+}
+.q-card .qc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.q-card .qc-role { font-weight: bold; font-size: 13px; color: #ffd54f; }
+.q-card .qc-id { font-size: 10px; color: #445; }
+.q-card .qc-text { font-size: 13px; color: #d0d0e8; line-height: 1.6; margin-bottom: 12px; }
+.q-card textarea { width: 100%; background: #0e0e1c; border: 1px solid #252540; color: #d8d8e8; border-radius: 6px; padding: 8px; font-family: inherit; font-size: 12px; resize: vertical; }
+.q-card .qc-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+.q-submit-btn {
+  font-size: 12px; padding: 6px 16px; border-radius: 5px; cursor: pointer;
+  background: #2a3a1a; border: 1px solid #4a7a30; color: #a0d080; font-family: inherit;
+}
+.q-submit-btn:hover { background: #3a5020; }
+.q-skip-btn {
+  font-size: 12px; padding: 6px 16px; border-radius: 5px; cursor: pointer;
+  background: transparent; border: 1px solid #2a2a40; color: #665; font-family: inherit;
+}
+.q-skip-btn:hover { color: #88a; border-color: #3a3a5a; }
+
 /* ─────────────── HINT ─────────────── */
 #hint {
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
@@ -383,6 +406,7 @@ canvas { display: block; image-rendering: pixelated; }
       <div class="nav-item" data-view="results"><span class="ni-icon">📦</span><span class="ni-label">Результаты</span><span class="ni-badge" id="badge-results"></span></div>
       <div class="nav-item" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
       <div class="nav-item" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">События</span></div>
+      <div class="nav-item" data-view="questions"><span class="ni-icon">❓</span><span class="ni-label">Вопросы</span><span class="ni-badge" id="badge-questions"></span></div>
     </div>
 
     <!-- Main -->
@@ -451,6 +475,17 @@ canvas { display: block; image-rendering: pixelated; }
       <div class="view" id="view-events">
         <div class="view-head"><h2>📋 События</h2></div>
         <div id="log-wrap"></div>
+      </div>
+
+      <!-- Questions view -->
+      <div class="view" id="view-questions">
+        <div class="view-head">
+          <h2>❓ Вопросы агентов</h2>
+          <div class="vh-sub">Ответьте на вопросы — агенты ждут вашего ответа</div>
+        </div>
+        <div id="questions-wrap">
+          <div class="empty-note" id="no-questions">Нет ожидающих вопросов</div>
+        </div>
       </div>
 
     </div>

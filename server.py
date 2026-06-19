@@ -205,6 +205,13 @@ async def brief_reset():
     return {"ok": True}
 
 
+@app.get("/api/questions")
+async def get_questions():
+    """Список всех ожидающих ответа вопросов от агентов."""
+    from src.office import questions as q_module
+    return {"questions": q_module.list_pending()}
+
+
 @app.post("/api/answer")
 async def answer_question(request: Request):
     data = await request.json()
@@ -212,6 +219,8 @@ async def answer_question(request: Request):
     ans = data.get("answer", "").strip()
     from src.office import questions as q_module
     ok = q_module.answer(qid, ans)
+    if ok:
+        await bus.publish({"type": "question_answered", "question_id": qid})
     return {"ok": ok}
 
 

@@ -332,64 +332,61 @@ function handleEvent(event) {
     addLog(event.agent_id, "⚠ " + event.text, getRole(event.agent_id));
   }
   else if (event.type === "question") {
-    showQuestionModal(event);
+    addQuestionCard(event);
+    switchView("questions");
+  }
+  else if (event.type === "question_answered") {
+    removeQuestionCard(event.question_id);
   }
 }
 
-function showQuestionModal(event) {
-  // Remove any existing modal
-  const existing = document.getElementById("question-modal");
-  if (existing) existing.remove();
+async function loadQuestions() {
+  try {
+    const r = await fetch("/api/questions");
+    const d = await r.json();
+    const wrap = document.getElementById("questions-wrap");
+    wrap.innerHTML = "";
+    const qs = d.questions || [];
+    const badge = document.getElementById("badge-questions");
+    badge.textContent = qs.length || "";
+    if (!qs.length) {
+      wrap.innerHTML = '<div class="empty-note" id="no-questions">Нет ожидающих вопросов</div>';
+      return;
+    }
+    for (const q of qs) addQuestionCard(q, false);
+  } catch (e) { console.error("loadQuestions:", e); }
+}
 
-  const overlay = document.createElement("div");
-  overlay.id = "question-modal";
-  overlay.style.cssText = `
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.75); z-index: 9999;
-    display: flex; align-items: center; justify-content: center;
-  `;
+function addQuestionCard(event, updateBadge = true) {
+  const wrap = document.getElementById("questions-wrap");
+  const noQ = document.getElementById("no-questions");
+  if (noQ) noQ.remove();
 
-  const role = getRole(event.agent_id);
-  const color = (agents[event.agent_id] && agents[event.agent_id].color) || "#4fc3f7";
+  if (document.getElementById("qcard-" + event.question_id)) return;
 
-  const box = document.createElement("div");
-  box.style.cssText = `
-    background: #0f0f1a; border: 1px solid ${color}; border-radius: 8px;
-    padding: 24px; max-width: 480px; width: 90%; font-family: 'Courier New', monospace;
-    color: #e0e0e0;
-  `;
-
-  box.innerHTML = `
-    <div style="color:${color}; font-weight:bold; margin-bottom:12px; font-size:13px;">
-      Вопрос от агента ${role} (${event.agent_id})
+  const role = event.agent_id ? getRole(event.agent_id) : "агент";
+  const card = document.createElement("div");
+  card.className = "q-card";
+  card.id = "qcard-" + event.question_id;
+  card.innerHTML = `
+    <div class="qc-head">
+      <span class="qc-role">${ROLE_ICONS[role] || "❓"} ${role}</span>
+      <span class="qc-id">${event.agent_id || ""}</span>
     </div>
-    <div style="margin-bottom:16px; font-size:13px; line-height:1.5;">${event.text}</div>
-    <textarea id="q-answer" rows="3" style="
-      width:100%; box-sizing:border-box; background:#1a1a2a; color:#e0e0e0;
-      border:1px solid #333; border-radius:4px; padding:8px; font-family:inherit;
-      font-size:12px; resize:vertical; margin-bottom:12px;
-    " placeholder="Введите ответ..."></textarea>
-    <div style="display:flex; gap:8px; justify-content:flex-end;">
-      <button id="q-cancel" style="
-        background:transparent; color:#888; border:1px solid #333;
-        padding:6px 16px; cursor:pointer; border-radius:4px; font-family:inherit;
-      ">Пропустить</button>
-      <button id="q-submit" style="
-        background:${color}22; color:${color}; border:1px solid ${color};
-        padding:6px 16px; cursor:pointer; border-radius:4px; font-family:inherit;
-      ">Отправить</button>
+    <div class="qc-text">${event.text}</div>
+    <textarea rows="3" placeholder="Введите ответ... (Ctrl+Enter для отправки)"></textarea>
+    <div class="qc-actions">
+      <button class="q-skip-btn">Пропустить</button>
+      <button class="q-submit-btn">Отправить ответ</button>
     </div>
   `;
+  wrap.prepend(card);
 
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  const answerEl = document.getElementById("q-answer");
-  answerEl.focus();
+  const ta = card.querySelector("textarea");
+  ta.focus();
 
   async function submit() {
-    const answer = answerEl.value.trim();
-    overlay.remove();
+    const answer = ta.value.trim();
     if (!answer) return;
     try {
       await fetch("/api/answer", {
@@ -397,14 +394,41 @@ function showQuestionModal(event) {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({question_id: event.question_id, answer}),
       });
-    } catch (err) {
-      console.error("Failed to send answer:", err);
-    }
+      removeQuestionCard(event.question_id);
+    } catch (err) { console.error("Failed to send answer:", err); }
   }
 
-  document.getElementById("q-submit").addEventListener("click", submit);
-  document.getElementById("q-cancel").addEventListener("click", () => overlay.remove());
-  answerEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKey) submit(); });
+  card.querySelector(".q-submit-btn").addEventListener("click", submit);
+  card.querySelector(".q-skip-btn").addEventListener("click", () => {
+    fetch("/api/answer", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question_id: event.question_id, answer: ""}),
+    }).catch(() => {});
+    removeQuestionCard(event.question_id);
+  });
+  ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKey) submit(); });
+
+  if (updateBadge) {
+    const badge = document.getElementById("badge-questions");
+    const cur = parseInt(badge.textContent || "0");
+    badge.textContent = cur + 1;
+  }
+}
+
+function removeQuestionCard(qid) {
+  const card = document.getElementById("qcard-" + qid);
+  if (card) card.remove();
+  const wrap = document.getElementById("questions-wrap");
+  const remaining = wrap.querySelectorAll(".q-card").length;
+  const badge = document.getElementById("badge-questions");
+  badge.textContent = remaining || "";
+  if (!remaining) {
+    const note = document.createElement("div");
+    note.className = "empty-note";
+    note.id = "no-questions";
+    note.textContent = "Нет ожидающих вопросов";
+    wrap.appendChild(note);
+  }
 }
 
 function getRole(agent_id) {
@@ -867,7 +891,6 @@ function switchView(name) {
   document.querySelectorAll(".nav-item").forEach(t => t.classList.toggle("active", t.dataset.view === name));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   if (name === "office") {
-    // Re-fit canvas now that #view-office is visible again
     resize();
     const {ox, oy} = getMapOffset();
     for (const a of Object.values(agents)) {
@@ -875,6 +898,9 @@ function switchView(name) {
       a.tx = ox + dp.tx * P + P/2;
       a.ty = oy + dp.ty * P + P/2;
     }
+  }
+  if (name === "questions") {
+    loadQuestions();
   }
 }
 
@@ -1232,6 +1258,9 @@ window.addEventListener("load", () => {
   // Connections
   setupConnections();
   loadConnections();
+
+  // Questions
+  loadQuestions();
 });
 
 window.addEventListener("resize", () => {
