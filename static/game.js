@@ -290,6 +290,7 @@ function connectSSE() {
   es.onopen = () => {
     statusBar.textContent = "● онлайн";
     statusBar.style.color = "#4fc3f7";
+    _historyDividerAdded = false;  // сбрасываем при каждом переподключении
   };
 
   es.onerror = () => {
@@ -304,36 +305,48 @@ function connectSSE() {
 }
 
 function handleEvent(event) {
+  const hist = !!event.historical;  // исторические события — тихо, без переключений
+
   if (event.type === "hired") {
     spawnAgent(event.agent_id, event.role, event.desk, event.task || "");
-    addLog(event.agent_id, `принят на работу как ${event.role}`, event.role);
+    if (!hist) addLog(event.agent_id, `принят на работу как ${event.role}`, event.role);
+    // Восстанавливаем реальный статус агента из снапшота
+    if (event.status && event.status !== "idle") {
+      updateAgentStatus(event.agent_id, event.status, event.last_message || "");
+    }
   }
   else if (event.type === "speech") {
-    addBubble(event.agent_id, event.text);
-    addLog(event.agent_id, event.text, getRole(event.agent_id));
-    updateAgentStatus(event.agent_id, "thinking", event.text);
+    if (!hist) addBubble(event.agent_id, event.text);
+    addLog(event.agent_id, event.text, getRole(event.agent_id), hist);
+    if (!hist) updateAgentStatus(event.agent_id, "thinking", event.text);
   }
   else if (event.type === "thinking") {
-    addBubble(event.agent_id, event.text);
-    updateAgentStatus(event.agent_id, "thinking", event.text);
+    if (!hist) {
+      addBubble(event.agent_id, event.text);
+      updateAgentStatus(event.agent_id, "thinking", event.text);
+    }
   }
   else if (event.type === "task_done") {
-    addLog(event.agent_id, "✓ " + (event.summary||"задача выполнена").slice(0,100), getRole(event.agent_id));
-    updateAgentStatus(event.agent_id, "done", (event.summary||"").slice(0,80));
-    loadDeliverables();  // обновляем счётчик и рендерим результаты
+    addLog(event.agent_id, "✓ " + (event.summary||"задача выполнена").slice(0,100), getRole(event.agent_id), hist);
+    if (!hist) {
+      updateAgentStatus(event.agent_id, "done", (event.summary||"").slice(0,80));
+      loadDeliverables();
+    }
   }
   else if (event.type === "progress") {
-    updateProgressBar(event);
+    if (!hist) updateProgressBar(event);
   }
   else if (event.type === "system") {
-    addLog("офис", event.text, "system");
+    addLog("офис", event.text, "system", hist);
   }
   else if (event.type === "error") {
-    addLog(event.agent_id, "⚠ " + event.text, getRole(event.agent_id));
+    addLog(event.agent_id, "⚠ " + event.text, getRole(event.agent_id), hist);
   }
   else if (event.type === "question") {
-    addQuestionCard(event);
-    switchView("questions");
+    if (!hist) {
+      addQuestionCard(event);
+      switchView("questions");
+    }
   }
   else if (event.type === "question_answered") {
     removeQuestionCard(event.question_id);
@@ -492,15 +505,31 @@ function updateAgentStatus(agent_id, status, message) {
   }
 }
 
-function addLog(who, text, role) {
-  const color = ROLE_COLORS[role] || "#556";
+let _historyDividerAdded = false;
+
+function addLog(who, text, role, historical = false) {
+  const color = historical ? "#333355" : (ROLE_COLORS[role] || "#556");
   const time = new Date().toLocaleTimeString("ru", {hour:"2-digit",minute:"2-digit"});
   const logWrap = document.getElementById("log-wrap");
+
+  // Первый живой лог после исторических — добавляем разделитель
+  if (!historical && !_historyDividerAdded) {
+    _historyDividerAdded = true;
+    const sep = document.createElement("div");
+    sep.style.cssText = "padding:6px 20px; font-size:10px; color:#2a2a4a; border-bottom:1px solid #151528; text-align:center;";
+    sep.textContent = "── история выше ──";
+    logWrap.prepend(sep);
+  }
+
   const div = document.createElement("div");
-  div.className = "log-entry";
+  div.className = "log-entry" + (historical ? " log-hist" : "");
   div.innerHTML = `<span class="lt">${time}</span><span class="lw" style="color:${color}">${who}</span>: ${escapeHtml(text.slice(0,160))}`;
-  logWrap.prepend(div);
-  if (logWrap.children.length > 150) logWrap.removeChild(logWrap.lastChild);
+  if (historical) {
+    logWrap.appendChild(div);  // исторические — в конец (старые внизу)
+  } else {
+    logWrap.prepend(div);      // новые — наверх
+  }
+  if (logWrap.children.length > 300) logWrap.removeChild(logWrap.lastChild);
 }
 
 function updateSidebar() {
@@ -1199,16 +1228,8 @@ function logOnly(event) {
   else if (event.type === "error") addLog(event.agent_id, "⚠ " + event.text, role);
 }
 
-async function replayHistory() {
-  try {
-    const r = await fetch("/api/history");
-    const d = await r.json();
-    const events = d.events || [];
-    if (!events.length) return;
-    for (const ev of events) logOnly(ev);
-    addLog("офис", `↺ История восстановлена (${events.length} событий)`, "system");
-  } catch {}
-}
+// История теперь стримится через SSE как historical-события (не нужен отдельный fetch)
+async function replayHistory() {}
 
 function showMission(brief) {
   const m = document.getElementById("team-mission");

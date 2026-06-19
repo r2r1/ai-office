@@ -192,6 +192,11 @@ def _hire_initial(publish_sync) -> None:
 _WORKER_SKIP = {"researcher", "strategist", "hr"}
 _rr_index = 0
 
+# Минимальная пауза между задачами агента (в секундах).
+# Агент, завершивший задачу менее MIN_IDLE_SECONDS назад, не получит новую.
+# Это предотвращает немедленный перезапуск при рестарте сервера.
+MIN_IDLE_SECONDS = LOOP_INTERVAL * 2
+
 
 async def _advance_work(strategy: str, publish) -> bool:
     """Даёт одному свободному рабочему агенту НОВЫЙ конкретный шаг к цели.
@@ -200,10 +205,17 @@ async def _advance_work(strategy: str, publish) -> bool:
     производил результаты, но не сжигал токены на всех сразу.
     Возвращает True, если кого-то запустили.
     """
+    import time
     global _rr_index
 
-    workers = [a for a in registry.all_agents()
-               if a.role not in _WORKER_SKIP and a.status in ("done", "idle")]
+    now = time.time()
+    workers = [
+        a for a in registry.all_agents()
+        if a.role not in _WORKER_SKIP
+        and a.status in ("done", "idle")
+        # не трогаем агента, если он завершил задачу совсем недавно
+        and (now - state.last_run_for(a.agent_id)) >= MIN_IDLE_SECONDS
+    ]
     if not workers:
         return False
 
@@ -213,14 +225,19 @@ async def _advance_work(strategy: str, publish) -> bool:
     _rr_index += 1
 
     goal = brief.get().get("goal", "") or brief.summary()
-    prev = state.result_for(agent.agent_id)
+    # Собираем все результаты агента, чтобы не повторяться
+    all_results = state.deliverables_for(agent.agent_id)
+    prev_summaries = "\n---\n".join(
+        d.get("content", "")[:400] for d in all_results[-3:]
+    ) or "ещё не было результатов"
+
     next_task = (
         f"Цель офиса: {goal}\n"
         f"Стратегия (кратко): {strategy[:700]}\n"
         f"Твоя роль: {agent.role}. Исходная задача: {agent.task}\n"
-        f"Что ты уже сделал в прошлый раз: {prev[:500] or 'ещё не было результата'}\n\n"
-        f"Сделай СЛЕДУЮЩИЙ конкретный шаг и выдай НОВЫЙ готовый результат "
-        f"(не повторяй прошлое), который реально двигает офис к цели. "
+        f"Что ты уже делал (последние результаты):\n{prev_summaries}\n\n"
+        f"Сделай СЛЕДУЮЩИЙ конкретный шаг, который ты ЕЩЁ НЕ ДЕЛАЛ, "
+        f"и выдай НОВЫЙ готовый результат, который реально двигает офис к цели. "
         f"Если нужна свежая информация — используй web_search или request_research. "
         f"Если не хватает данных от клиента (доступы, ключи, решения) — спроси через ask_user. "
         f"Можешь делегировать коллеге через send_message."
@@ -238,6 +255,7 @@ async def _run_hired_agent(agent_id: str, agent_fn, publish) -> None:
     try:
         await agent_fn()
         registry.update_status(agent_id, "done")
+        state.save_last_run(agent_id)  # фиксируем время завершения
     except Exception as e:
         await publish({"type": "error", "agent_id": agent_id, "text": str(e)[:100]})
         registry.update_status(agent_id, "idle")

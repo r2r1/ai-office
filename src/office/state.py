@@ -6,6 +6,7 @@
 """
 
 import json
+import time
 from pathlib import Path
 
 STATE_FILE = Path("reports/state.json")
@@ -18,6 +19,7 @@ _events: list[dict] = []
 _agents: dict[str, dict] = {}  # agent_id -> {agent_id, role, desk, task}
 _results: dict[str, str] = {}  # agent_id -> последний результат (task_done summary)
 _deliverables: list[dict] = []  # готовые результаты работы агентов (полный текст)
+_last_runs: dict[str, float] = {}  # agent_id -> unix timestamp последнего завершения задачи
 
 
 def record(event: dict) -> None:
@@ -87,15 +89,32 @@ def result_for(agent_id: str) -> str:
     return _results.get(agent_id, "")
 
 
+def save_last_run(agent_id: str) -> None:
+    """Отмечает время последнего завершения задачи агента."""
+    _last_runs[agent_id] = time.time()
+    _save()
+
+
+def last_run_for(agent_id: str) -> float:
+    """Unix-timestamp последнего завершения задачи (0 если никогда)."""
+    return _last_runs.get(agent_id, 0.0)
+
+
 def _save() -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data = {"events": _events, "agents": _agents, "results": _results, "deliverables": _deliverables}
+    data = {
+        "events": _events,
+        "agents": _agents,
+        "results": _results,
+        "deliverables": _deliverables,
+        "last_runs": _last_runs,
+    }
     STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load() -> None:
     """Загружает историю при старте сервера."""
-    global _events, _agents, _results, _deliverables
+    global _events, _agents, _results, _deliverables, _last_runs
     if STATE_FILE.exists():
         try:
             d = json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -103,15 +122,17 @@ def load() -> None:
             _agents = d.get("agents", {})
             _results = d.get("results", {})
             _deliverables = d.get("deliverables", [])
+            _last_runs = d.get("last_runs", {})
         except (json.JSONDecodeError, OSError):
             pass
 
 
 def reset() -> None:
-    global _events, _agents, _results, _deliverables
+    global _events, _agents, _results, _deliverables, _last_runs
     _events = []
     _agents = {}
     _results = {}
     _deliverables = []
+    _last_runs = {}
     if STATE_FILE.exists():
         STATE_FILE.unlink()

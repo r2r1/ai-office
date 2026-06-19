@@ -66,8 +66,15 @@ async def events():
                     "role": agent.role,
                     "desk": agent.desk,
                     "task": agent.task,
+                    "status": agent.status,
+                    "last_message": agent.last_message,
                 }
                 yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+
+            # Исторические события из прошлых сессий
+            for evt in state.history()[-200:]:
+                historical = dict(evt, historical=True)
+                yield f"data: {json.dumps(historical, ensure_ascii=False)}\n\n"
 
             # Живой поток
             while True:
