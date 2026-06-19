@@ -19,9 +19,34 @@ from src.office import connections
 from src.office import memory as memory_module
 from src.office import models as models_module
 
+_AUTONOMY_RULES = """
+
+=== ПРАВИЛО АВТОНОМНОСТИ (СТРОГО ОБЯЗАТЕЛЬНО) ===
+Никогда не проси пользователя делать что-то руками, если это можно сделать через API.
+ЗАПРЕЩЕНО говорить: "создайте таблицу", "заполните колонки", "зайдите в сервис и добавьте".
+ОБЯЗАТЕЛЬНО: если нужен внешний сервис — сначала проверь get_connection, потом ask_user
+об API-ключе с инструкцией как его получить.
+
+Инструкции по получению API-ключей:
+- Google Sheets/Drive: console.cloud.google.com → APIs → Enable Sheets API → Credentials → Service Account → скачать JSON
+- Telegram Bot: @BotFather в Telegram → /newbot → получить TOKEN
+- Notion: notion.so/my-integrations → New Integration → скопировать API key
+- Airtable: airtable.com/account → API → Generate API key
+- OpenAI: platform.openai.com/api-keys → Create new key
+- Anthropic: console.anthropic.com/account/keys → Create Key
+- VK: vk.com/dev → Мои приложения → Создать приложение → ключ доступа
+- Instagram/Facebook: developers.facebook.com → My Apps → Create App
+- GitHub: github.com/settings/tokens → Generate new token
+- Stripe: dashboard.stripe.com/apikeys
+
+Когда спрашиваешь API-ключ — объясняй конкретно ГДЕ взять (3-5 шагов).
+После получения ключа — СРАЗУ начинай работать через API, не жди дополнительных инструкций.
+"""
+
 _INTER_AGENT_SUFFIX = (
     "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
-    "\nЕсли нужны данные для подключения к платформе — сначала проверь get_connection, затем если нет — спроси через ask_user."
+    "\nНИКОГДА не проси пользователя делать ручную работу — если нужен внешний сервис, используй API."
+    "\nЕсли нужны данные для подключения к платформе — сначала проверь get_connection, затем если нет — спроси через ask_user с инструкцией как получить API-ключ."
     "\nЕсли подключение не работает (ошибка API, неверный ключ) — опиши ошибку конкретно: что пробовал, какой ответ получил."
 )
 
@@ -51,7 +76,7 @@ _ASK_USER_TOOL = {
     "type": "function",
     "function": {
         "name": "ask_user",
-        "description": "Задаёт вопрос пользователю и ждёт ответа. Используй когда нужна уточняющая информация от клиента.",
+        "description": "Задаёт вопрос пользователю. ТОЛЬКО для запроса API-ключей/доступов с инструкцией как их получить, или для уточнений бизнес-требований. НЕ используй чтобы просить пользователя делать ручную работу.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -220,11 +245,12 @@ def _brief_context() -> str:
     return "\n\n=== БРИФ КЛИЕНТА (всегда держи в контексте) ===\n" + "\n".join(parts)
 
 
-def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]]):
+def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]], skill: str = ""):
     """Возвращает async-функцию, запускающую агента."""
     base = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.")
-    # Собираем системный промпт: роль + бриф + память (ответы пользователя) + межагентный суффикс
-    system = base + _brief_context() + memory_module.context_block() + _INTER_AGENT_SUFFIX
+    skill_line = f"\n\nТвоя специализация в этом проекте: {skill}" if skill else ""
+    # Собираем системный промпт: роль + специализация + бриф + память + правила автономности + межагентный суффикс
+    system = base + skill_line + _brief_context() + memory_module.context_block() + _AUTONOMY_RULES + _INTER_AGENT_SUFFIX
 
     async def _handle_request_research(args: dict) -> str:
         question = args.get("question", "")

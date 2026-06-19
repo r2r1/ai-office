@@ -166,7 +166,8 @@ async def _orchestrate(strategy: str, publish) -> None:
     if action == "hire":
         role = decision.get("role", "")
         task = decision.get("task", f"Выполни задачи {role}")
-        await _hire_and_run(role, task, publish)
+        skill = decision.get("skill") or ""
+        await _hire_and_run(role, task, publish, skill=skill)
 
     elif action == "assign":
         agent_id = decision.get("agent_id", "")
@@ -187,7 +188,7 @@ async def _orchestrate(strategy: str, publish) -> None:
         await publish({"type": "system", "text": "Директор: ждём результатов текущих задач"})
 
 
-async def _assign(agent_id: str, role: str, task: str, publish) -> None:
+async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "") -> None:
     """Поручает задачу конкретному агенту (рабочему, ресёрчеру или стратегу)."""
     await publish({"type": "speech", "agent_id": "orchestrator_1",
                    "text": f"→ Поручаю {agent_id}: {task[:70]}"})
@@ -202,7 +203,7 @@ async def _assign(agent_id: str, role: str, task: str, publish) -> None:
             elif role == "strategist":
                 result = await strategist.run_async(task, publish=publish, agent_id=agent_id, save=False)
             else:
-                fn = agent_factory.create(role, _task_with_context(role, task), agent_id, publish)
+                fn = agent_factory.create(role, _task_with_context(role, task, skill), agent_id, publish, skill=skill)
                 result = await fn()
             registry.update_status(agent_id, "done")
             state.save_last_run(agent_id)
@@ -214,16 +215,17 @@ async def _assign(agent_id: str, role: str, task: str, publish) -> None:
     asyncio.create_task(_job())
 
 
-def _task_with_context(role: str, task: str) -> str:
+def _task_with_context(role: str, task: str, skill: str = "") -> str:
     """Обогащает задачу контекстом цели и текущего этапа."""
     goal = brief.get().get("goal", "") or brief.summary()
     cur = milestones.get(_current_milestone_id)
     stage = f"Текущий этап: {cur['title']}\n" if cur else ""
+    skill_line = f"Твоя специализация: {skill}\n" if skill else ""
     return (
-        f"Цель офиса: {goal}\n{stage}"
+        f"Цель офиса: {goal}\n{stage}{skill_line}"
         f"Твоя задача от директора: {task}\n\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
-        f"или request_research. Если не хватает доступов/решений клиента — ask_user."
+        f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
     )
 
 
@@ -271,17 +273,18 @@ async def _bootstrap(publish) -> str:
     return strategy
 
 
-async def _hire_and_run(role: str, task: str, publish) -> None:
+async def _hire_and_run(role: str, task: str, publish, skill: str = "") -> None:
     # Формируем уникальный agent_id (роль может встречаться несколько раз)
     existing_count = sum(1 for a in registry.all_agents() if a.role == role)
     agent_id = f"{role}_{existing_count + 1}"
-    rec = registry.register(agent_id, role, task)
+    full_task = f"[Скилл: {skill}] {task}" if skill else task
+    rec = registry.register(agent_id, role, full_task)
     if rec:
         await publish({
             "type": "hired", "agent_id": agent_id, "role": role,
-            "desk": rec.desk, "task": task[:100],
+            "desk": rec.desk, "task": full_task[:100], "skill": skill,
         })
-        await _assign(agent_id, role, task, publish)
+        await _assign(agent_id, role, task, publish, skill=skill)
     else:
         await publish({"type": "system", "text": f"Не удалось зарегистрировать агента {agent_id}"})
 
