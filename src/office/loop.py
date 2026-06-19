@@ -41,7 +41,9 @@ _current_milestone_id: str = ""
 _first_cycle_done = False
 
 # Минимальный промежуток между задачами ОДНОГО агента (антидребезг при рестарте).
-AGENT_COOLDOWN_SECS = 3600  # 1 час
+# Директор теперь сам учитывает занятость агентов — короткий cooldown нужен только
+# чтобы не запустить одного агента дважды за один цикл при гонке.
+AGENT_COOLDOWN_SECS = 60  # 1 минута
 
 
 async def _set_progress_note(note: str, publish) -> None:
@@ -120,7 +122,20 @@ async def _orchestrate(strategy: str, publish) -> None:
 
     goal = brief.get().get("goal", "") or brief.summary()
     ms = milestones.all_stages()
-    decision = await orchestrator.decide(goal, strategy, ms, publish)
+
+    # Передаём директору, кто сейчас занят / на кулдауне — чтобы он выбирал свободных
+    now = time.time()
+    agent_availability = {}
+    for a in registry.all_agents():
+        last = state.last_run_for(a.agent_id)
+        cooldown_left = max(0, AGENT_COOLDOWN_SECS - (now - last))
+        agent_availability[a.agent_id] = {
+            "status": a.status,
+            "on_cooldown": cooldown_left > 0,
+            "cooldown_secs": int(cooldown_left),
+        }
+
+    decision = await orchestrator.decide(goal, strategy, ms, publish, agent_availability)
 
     thought = decision.get("thought", "")
     if thought:
@@ -158,7 +173,7 @@ async def _orchestrate(strategy: str, publish) -> None:
         task = decision.get("task", "")
         rec = registry.get(agent_id)
         if rec and task:
-            # антидребезг: не гоняем агента чаще раза в час
+            # антидребезг на случай гонки: оркестратор уже должен был выбрать свободного
             if (now - state.last_run_for(agent_id)) < AGENT_COOLDOWN_SECS:
                 await publish({"type": "system",
                                "text": f"{agent_id} недавно отработал — директор подождёт"})
@@ -257,13 +272,9 @@ async def _bootstrap(publish) -> str:
 
 
 async def _hire_and_run(role: str, task: str, publish) -> None:
-    if registry.has_role(role):
-        await publish({"type": "system", "text": f"Роль {role} уже есть — пропускаю найм"})
-        return
-    if registry.count() >= registry.MAX_DESKS:
-        await publish({"type": "system", "text": "Все столы заняты — найм невозможен"})
-        return
-    agent_id = f"{role}_{registry.count() + 1}"
+    # Формируем уникальный agent_id (роль может встречаться несколько раз)
+    existing_count = sum(1 for a in registry.all_agents() if a.role == role)
+    agent_id = f"{role}_{existing_count + 1}"
     rec = registry.register(agent_id, role, task)
     if rec:
         await publish({
@@ -271,6 +282,8 @@ async def _hire_and_run(role: str, task: str, publish) -> None:
             "desk": rec.desk, "task": task[:100],
         })
         await _assign(agent_id, role, task, publish)
+    else:
+        await publish({"type": "system", "text": f"Не удалось зарегистрировать агента {agent_id}"})
 
 
 def _load_strategy() -> str:

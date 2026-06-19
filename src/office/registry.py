@@ -5,7 +5,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-MAX_DESKS = 8
+MAX_DESKS = 200  # практически без ограничений — офис растёт свободно
 
 ROLE_COLORS = {
     "orchestrator": "#ffd54f",
@@ -34,8 +34,6 @@ _used_desks: set[int] = set()
 
 
 def register(agent_id: str, role: str, task: str = "") -> Optional[AgentRecord]:
-    if len(_used_desks) >= MAX_DESKS:
-        return None
     desk = next(i for i in range(MAX_DESKS) if i not in _used_desks)
     _used_desks.add(desk)
     rec = AgentRecord(agent_id=agent_id, role=role, desk=desk, task=task)
@@ -74,7 +72,7 @@ def restore(saved: list[dict]) -> None:
             continue
         desk = a.get("desk", 0)
         if desk in _used_desks:
-            desk = next((i for i in range(MAX_DESKS) if i not in _used_desks), desk)
+            desk = next(i for i in range(MAX_DESKS) if i not in _used_desks)
         _used_desks.add(desk)
         _agents[aid] = AgentRecord(
             agent_id=aid, role=a.get("role", ""), desk=desk,

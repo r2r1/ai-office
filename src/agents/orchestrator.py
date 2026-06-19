@@ -39,11 +39,21 @@ _DECIDE_SYSTEM = """Ты — директор автономного AI-офис
 ведёшь бизнес к цели клиента. Каждый ход ты принимаешь ОДНО решение: поручить конкретную
 задачу одному агенту, нанять нового специалиста или подождать.
 
+ЗОНЫ ОТВЕТСТВЕННОСТИ (соблюдай строго):
+- researcher — исследование, сбор данных, анализ рынка
+- strategist — планирование, стратегия, бизнес-модель
+- salesman — продажи, поиск клиентов, переговоры, CRM
+- developer — технические задачи, автоматизации, продукт, код
+- marketer — маркетинг, контент, соцсети, реклама, бренд
+- analyst — аналитика данных, метрики, отчёты, KPI
+
 Принципы:
 - Двигай бизнес к текущему этапу. Ставь конкретные, выполнимые задачи с измеримым результатом.
 - Не повторяй задачи, которые агент уже сделал.
-- Если для этапа не хватает роли — найми (только из доступных).
-- Ресёрчеру поручай добычу свежих данных, когда команде не хватает информации.
+- Назначай задачу агенту строго по его зоне ответственности (role).
+- ВАЖНО: смотри колонку "занят/кулдаун" — НЕ назначай задачу агенту, у которого on_cooldown=true или status=thinking. Выбери другого.
+- Если нужной роли нет в команде — найми (только из доступных ролей).
+- Если все нужные агенты заняты — найми ещё одного агента той же роли или подожди.
 - Если текущий этап достигнут — пометь его выполненным и опиши, что сделано.
 
 Ответь ТОЛЬКО валидным JSON без markdown:
@@ -112,26 +122,42 @@ async def decide(
     strategy: str,
     milestones: list[dict],
     publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+    agent_availability: Optional[dict] = None,
 ) -> dict:
     """
     Главное решение директора: кому что поручить дальше.
     Возвращает dict с action: assign | hire | wait.
+    agent_availability: {agent_id: {status, on_cooldown, cooldown_secs}}
     """
     agents = registry.all_agents()
-    existing_roles = {a.role for a in agents}
-    available = HIREABLE_ROLES - existing_roles
+    avail = agent_availability or {}
 
-    # Сводка по команде с последними результатами
+    # Роли, которых ещё нет в команде (+ допускаем найм дополнительных экземпляров)
+    existing_roles = {a.role for a in agents if a.role in HIREABLE_ROLES}
+    hireable_missing = HIREABLE_ROLES - existing_roles
+
+    # Сводка по команде с доступностью и последними результатами
     from src.office import state
     roster_lines = []
     for a in agents:
+        avl = avail.get(a.agent_id, {})
+        cooldown_note = f"🔴занят/кулдаун {avl['cooldown_secs']}с" if avl.get("on_cooldown") else "🟢свободен"
+        if a.status == "thinking":
+            cooldown_note = "🔴думает"
         last = state.result_for(a.agent_id)
-        last_short = (last[:120] + "…") if last and len(last) > 120 else (last or "ещё не сдавал")
-        roster_lines.append(f"- {a.agent_id} ({a.role}, {a.status}): {last_short}")
+        last_short = (last[:100] + "…") if last and len(last) > 100 else (last or "ещё не сдавал")
+        roster_lines.append(
+            f"- {a.agent_id} ({a.role}) [{cooldown_note}]: {last_short}"
+        )
     roster = "\n".join(roster_lines) or "команда пустая"
 
     ms_lines = [f"- [{m['status']}] {m['id']}: {m['title']}" for m in milestones]
     ms_text = "\n".join(ms_lines) or "этапы ещё не заданы"
+
+    # Можно нанять любую роль: либо отсутствующую, либо вторую копию занятой
+    busy_hireable = {a.role for a in agents if a.role in HIREABLE_ROLES
+                     and avail.get(a.agent_id, {}).get("on_cooldown")}
+    available_to_hire = hireable_missing | busy_hireable  # нет роли ИЛИ все её носители заняты
 
     if publish:
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
@@ -141,11 +167,10 @@ async def decide(
         f"Цель: {goal}\n\n"
         f"Стратегия (кратко):\n{strategy[:1200]}\n\n"
         f"Этапы пути:\n{ms_text}\n\n"
-        f"Команда сейчас:\n{roster}\n\n"
-        f"Свободные роли для найма: {', '.join(sorted(available)) or 'нет'}\n"
-        f"Свободных столов: {registry.MAX_DESKS - registry.count()}\n\n"
-        f"Прими ОДНО решение: assign (поручить задачу агенту из команды), "
-        f"hire (нанять из доступных ролей) или wait."
+        f"Команда сейчас (статус и доступность):\n{roster}\n\n"
+        f"Роли доступные для найма: {', '.join(sorted(available_to_hire)) or 'нет (все роли укомплектованы)'}\n\n"
+        f"Прими ОДНО решение: assign (поручить задачу 🟢свободному агенту из команды), "
+        f"hire (нанять из доступных ролей, если нужная роль занята или отсутствует) или wait."
     )
 
     raw = await llm.run_agent(
@@ -165,19 +190,42 @@ async def decide(
 
     if action == "hire":
         role = decision.get("role", "")
-        if role not in available:
+        if role not in HIREABLE_ROLES:
             decision["action"] = "wait"
-            decision["thought"] = f"Роль {role} недоступна для найма — жду"
+            decision["thought"] = f"Роль {role} не подходит для найма — жду"
+
     elif action == "assign":
         aid = decision.get("agent_id", "")
-        if registry.get(aid) is None:
-            # пробуем сопоставить по роли
-            role = decision.get("role", "")
-            match = next((a for a in agents if a.role == role), None)
+        rec = registry.get(aid)
+        if rec is None:
+            # пробуем найти агента по роли
+            role_hint = decision.get("role", "")
+            match = next((a for a in agents if a.role == role_hint), None)
             if match:
                 decision["agent_id"] = match.agent_id
+                rec = match
             else:
                 decision["action"] = "wait"
                 decision["thought"] = "Указан несуществующий агент — жду"
+                return decision
+
+        # Если директор всё равно выбрал занятого агента — ищем свободного той же роли
+        if rec and avail.get(rec.agent_id, {}).get("on_cooldown"):
+            role = rec.role
+            free = next(
+                (a for a in agents if a.role == role and not avail.get(a.agent_id, {}).get("on_cooldown")),
+                None,
+            )
+            if free:
+                decision["agent_id"] = free.agent_id
+            else:
+                # все агенты этой роли заняты — лучше нанять ещё одного
+                if role in HIREABLE_ROLES:
+                    decision["action"] = "hire"
+                    decision["role"] = role
+                    decision["thought"] = f"Все {role} заняты — нанимаю ещё одного"
+                else:
+                    decision["action"] = "wait"
+                    decision["thought"] = f"Все {role} заняты — жду"
 
     return decision
