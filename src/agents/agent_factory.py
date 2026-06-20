@@ -19,6 +19,8 @@ from src.office import connections
 from src.office import memory as memory_module
 from src.office import models as models_module
 from src.office import office_channel
+from src.office import threads as threads_module
+from src.integrations import registry as integrations_registry
 
 _AUTONOMY_RULES = """
 
@@ -69,6 +71,17 @@ ROLE_PROMPTS = {
     "analyst": (
         "Ты — аналитик AI-агентства. Собери и проанализируй данные по рынку, "
         "конкурентам или клиентам. Выводы с цифрами. Используй web_search."
+    ),
+    "integrator": (
+        "Ты — агент-интегратор AI-агентства. Ты отвечаешь за реальные подключения "
+        "офиса к внешним сервисам (Telegram, и т.д.). Алгоритм работы:\n"
+        "1. Вызови list_integrations — посмотри, что доступно и что уже подключено.\n"
+        "2. Если для задачи нужен сервис без учётных данных — запроси их через ask_user "
+        "с конкретной инструкцией как получить (она есть в описании интеграции).\n"
+        "3. Как только учётка появилась — проверь подключение реальным действием "
+        "(например telegram.get_me через use_integration) и доложи статус.\n"
+        "4. Выполняй реальные действия в сервисах через use_integration по запросу команды.\n"
+        "Никогда не проси пользователя делать ручную работу в сервисе — делай через API сам."
     ),
 }
 
@@ -154,6 +167,43 @@ _READ_OFFICE_CHAT_TOOL = {
                 "n": {"type": "integer", "description": "Количество последних сообщений (по умолчанию 20)", "default": 20},
             },
             "required": [],
+        },
+    },
+}
+
+# Инструмент: список доступных интеграций
+_LIST_INTEGRATIONS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_integrations",
+        "description": (
+            "Показывает каталог реальных интеграций с внешними сервисами (Telegram и др.): "
+            "что умеет каждая, какие действия доступны и подключена ли она. "
+            "Вызови ПЕРЕД тем как что-то делать во внешнем сервисе."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+# Инструмент: выполнить реальное действие во внешнем сервисе
+_USE_INTEGRATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "use_integration",
+        "description": (
+            "Выполняет РЕАЛЬНОЕ действие во внешнем сервисе (например отправить пост в Telegram). "
+            "Учётные данные подтягиваются автоматически из подключений. "
+            "Если сервис не подключён — вернётся инструкция, после чего запроси ключ через ask_user. "
+            "Сначала вызови list_integrations, чтобы узнать имена действий и параметры."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Имя интеграции (например 'telegram')"},
+                "action": {"type": "string", "description": "Имя действия (например 'send_message')"},
+                "params": {"type": "object", "description": "Аргументы действия (см. list_integrations)"},
+            },
+            "required": ["name", "action"],
         },
     },
 }
@@ -291,12 +341,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                            "text": f"💭 (из памяти): {question_text[:50]} → {cached[:60]}"})
             return cached
         qid, fut = questions_module.ask(question_text, publish, agent_id=agent_id)
-        await publish({"type": "question", "agent_id": agent_id, "question_id": qid, "text": question_text})
+        # Вопрос попадает в личный чат с агентом — пользователь ответит прямо там
+        threads_module.post(agent_id, "agent", question_text, kind="question", question_id=qid)
+        await publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
+                       "kind": "question", "question_id": qid, "text": question_text})
         try:
             answer = await asyncio.wait_for(fut, timeout=300)  # 5 мин макс
         except asyncio.TimeoutError:
             questions_module.answer(qid, "")
-            await publish({"type": "question_answered", "question_id": qid})
+            threads_module.mark_answered(qid)
+            await publish({"type": "question_answered", "question_id": qid, "agent_id": agent_id})
             return "Пользователь не ответил — продолжай без этих данных."
         if answer:
             memory_module.remember(question_text, answer)
@@ -351,6 +405,60 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
                           ensure_ascii=False)
 
+    async def _handle_list_integrations(args: dict) -> str:
+        lines = []
+        for integ in integrations_registry.all_integrations():
+            status = "✅ подключено" if integrations_registry.is_connected(integ) else "⚪ не подключено"
+            acts = ", ".join(
+                f"{a.name}({', '.join(a.required) or '—'})" for a in integ.actions.values()
+            )
+            lines.append(f"• {integ.name} [{status}] — {integ.description}\n    действия: {acts}")
+        if not lines:
+            return "Пока нет доступных интеграций."
+        return "Доступные интеграции:\n" + "\n".join(lines)
+
+    async def _handle_use_integration(args: dict) -> str:
+        name = (args.get("name") or "").strip()
+        action_name = (args.get("action") or "").strip()
+        params = args.get("params") or {}
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                params = {}
+
+        integ = integrations_registry.get(name)
+        if not integ:
+            avail = ", ".join(i.name for i in integrations_registry.all_integrations()) or "нет"
+            return f"Интеграция '{name}' не найдена. Доступные: {avail}."
+        action = integ.actions.get(action_name)
+        if not action:
+            acts = ", ".join(integ.actions.keys())
+            return f"У '{integ.name}' нет действия '{action_name}'. Доступные действия: {acts}."
+
+        creds = integrations_registry.credentials_for(integ)
+        if not integrations_registry.is_connected(integ):
+            return (
+                f"Сервис '{integ.title}' ещё не подключён — нет учётных данных. "
+                f"Запроси их у пользователя через ask_user. Как получить:\n{integ.how_to}"
+            )
+
+        await _publish_and_log({"type": "speech", "agent_id": agent_id,
+                                "text": f"⚙️ {integ.title}.{action_name}…"})
+        try:
+            result = await action.handler(creds, params)
+        except Exception as e:
+            err = str(e)[:200]
+            await _report_connection_error(integ.title, err)
+            return f"Ошибка при вызове {integ.name}.{action_name}: {err}"
+
+        await _publish_and_log({"type": "speech", "agent_id": agent_id,
+                                "text": f"✅ {integ.title}.{action_name}: {result[:80]}"})
+        await publish({"type": "integration_used", "agent_id": agent_id,
+                       "integration": integ.name, "action": action_name,
+                       "text": f"⚙️ {integ.title}.{action_name} → {result[:120]}"})
+        return result
+
     async def _report_connection_error(platform: str, error: str) -> None:
         """Публикует событие ошибки подключения чтобы пользователь видел в интерфейсе."""
         await publish({"type": "connection_error", "agent_id": agent_id,
@@ -380,7 +488,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL,
-                         _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL],
+                         _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
+                         _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
@@ -388,6 +497,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "read_messages": _handle_read_messages,
                 "read_office_chat": _handle_read_office_chat,
                 "get_connection": _handle_get_connection,
+                "list_integrations": _handle_list_integrations,
+                "use_integration": _handle_use_integration,
             },
         )
 

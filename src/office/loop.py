@@ -329,6 +329,7 @@ def _hire_initial(publish_sync) -> None:
         ("researcher_1", "researcher", "Исследование рынка и трендов"),
         ("strategist_1", "strategist", "Построение бизнес-стратегии"),
         ("architect_1", "architect", "Техническое проектирование решения"),
+        ("integrator_1", "integrator", "Подключение внешних сервисов и интеграции"),
         ("hr_1", "hr", "Найм новых агентов"),
     ]
     for aid, role, task in starters:

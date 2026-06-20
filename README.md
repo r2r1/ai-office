@@ -34,7 +34,7 @@ cp .env.example .env
 ```
 LLM_BASE_URL=https://apinet.cloud/v1
 LLM_API_KEY=sk-your-key
-LLM_MODEL=qwen3-vl-plus    # любая модель провайдера
+LLM_MODEL=glm-4.5-flash    # ≈бесплатно; любая модель провайдера (apinet.cloud/pricing)
 DEMO_MODE=0                # 1 = демо без API
 ```
 

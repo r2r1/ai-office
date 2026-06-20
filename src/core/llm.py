@@ -24,7 +24,7 @@ load_dotenv()
 
 BASE_URL = os.getenv("LLM_BASE_URL", "https://apinet.cloud/v1")
 API_KEY = os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
-DEFAULT_MODEL = os.getenv("LLM_MODEL", "qwen3-vl-plus")
+DEFAULT_MODEL = os.getenv("LLM_MODEL", "glm-4.5-flash")
 
 # Инструмент веб-поиска в формате OpenAI function calling
 WEB_SEARCH_TOOL = {

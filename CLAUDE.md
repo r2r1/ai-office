@@ -31,7 +31,7 @@ python main.py                         # CLI: ресёрчер → страте�
 ```
 LLM_BASE_URL=https://apinet.cloud/v1
 LLM_API_KEY=sk-...
-LLM_MODEL=qwen3-vl-plus
+LLM_MODEL=glm-4.5-flash   # ≈бесплатно ($0.01/1M, tools+reasoning); см. apinet.cloud/pricing
 DEMO_MODE=0
 LOOP_INTERVAL_SECONDS=10
 ```
@@ -53,10 +53,14 @@ node --check static/game.js                    # синтаксис JS
   ├── Researcher                — исследование рынка (quick/deep)
   ├── Strategist                — бизнес-стратегия, юнит-экономика, план
   ├── Architect                 — Техническое Задание (ТЗ) → reports/tech_design.md
+  ├── Integrator                — подключение внешних сервисов, реальные вызовы API
   ├── HR                        — найм
   └── Рабочие (нанимаются):
         Salesman / Developer / Marketer / Analyst
 ```
+
+> Постоянный штат (orchestrator/researcher/strategist/architect/integrator/hr)
+> регистрируется в `loop._hire_initial`. Рабочие нанимаются динамически.
 
 ### Поток работы (`src/office/loop.py`)
 1. **BOOTSTRAP** (один раз): researcher (deep) → strategist → `reports/strategy.md`,
@@ -74,21 +78,45 @@ node --check static/game.js                    # синтаксис JS
 | `agents/orchestrator.py` | Директор: `plan_milestones()`, `decide()` |
 | `agents/architect.py` | Архитектор: `run_async()` → ТЗ, `load()` |
 | `agents/strategist.py`, `researcher.py`, `hr.py` | Руководящие агенты |
-| `agents/agent_factory.py` | Создаёт нанятых рабочих + их инструменты |
+| `agents/agent_factory.py` | Создаёт агентов + их инструменты (вкл. `use_integration`) |
+| `integrations/` | Слой реальных вызовов внешних API (см. ниже) |
 | `office/loop.py` | Главный автономный цикл |
 | `office/registry.py` | Реестр агентов (роли, столы, статусы) |
 | `office/bus.py` | Event bus для SSE |
 | `office/milestones.py` | Этапы проекта и прогресс |
-| `office/questions.py` | Вопросы агентов пользователю (дедуп по тексту → общий future) |
+| `office/questions.py` | Блокирующие вопросы агентов (future; дедуп по тексту; `pending_for`) |
+| `office/threads.py` | Отображаемая переписка пользователя с агентом (вопросы + реплики) |
 | `office/connections.py` | Хранилище API-ключей/доступов (дедуп по name+values) |
 | `office/office_channel.py` | Общий чат офиса (broadcast) |
-| `office/chat.py` | Личный диалог пользователя с агентом |
+| `office/chat.py` | LLM-диалог с агентом (контекст в формате role/content) |
 | `office/models.py` | Выбор LLM-модели (глобально / на агента) |
 | `office/state.py`, `memory.py`, `brief.py` | Состояние, память, бриф клиента |
 
+### Слой интеграций (`src/integrations/`)
+Реальные вызовы внешних API (в отличие от `office/connections.py` — там только
+хранилище учётных данных).
+- `base.py` — `Integration` / `Action` / `CredField`: декларативное описание сервиса
+  (нужные креды + `how_to` + действия с JSON-схемой и async-`handler(creds, params)`).
+- `registry.py` — каталог (`_ALL`), статус подключения по `connections.py`
+  (`is_connected`, `credentials_for`, `catalog_payload`).
+- `telegram.py` — эталонная интеграция (Bot API: `get_me` / `send_message` / `send_photo`).
+
+Агенты работают через инструменты `list_integrations` и `use_integration(name, action, params)`
+(в `agent_factory.py`): креды подтягиваются автоматически; нет кредов → агенту возвращается
+инструкция, и он запрашивает их через `ask_user` (учётка автосохраняется в `connections`).
+Действия за реальную работу во внешних сервисах директор поручает роли **integrator**.
+
+**Чтобы добавить интеграцию**: создай модуль по образцу `telegram.py` (объект `INTEGRATION`)
+и зарегистрируй его в `registry._ALL`. Фронт (`/api/integrations`) и инструменты агентов
+подхватят её автоматически. Проверка из UI — `POST /api/integrations/{name}/test`
+(первое действие без обязательных параметров).
+
 ### Frontend (`static/`)
 - `index.html` — разметка, CSS, навигация по вкладкам (Офис / Команда / Результаты /
-  Доступы / События / Вопросы / Этапы / Чат).
+  Доступы / События / Этапы / Чаты). Вкладка «Доступы» показывает каталог
+  готовых интеграций (статус ✅/⚪, «Подключить», «Проверить») и сохранённые подключения.
+  Вкладка «Чаты» — общий чат офиса + личные чаты со всеми агентами (отдельной
+  вкладки «Вопросы» больше нет — вопросы агентов приходят прямо в личный чат).
 - `game.js` — изометрический рендерер canvas.
   - Координаты: `tileToScreen(col, row)` центрирует сетку (учитывает midpoint
     `(col-row)` и `(col+row)`); `updateScale()` автоподгон под размер.
@@ -105,7 +133,9 @@ node --check static/game.js                    # синтаксис JS
 - `GET/POST /api/brief/*` — бриф клиента (старт работы).
 - `GET /api/agents`, `/api/agent/{id}`, `/api/deliverables` — состояние.
 - `GET /api/milestones`, `/api/progress`, `/api/milestone/{id}` — этапы.
-- `GET/POST /api/questions`, `/api/answer`, `/api/ask` — вопросы агентов.
+- `GET /api/threads`, `/api/thread/{id}` — сводка и переписка личных чатов.
+- `POST /api/ask` — сообщение агенту: если у него открыт вопрос → это ответ
+  (разблокирует задачу), иначе обычная беседа. `/api/answer` — низкоуровневый ответ по qid.
 - `GET/POST /api/connections` — доступы/API-ключи.
 - `GET/POST /api/chat` — общий чат офиса.
 - `GET/POST /api/model`, `/api/models`, `/api/agent/{id}/model` — модели.

@@ -16,11 +16,14 @@ from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
 from src.office import memory
+from src.office import threads as threads_module
+from src.office import questions as questions_module
 from src.office import milestones
 from src.office import office_channel
 from src.office import models as models_module
 from src.agents import onboarding
 from src.core import llm as llm_core
+from src.integrations import registry as integrations_registry
 
 load_dotenv()
 
@@ -37,6 +40,7 @@ async def lifespan(app: FastAPI):
         milestones.load()
         connections.load()
         memory.load()
+        threads_module.load()
         office_channel.load()
         models_module.load()
         registry.restore(state.saved_agents())
@@ -295,6 +299,35 @@ async def delete_connection(cid: str):
     return {"ok": ok}
 
 
+@app.get("/api/integrations")
+async def get_integrations():
+    """Каталог поддерживаемых интеграций со статусом подключения."""
+    return {"integrations": integrations_registry.catalog_payload()}
+
+
+@app.post("/api/integrations/{name}/test")
+async def test_integration(name: str):
+    """Проверяет подключение: запускает безопасное действие без обязательных параметров."""
+    integ = integrations_registry.get(name)
+    if integ is None:
+        return JSONResponse({"error": "интеграция не найдена"}, status_code=404)
+    if not integrations_registry.is_connected(integ):
+        return JSONResponse({"error": "нет учётных данных — добавьте подключение"}, status_code=400)
+    # Берём действие-пинг: первое без обязательных параметров
+    ping = next((a for a in integ.actions.values() if not a.required), None)
+    if ping is None:
+        return JSONResponse({"error": "у интеграции нет проверочного действия"}, status_code=400)
+    creds = integrations_registry.credentials_for(integ)
+    try:
+        result = await ping.handler(creds, {})
+        await bus.publish({"type": "integration_used", "agent_id": "user",
+                           "integration": integ.name, "action": ping.name,
+                           "text": f"⚙️ Проверка {integ.title}: {result[:120]}"})
+        return {"ok": True, "result": result}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=200)
+
+
 @app.post("/api/brief/reset")
 async def brief_reset():
     """Полный сброс: новый клиент / новая задача с чистого листа."""
@@ -305,6 +338,7 @@ async def brief_reset():
     progress.reset()
     milestones.reset()
     memory.reset()
+    threads_module.reset()
     office_channel.reset()
     models_module.reset()  # сбрасываем индивидуальные модели, глобальную оставляем
     # удаляем сохранённую стратегию, чтобы офис прошёл bootstrap заново
@@ -375,12 +409,28 @@ async def answer_question(request: Request):
     return {"ok": ok}
 
 
+@app.get("/api/threads")
+async def get_threads():
+    """Сводка по личным чатам с агентами (для боковой панели вкладки «Чаты»)."""
+    return {"threads": threads_module.summaries()}
+
+
+@app.get("/api/thread/{agent_id}")
+async def get_thread(agent_id: str):
+    """Полная переписка пользователя с конкретным агентом."""
+    return {"agent_id": agent_id, "messages": threads_module.recent(agent_id)}
+
+
 @app.post("/api/ask")
 async def ask_agent(request: Request):
-    """Пользователь задаёт вопрос конкретному агенту."""
+    """Сообщение пользователя агенту в личном чате.
+
+    Если у агента есть открытый вопрос — сообщение трактуется как ОТВЕТ на него
+    (разблокирует ожидающую задачу). Иначе — это обычная беседа с агентом.
+    """
     data = await request.json()
     agent_id = data.get("agent_id", "")
-    message = data.get("message", "").strip()
+    message = (data.get("message") or "").strip()
 
     if not agent_id or not message:
         return JSONResponse({"error": "agent_id и message обязательны"}, status_code=400)
@@ -388,8 +438,27 @@ async def ask_agent(request: Request):
     if registry.get(agent_id) is None:
         return JSONResponse({"error": "агент не найден"}, status_code=404)
 
+    # Сообщение пользователя всегда попадает в ленту чата
+    threads_module.post(agent_id, "user", message)
+
+    # 1) Есть ожидающий вопрос от этого агента → это ответ на него
+    qid = questions_module.pending_for(agent_id)
+    if qid:
+        questions_module.answer(qid, message)
+        threads_module.mark_answered(qid)
+        await bus.publish({"type": "question_answered", "question_id": qid, "agent_id": agent_id})
+        await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "user",
+                           "kind": "msg", "text": message})
+        return {"agent_id": agent_id, "answered": True}
+
+    # 2) Иначе — обычный диалог с агентом
+    await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "user",
+                       "kind": "msg", "text": message})
     try:
         reply = await chat.ask(agent_id, message, publish=bus.publish)
+        threads_module.post(agent_id, "agent", reply)
+        await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
+                           "kind": "msg", "text": reply})
         return {"agent_id": agent_id, "reply": reply}
     except Exception as e:
         return JSONResponse({"error": str(e)[:200]}, status_code=500)

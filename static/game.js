@@ -49,18 +49,19 @@ const ROLE_COLORS = {
   developer:  "#ce93d8",
   marketer:   "#80cbc4",
   analyst:    "#fff176",
+  integrator: "#4dd0e1",
 };
 
 // Иконки ролей (emoji -> рисуем текстом)
 const ROLE_ICONS = {
   orchestrator: "🧭", researcher: "🔍", strategist: "📋", architect: "🏗️", hr: "👔",
-  salesman: "💰", developer: "💻", marketer: "📢", analyst: "📊",
+  salesman: "💰", developer: "💻", marketer: "📢", analyst: "📊", integrator: "🔌",
 };
 
 // Человекочитаемые названия ролей
 const ROLE_NAMES = {
   orchestrator: "Директор", researcher: "Ресёрчер", strategist: "Стратег", architect: "Архитектор", hr: "HR",
-  salesman: "Продажник", developer: "Разработчик", marketer: "Маркетолог", analyst: "Аналитик",
+  salesman: "Продажник", developer: "Разработчик", marketer: "Маркетолог", analyst: "Аналитик", integrator: "Интегратор",
 };
 
 // ---- Карта офиса (0=пол, 1=стена, 2=стол, 3=окно, 4=растение) ---
@@ -275,7 +276,7 @@ function drawIsoMap() {
 const HAIR_COLORS = {
   orchestrator: "#8a6d00", researcher: "#1a4a6a", strategist: "#2a5a3a", hr: "#7a4a10",
   salesman: "#7a2a4a", developer: "#5a2a6a", marketer: "#2a5a55", analyst: "#6a6a10",
-  architect: "#4a3a6a",
+  architect: "#4a3a6a", integrator: "#0a5a6a",
 };
 
 function drawIsoCharacter(cx, cy, color, role, status) {
@@ -464,11 +465,14 @@ function handleEvent(event) {
   else if (event.type === "speech") {
     if (!hist) addBubble(event.agent_id, event.text);
     addLog(event.agent_id, event.text, getRole(event.agent_id), hist);
-    addToChatFeed({from: event.agent_id, role: getRole(event.agent_id), text: event.text}, hist);
+    onOfficeMessage({from: event.agent_id, role: getRole(event.agent_id), text: event.text}, hist);
     if (!hist) updateAgentStatus(event.agent_id, "thinking", event.text);
   }
   else if (event.type === "office_chat") {
-    addToChatFeed({from: event.from, role: event.role, text: event.text}, hist);
+    onOfficeMessage({from: event.from, role: event.role, text: event.text}, hist);
+  }
+  else if (event.type === "agent_message") {
+    if (!hist) onAgentMessage(event);
   }
   else if (event.type === "thinking") {
     if (!hist) {
@@ -492,20 +496,6 @@ function handleEvent(event) {
   else if (event.type === "error") {
     addLog(event.agent_id, "⚠ " + event.text, getRole(event.agent_id), hist);
   }
-  else if (event.type === "question") {
-    if (!hist) {
-      addQuestionCard(event);
-      // Auto-switch only from the office canvas; elsewhere just pulse the badge
-      if (_currentView === "office") {
-        switchView("questions");
-      } else {
-        const badge = document.getElementById("badge-questions");
-        badge.classList.add("badge-pulse");
-        setTimeout(() => badge.classList.remove("badge-pulse"), 2000);
-        showToast("❓ Агент задал вопрос — см. вкладку «Вопросы»", "ok");
-      }
-    }
-  }
   else if (event.type === "connection_added") {
     if (!hist) {
       loadConnections();  // обновляем вкладку Доступы
@@ -515,115 +505,14 @@ function handleEvent(event) {
   else if (event.type === "connection_error") {
     if (!hist) showToast(`❌ ${event.platform}: ${event.error}`, "err");
   }
+  else if (event.type === "integration_used") {
+    if (!hist) showToast(event.text || "⚙️ Действие во внешнем сервисе", "ok");
+  }
   else if (event.type === "question_answered") {
-    removeQuestionCard(event.question_id);
-  }
-}
-
-async function loadQuestions() {
-  try {
-    const r = await fetch("/api/questions");
-    const d = await r.json();
-    const qs = d.questions || [];
-    const badge = document.getElementById("badge-questions");
-    badge.textContent = qs.length || "";
-    badge.style.display = qs.length ? "block" : "none";
-
-    // Add only new cards — don't wipe existing ones (preserves typed text)
-    for (const q of qs) addQuestionCard(q, false);
-
-    // Remove cards that are no longer pending
-    const wrap = document.getElementById("questions-wrap");
-    const activeIds = new Set(qs.map(q => q.question_id));
-    wrap.querySelectorAll(".q-card").forEach(card => {
-      const qid = card.id.replace("qcard-", "");
-      if (!activeIds.has(qid)) card.remove();
-    });
-
-    if (!wrap.querySelectorAll(".q-card").length) {
-      if (!document.getElementById("no-questions")) {
-        const note = document.createElement("div");
-        note.className = "empty-note"; note.id = "no-questions";
-        note.textContent = "Нет ожидающих вопросов";
-        wrap.appendChild(note);
-      }
+    // Вопрос закрыт (ответили в чате или таймаут) — обновим открытый тред
+    if (!hist && activeThread === event.agent_id && _currentView === "chat") {
+      loadAgentThread(event.agent_id);
     }
-  } catch (e) { console.error("loadQuestions:", e); }
-}
-
-function addQuestionCard(event, updateBadge = true) {
-  const wrap = document.getElementById("questions-wrap");
-  const noQ = document.getElementById("no-questions");
-  if (noQ) noQ.remove();
-
-  if (document.getElementById("qcard-" + event.question_id)) return;
-
-  const role = event.agent_id ? getRole(event.agent_id) : "агент";
-  const card = document.createElement("div");
-  card.className = "q-card";
-  card.id = "qcard-" + event.question_id;
-  card.innerHTML = `
-    <div class="qc-head">
-      <span class="qc-role">${ROLE_ICONS[role] || "❓"} ${role}</span>
-      <span class="qc-id">${event.agent_id || ""}</span>
-    </div>
-    <div class="qc-text">${event.text}</div>
-    <textarea rows="3" placeholder="Введите ответ... (Ctrl+Enter для отправки)"></textarea>
-    <div class="qc-actions">
-      <button class="q-skip-btn">Пропустить</button>
-      <button class="q-submit-btn">Отправить ответ</button>
-    </div>
-  `;
-  wrap.prepend(card);
-
-  const ta = card.querySelector("textarea");
-  ta.focus();
-
-  async function submit() {
-    const answer = ta.value.trim();
-    if (!answer) return;
-    try {
-      await fetch("/api/answer", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({question_id: event.question_id, answer}),
-      });
-      removeQuestionCard(event.question_id);
-    } catch (err) { console.error("Failed to send answer:", err); }
-  }
-
-  card.querySelector(".q-submit-btn").addEventListener("click", submit);
-  card.querySelector(".q-skip-btn").addEventListener("click", () => {
-    fetch("/api/answer", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({question_id: event.question_id, answer: ""}),
-    }).catch(() => {});
-    removeQuestionCard(event.question_id);
-  });
-  ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKey) submit(); });
-
-  if (updateBadge) {
-    const badge = document.getElementById("badge-questions");
-    const cur = parseInt(badge.textContent || "0");
-    badge.textContent = cur + 1;
-    badge.style.display = "block";
-  }
-}
-
-function removeQuestionCard(qid) {
-  const card = document.getElementById("qcard-" + qid);
-  if (card) card.remove();
-  const wrap = document.getElementById("questions-wrap");
-  const remaining = wrap.querySelectorAll(".q-card").length;
-  const badge = document.getElementById("badge-questions");
-  badge.textContent = remaining || "";
-  badge.style.display = remaining ? "block" : "none";
-  if (!remaining) {
-    const note = document.createElement("div");
-    note.className = "empty-note";
-    note.id = "no-questions";
-    note.textContent = "Нет ожидающих вопросов";
-    wrap.appendChild(note);
   }
 }
 
@@ -647,6 +536,7 @@ function spawnAgent(agent_id, role, desk, task) {
   };
 
   updateSidebar();
+  if (_currentView === "chat") renderThreadList();
 }
 
 function addBubble(agent_id, text) {
@@ -986,104 +876,263 @@ function syncAgentTargets() {
   }
 }
 
-// ---- Чат-окно ----
-const chatWindow = document.getElementById("chat-window");
-const chatTitle = document.getElementById("chat-title");
-const chatMessages = document.getElementById("chat-messages");
-const chatInput = document.getElementById("chat-input");
-const chatSend = document.getElementById("chat-send");
-const chatClose = document.getElementById("chat-close");
+// ============================================================
+// ЧАТЫ: общий канал офиса + личные чаты с агентами (вкладка «Чаты»)
+// ============================================================
+let activeThread = null;          // "office" | agent_id | null
+const threadUnread = {};          // id -> число непрочитанных
+let threadMeta = {};              // agent_id -> {last_text, last_ts, unanswered}
 
-// Истории чатов на клиенте: agent_id -> [{role, text}]
-const chatHistories = {};
-
+// Клик по агенту на карте → открыть вкладку «Чаты» с этим агентом
 function openChat(agentId) {
   selectedAgentId = agentId;
-  const a = agents[agentId];
-  if (!a) return;
-
-  chatTitle.textContent = `${ROLE_ICONS[a.role] || "🤖"} ${a.role}`;
-  chatTitle.style.color = a.color;
-  chatWindow.classList.remove("hidden");
-
-  // Восстанавливаем историю
-  renderChatHistory(agentId);
-  chatInput.focus();
-
-  // Прячем подсказку
-  const hint = document.getElementById("hint");
-  if (hint) hint.style.opacity = "0";
+  switchView("chat");
+  selectThread(agentId);
 }
 
-function closeChat() {
-  chatWindow.classList.add("hidden");
-  selectedAgentId = null;
-}
-
-function renderChatHistory(agentId) {
-  chatMessages.innerHTML = "";
-  const hist = chatHistories[agentId] || [];
-  if (hist.length === 0) {
-    const a = agents[agentId];
-    addChatMessage("agent", `Привет! Я ${a.role}. ${a.task ? "Сейчас работаю над: " + a.task : ""} Чем помочь?`, false);
-  } else {
-    for (const m of hist) addChatMessage(m.role, m.text, false);
-  }
-}
-
-function addChatMessage(role, text, save = true) {
-  const div = document.createElement("div");
-  div.className = "msg " + role;
-  div.textContent = text;
-  chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-  if (save && selectedAgentId) {
-    (chatHistories[selectedAgentId] = chatHistories[selectedAgentId] || []).push({role, text});
-  }
-  return div;
-}
-
-async function sendChat() {
-  const message = chatInput.value.trim();
-  if (!message || !selectedAgentId) return;
-  const agentId = selectedAgentId;
-
-  addChatMessage("user", message);
-  chatInput.value = "";
-  chatSend.disabled = true;
-
-  // Индикатор "печатает"
-  const typing = document.createElement("div");
-  typing.className = "msg typing";
-  typing.textContent = "печатает...";
-  chatMessages.appendChild(typing);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-
+async function loadThreadList() {
   try {
-    const resp = await fetch("/api/ask", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({agent_id: agentId, message}),
-    });
-    const data = await resp.json();
-    typing.remove();
-    if (data.error) {
-      addChatMessage("agent", "⚠ Ошибка: " + data.error, false);
-    } else {
-      addChatMessage("agent", data.reply);
+    const r = await fetch("/api/threads");
+    const d = await r.json();
+    threadMeta = d.threads || {};
+  } catch { threadMeta = {}; }
+  // Засеваем непрочитанные открытыми вопросами (на случай перезагрузки)
+  for (const [id, m] of Object.entries(threadMeta)) {
+    if (!(id in threadUnread)) threadUnread[id] = m.unanswered || 0;
+  }
+  renderThreadList();
+  updateChatBadge();
+}
+
+function renderThreadList() {
+  const sb = document.getElementById("chats-sidebar");
+  if (!sb) return;
+  sb.innerHTML = "";
+  sb.appendChild(buildChatItem("office", "🏢", "Общий чат офиса", "Все агенты и вы", "#8fd3ff"));
+  Object.keys(agents).sort().forEach((id) => {
+    const a = agents[id];
+    const meta = threadMeta[id] || {};
+    sb.appendChild(buildChatItem(
+      id, ROLE_ICONS[a.role] || "🤖", ROLE_NAMES[a.role] || a.role,
+      meta.last_text || "", a.color));
+  });
+}
+
+function buildChatItem(id, icon, name, last, color) {
+  const item = document.createElement("div");
+  item.className = "chat-item" + (activeThread === id ? " active" : "");
+  const unread = threadUnread[id] || 0;
+  item.innerHTML = `
+    <div class="ci-avatar" style="color:${color||"#cfd"}">${icon}</div>
+    <div class="ci-body">
+      <div class="ci-name">${escapeHtml(name)}</div>
+      <div class="ci-last">${escapeHtml((last || "").slice(0, 42))}</div>
+    </div>
+    ${unread ? `<div class="ci-badge">${unread}</div>` : ""}
+  `;
+  item.addEventListener("click", () => selectThread(id));
+  return item;
+}
+
+async function selectThread(id) {
+  activeThread = id;
+  threadUnread[id] = 0;
+  selectedAgentId = id === "office" ? null : id;
+  const input = document.getElementById("chat-compose-input");
+  const send = document.getElementById("chat-compose-send");
+  const head = document.getElementById("cth-title");
+  input.disabled = false; send.disabled = false;
+  if (id === "office") {
+    head.textContent = "🏢 Общий чат офиса";
+    input.placeholder = "Написать всем агентам...";
+    await loadOfficeFeed();
+  } else {
+    const a = agents[id];
+    head.textContent = `${ROLE_ICONS[a?.role] || "🤖"} ${ROLE_NAMES[a?.role] || id}`;
+    input.placeholder = "Сообщение агенту...";
+    await loadAgentThread(id);
+  }
+  renderThreadList();
+  updateChatBadge();
+  input.focus();
+}
+
+function _feedEl() { return document.getElementById("chat-feed"); }
+
+function renderBubble({icon, who, text, cls, question, answered}) {
+  const feed = _feedEl();
+  const no = feed.querySelector(".empty-note");
+  if (no) no.remove();
+  const wrap = document.createElement("div");
+  wrap.className = "cf-msg" + (cls || "");
+  const hint = (question && !answered)
+    ? `<div class="cf-question-hint">⏳ агент ждёт вашего ответа — напишите ниже</div>` : "";
+  wrap.innerHTML = `
+    <div class="cf-avatar">${icon}</div>
+    <div class="cf-body">
+      <div class="cf-who">${escapeHtml(who)}</div>
+      <div class="cf-text${question ? " is-question" : ""}">${escapeHtml(text || "")}</div>
+      ${hint}
+    </div>`;
+  feed.appendChild(wrap);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function renderOfficeMsg(msg) {
+  const from = msg.from || "agent";
+  const role = msg.role || roleFromId(from);
+  const isUser = from === "user" || role === "user";
+  const isSystem = from === "system" || role === "system";
+  renderBubble({
+    icon: isUser ? "🧑" : isSystem ? "🏢" : (ROLE_ICONS[role] || "🤖"),
+    who: isUser ? "Вы" : isSystem ? "Офис" : (ROLE_NAMES[role] || role),
+    text: msg.text,
+    cls: isUser ? " user-msg" : isSystem ? " system-msg" : "",
+  });
+}
+
+function renderThreadMsg(id, m) {
+  const a = agents[id];
+  const isUser = m.from === "user";
+  const isSystem = m.from === "system";
+  renderBubble({
+    icon: isUser ? "🧑" : isSystem ? "🏢" : (ROLE_ICONS[a?.role] || "🤖"),
+    who: isUser ? "Вы" : isSystem ? "Офис" : (ROLE_NAMES[a?.role] || a?.role || id),
+    text: m.text,
+    cls: isUser ? " user-msg" : isSystem ? " system-msg" : "",
+    question: m.kind === "question",
+    answered: m.answered,
+  });
+}
+
+async function loadOfficeFeed() {
+  const feed = _feedEl();
+  feed.innerHTML = "";
+  try {
+    const r = await fetch("/api/chat");
+    const d = await r.json();
+    const msgs = d.messages || [];
+    if (!msgs.length) { feed.innerHTML = `<div class="empty-note">Пока нет сообщений</div>`; return; }
+    msgs.forEach(m => renderOfficeMsg(m));
+  } catch {}
+}
+
+async function loadAgentThread(id) {
+  const feed = _feedEl();
+  feed.innerHTML = "";
+  try {
+    const r = await fetch(`/api/thread/${encodeURIComponent(id)}`);
+    const d = await r.json();
+    const msgs = d.messages || [];
+    if (!msgs.length) {
+      const a = agents[id];
+      feed.innerHTML = `<div class="empty-note">Чат с агентом «${escapeHtml(ROLE_NAMES[a?.role] || id)}» пуст. Напишите — он ответит.</div>`;
+      return;
     }
-  } catch (err) {
-    typing.remove();
-    addChatMessage("agent", "⚠ Не удалось связаться с агентом: " + err.message, false);
-  } finally {
-    chatSend.disabled = false;
-    chatInput.focus();
+    msgs.forEach(m => renderThreadMsg(id, m));
+  } catch {}
+}
+
+// Входящее сообщение в общий канал (speech агентов или office_chat)
+function onOfficeMessage(msg, historical = false) {
+  if (activeThread === "office" && _currentView === "chat") {
+    renderOfficeMsg(msg);
+  } else if (!historical) {
+    const isUser = (msg.from === "user") || (msg.role === "user");
+    if (!isUser) bumpUnread("office");
   }
 }
 
-chatSend.addEventListener("click", sendChat);
-chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
-chatClose.addEventListener("click", closeChat);
+// Входящее сообщение в личный чат с агентом (вопрос или реплика)
+function onAgentMessage(event) {
+  const id = event.agent_id;
+  const isQuestion = event.kind === "question";
+  if (activeThread === id && _currentView === "chat") {
+    renderThreadMsg(id, {from: event.from, text: event.text,
+                         kind: event.kind, answered: false});
+  } else if (event.from !== "user") {
+    bumpUnread(id);
+    if (isQuestion) {
+      const a = agents[id];
+      const who = ROLE_NAMES[a?.role] || id;
+      showToast(`❓ ${who} спрашивает — откройте «Чаты»`, "ok");
+      const badge = document.getElementById("badge-chat");
+      if (badge) { badge.classList.add("badge-pulse"); setTimeout(() => badge.classList.remove("badge-pulse"), 2000); }
+    }
+  }
+  // обновим превью в списке тредов
+  if (event.from !== "user") {
+    threadMeta[id] = threadMeta[id] || {};
+    threadMeta[id].last_text = event.text;
+  }
+  if (_currentView === "chat") renderThreadList();
+}
+
+function bumpUnread(id) {
+  if (activeThread === id && _currentView === "chat") return;
+  threadUnread[id] = (threadUnread[id] || 0) + 1;
+  updateChatBadge();
+  if (_currentView === "chat") renderThreadList();
+}
+
+function updateChatBadge() {
+  const total = Object.values(threadUnread).reduce((s, n) => s + (n || 0), 0);
+  const badge = document.getElementById("badge-chat");
+  if (!badge) return;
+  badge.textContent = total || "";
+  badge.style.display = total ? "block" : "none";
+}
+
+async function sendActiveMessage() {
+  const input = document.getElementById("chat-compose-input");
+  const send = document.getElementById("chat-compose-send");
+  const text = (input.value || "").trim();
+  if (!text || !activeThread) return;
+  input.value = "";
+
+  // Сообщения отрисовываются по событиям SSE (единый источник) — локально не дублируем
+  if (activeThread === "office") {
+    try {
+      await fetch("/api/chat", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({text}),
+      });
+    } catch { showToast("❌ Не удалось отправить", "err"); }
+    return;
+  }
+
+  const agentId = activeThread;
+  send.disabled = true;
+  const feed = _feedEl();
+  const typing = document.createElement("div");
+  typing.className = "cf-msg"; typing.id = "thread-typing";
+  typing.innerHTML = `<div class="cf-avatar">🤖</div><div class="cf-body"><div class="cf-text">печатает…</div></div>`;
+  feed.appendChild(typing); feed.scrollTop = feed.scrollHeight;
+  try {
+    const r = await fetch("/api/ask", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({agent_id: agentId, message: text}),
+    });
+    const d = await r.json();
+    typing.remove();
+    if (d.error) renderThreadMsg(agentId, {from: "agent", text: "⚠ " + d.error});
+    else if (d.answered) renderThreadMsg(agentId, {from: "system", text: "✓ Ответ отправлен агенту"});
+    // d.reply приходит через SSE agent_message — отдельно не рендерим
+  } catch (e) {
+    typing.remove();
+    renderThreadMsg(agentId, {from: "agent", text: "⚠ Не удалось связаться: " + e.message});
+  } finally {
+    send.disabled = false;
+    document.getElementById("chat-compose-input").focus();
+  }
+}
+
+function setupChat() {
+  const sendBtn = document.getElementById("chat-compose-send");
+  const inp = document.getElementById("chat-compose-input");
+  if (sendBtn) sendBtn.addEventListener("click", sendActiveMessage);
+  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") sendActiveMessage(); });
+}
 
 // ============================================================
 // ОНБОРДИНГ: клиент описывает задачу → офис запускается под него
@@ -1201,16 +1250,13 @@ function switchView(name) {
     resize();
     syncAgentTargets();
   }
-  if (name === "questions") {
-    loadQuestions();
-  }
   if (name === "progress") {
     loadProgress();
   }
   if (name === "chat") {
-    loadChatFeed();
-    const badge = document.getElementById("badge-chat");
-    if (badge) { badge.textContent = ""; badge.style.display = "none"; }
+    loadThreadList();
+    if (!activeThread) selectThread("office");
+    else selectThread(activeThread);
   }
 }
 
@@ -1293,79 +1339,6 @@ async function openMilestone(stageId) {
 }
 
 // ============================================================
-// ОБЩИЙ ЧАТ ОФИСА (двусторонний)
-// ============================================================
-const _chatSeen = new Set();
-
-function addToChatFeed(msg, historical = false) {
-  const feed = document.getElementById("chat-feed");
-  if (!feed) return;
-  const no = document.getElementById("no-chat-msgs");
-  if (no) no.remove();
-
-  const from = msg.from || "agent";
-  const role = msg.role || roleFromId(from);
-  const isUser = from === "user" || role === "user";
-  const isSystem = from === "system" || role === "system";
-
-  const wrap = document.createElement("div");
-  wrap.className = "cf-msg" + (isUser ? " user-msg" : isSystem ? " system-msg" : "");
-  const icon = isUser ? "🧑" : isSystem ? "🏢" : (ROLE_ICONS[role] || "🤖");
-  const who = isUser ? "Вы" : isSystem ? "Офис" : `${ROLE_NAMES[role] || role}`;
-  wrap.innerHTML = `
-    <div class="cf-avatar">${icon}</div>
-    <div class="cf-body">
-      <div class="cf-who">${escapeHtml(who)}</div>
-      <div class="cf-text">${escapeHtml(msg.text || "")}</div>
-    </div>
-  `;
-  feed.appendChild(wrap);
-  feed.scrollTop = feed.scrollHeight;
-
-  // Бейдж непрочитанного, если мы не на вкладке чата
-  if (!historical && _currentView !== "chat" && !isUser) {
-    const badge = document.getElementById("badge-chat");
-    if (badge) {
-      const cur = parseInt(badge.textContent || "0") + 1;
-      badge.textContent = cur;
-      badge.style.display = "block";
-    }
-  }
-}
-
-async function loadChatFeed() {
-  try {
-    const r = await fetch("/api/chat");
-    const d = await r.json();
-    const msgs = d.messages || [];
-    const feed = document.getElementById("chat-feed");
-    if (feed) feed.querySelectorAll(".cf-msg").forEach(c => c.remove());
-    for (const m of msgs) addToChatFeed(m, true);
-  } catch (e) { /* чат может быть недоступен */ }
-}
-
-async function sendChatBroadcast() {
-  const inp = document.getElementById("chat-compose-input");
-  const text = (inp.value || "").trim();
-  if (!text) return;
-  inp.value = "";
-  addToChatFeed({from: "user", role: "user", text}, true);
-  try {
-    await fetch("/api/chat", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({text}),
-    });
-  } catch (e) { showToast("❌ Не удалось отправить сообщение", "err"); }
-}
-
-function setupChat() {
-  const sendBtn = document.getElementById("chat-compose-send");
-  const inp = document.getElementById("chat-compose-input");
-  if (sendBtn) sendBtn.addEventListener("click", sendChatBroadcast);
-  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChatBroadcast(); });
-}
-
-// ============================================================
 // CONNECTIONS
 // ============================================================
 let connectionsCache = [];
@@ -1377,6 +1350,7 @@ async function loadConnections() {
     connectionsCache = d.connections || [];
   } catch { connectionsCache = []; }
   renderConnections();
+  loadIntegrations();  // статусы интеграций зависят от подключений
 }
 
 function renderConnections() {
@@ -1409,6 +1383,75 @@ function renderConnections() {
   });
 }
 
+// ---- Каталог готовых интеграций ----
+let integrationsCache = [];
+
+async function loadIntegrations() {
+  try {
+    const r = await fetch("/api/integrations");
+    const d = await r.json();
+    integrationsCache = d.integrations || [];
+  } catch { integrationsCache = []; }
+  renderIntegrations();
+}
+
+function renderIntegrations() {
+  const wrap = document.getElementById("integrations-catalog");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (!integrationsCache.length) {
+    wrap.innerHTML = `<div class="empty-note">Нет доступных интеграций</div>`;
+    return;
+  }
+  integrationsCache.forEach((it) => {
+    const card = document.createElement("div");
+    card.className = "integ-card";
+    const acts = (it.actions || []).map(a => a.name).join(", ") || "—";
+    const statusCls = it.connected ? "on" : "off";
+    const statusTxt = it.connected ? "✅ подключено" : "⚪ не подключено";
+    card.innerHTML = `
+      <div class="ic-head">
+        <span class="ic-icon">${escapeHtml(it.icon||"⚙️")}</span>
+        <span class="ic-name">${escapeHtml(it.title||it.name)}</span>
+        <span class="ic-status ${statusCls}">${statusTxt}</span>
+      </div>
+      <div class="ic-desc">${escapeHtml(it.description||"")}</div>
+      <div class="ic-actions-list">Действия: ${escapeHtml(acts)}</div>
+      ${it.connected ? "" : `<div class="ic-howto">${escapeHtml(it.how_to||"")}</div>`}
+      <div class="ic-btns">
+        <button class="dc-btn integ-connect">${it.connected ? "✎ Изменить доступ" : "🔌 Подключить"}</button>
+        ${it.connected ? `<button class="dc-btn integ-test">🧪 Проверить</button>` : ""}
+      </div>
+    `;
+    card.querySelector(".integ-connect").addEventListener("click", () => connectIntegration(it));
+    const testBtn = card.querySelector(".integ-test");
+    if (testBtn) testBtn.addEventListener("click", () => testIntegration(it));
+    wrap.appendChild(card);
+  });
+}
+
+function connectIntegration(it) {
+  // Ищем уже существующее подключение с таким именем — тогда редактируем его
+  const existing = connectionsCache.find(c =>
+    (c.name||"").toLowerCase() === (it.title||"").toLowerCase() ||
+    (c.name||"").toLowerCase() === (it.name||"").toLowerCase());
+  if (existing) { openConnForm(existing); return; }
+  const fields = {};
+  (it.cred_fields || []).forEach(f => { fields[f.key] = ""; });
+  openConnForm({ name: it.title || it.name, type: "api", fields,
+                 note: `Интеграция: ${it.name}` });
+}
+
+async function testIntegration(it) {
+  showToast(`🧪 Проверяю ${it.title}...`, "ok");
+  try {
+    const r = await fetch(`/api/integrations/${encodeURIComponent(it.name)}/test`, {method: "POST"});
+    const d = await r.json();
+    if (d.ok) showToast(`✅ ${it.title}: ${(d.result||"работает").slice(0,80)}`, "ok");
+    else showToast(`❌ ${it.title}: ${(d.error||"ошибка").slice(0,80)}`, "err");
+  } catch (e) { showToast(`❌ Ошибка проверки: ${e.message}`, "err"); }
+}
+
 function connTypeLabel(t) {
   return ({api:"API ключ", login:"Логин-пароль", token:"Токен", other:"Другое"})[t] || (t || "Другое");
 }
@@ -1429,7 +1472,7 @@ function addFieldRow(k, v) {
 function escapeAttr(s) { return (s||"").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 
 function openConnForm(conn) {
-  document.getElementById("conn-box-title").textContent = conn ? "Изменить подключение" : "Новое подключение";
+  document.getElementById("conn-box-title").textContent = (conn && conn.id) ? "Изменить подключение" : "Новое подключение";
   document.getElementById("cf-id").value = conn ? (conn.id||"") : "";
   document.getElementById("cf-name").value = conn ? (conn.name||"") : "";
   document.getElementById("cf-type").value = conn ? (conn.type||"api") : "api";
@@ -1664,7 +1707,7 @@ window.addEventListener("load", () => {
   // Agent drawer
   document.getElementById("ad-close").addEventListener("click", closeAgentDrawer);
   document.getElementById("ad-chat-btn").addEventListener("click", () => {
-    if (drawerAgentId) { openChat(drawerAgentId); closeAgentDrawer(); switchView("office"); }
+    if (drawerAgentId) { const id = drawerAgentId; closeAgentDrawer(); openChat(id); }
   });
 
   // Progress bar
@@ -1675,12 +1718,9 @@ window.addEventListener("load", () => {
   setupConnections();
   loadConnections();
 
-  // Questions
-  loadQuestions();
-
-  // Общий чат
+  // Чаты (общий + личные с агентами)
   setupChat();
-  loadChatFeed();
+  loadThreadList();
 
   // Model switcher (topbar global) + onboarding model picker
   setupModelSwitcher();

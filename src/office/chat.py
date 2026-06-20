@@ -178,11 +178,9 @@ async def ask(
         del history[:len(history) - MAX_HISTORY]
     _save_histories()
 
-    if publish:
-        # Показываем ответ пузырём над агентом
-        await publish({"type": "speech", "agent_id": agent_id, "text": reply[:120]})
-        await publish({"type": "chat_reply", "agent_id": agent_id, "text": reply})
-
+    # Ответ агента доставляется в личный чат вызывающей стороной (server /api/ask
+    # публикует agent_message). Здесь намеренно НЕ публикуем speech/chat_reply,
+    # чтобы личная переписка не утекала в общий канал офиса.
     return reply
 
 

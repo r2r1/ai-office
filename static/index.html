@@ -59,7 +59,21 @@ button { font-family: inherit; }
 .ps-stage .pss-count { font-size: 10px; color: #9fb3e0; background: #1e2a3a; border-radius: 8px; padding: 1px 7px; }
 .ps-stage .pss-summary { font-size: 11px; color: #667; margin-top: 6px; line-height: 1.5; }
 
-/* ── Chat tab ── */
+/* ── Chats tab ── */
+#chats-layout { flex: 1; display: flex; min-height: 0; }
+#chats-sidebar { width: 240px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.chat-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+.chat-item:hover { background: var(--panel2); }
+.chat-item.active { background: #16243a; border-color: #2a4a78; }
+.chat-item .ci-avatar { width: 30px; height: 30px; border-radius: 50%; background: #1e2a3a; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+.chat-item .ci-body { flex: 1; min-width: 0; }
+.chat-item .ci-name { font-size: 12px; font-weight: 600; color: #d0d0e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item .ci-last { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item .ci-badge { background: #e0507a; color: #fff; font-size: 10px; min-width: 17px; height: 17px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 5px; flex-shrink: 0; }
+#chats-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#chats-thread-head { padding: 11px 18px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; color: #d0d0e8; flex-shrink: 0; }
+.cf-msg .cf-text.is-question { border-left: 3px solid #e0507a; background: #2a1a22; }
+.cf-question-hint { font-size: 10px; color: #e0a0b0; margin-top: 4px; }
 #chat-feed { flex: 1; overflow-y: auto; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
 .cf-msg { display: flex; gap: 10px; align-items: flex-start; }
 .cf-msg.user-msg { flex-direction: row-reverse; }
@@ -75,6 +89,7 @@ button { font-family: inherit; }
 #chat-compose-input:focus { border-color: var(--accent); }
 #chat-compose-send { background: #1e3558; border: none; border-radius: 6px; color: #8fd3ff; padding: 0 16px; cursor: pointer; font-size: 14px; }
 #chat-compose-send:hover { background: #2a4a78; }
+#chat-compose-send:disabled, #chat-compose-input:disabled { opacity: 0.4; cursor: default; }
 
 #tb-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 #status-bar { font-size: 11px; color: #3a3a5a; white-space: nowrap; }
@@ -199,29 +214,19 @@ canvas { display: block; }
 .conn-card .cc-fields .cf-v { color: #c8c8e0; }
 .conn-card .cc-note { font-size: 11px; color: #667; margin-bottom: 8px; font-style: italic; }
 .conn-card .cc-actions { display: flex; gap: 8px; }
-
-/* ── Questions view ── */
-#questions-wrap { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
-.q-card {
-  background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 16px;
-  border-left: 3px solid #ffd54f;
-}
-.q-card .qc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.q-card .qc-role { font-weight: bold; font-size: 13px; color: #ffd54f; }
-.q-card .qc-id { font-size: 10px; color: #445; }
-.q-card .qc-text { font-size: 13px; color: #d0d0e8; line-height: 1.6; margin-bottom: 12px; }
-.q-card textarea { width: 100%; background: #0e0e1c; border: 1px solid #252540; color: #d8d8e8; border-radius: 6px; padding: 8px; font-family: inherit; font-size: 12px; resize: vertical; }
-.q-card .qc-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
-.q-submit-btn {
-  font-size: 12px; padding: 6px 16px; border-radius: 5px; cursor: pointer;
-  background: #2a3a1a; border: 1px solid #4a7a30; color: #a0d080; font-family: inherit;
-}
-.q-submit-btn:hover { background: #3a5020; }
-.q-skip-btn {
-  font-size: 12px; padding: 6px 16px; border-radius: 5px; cursor: pointer;
-  background: transparent; border: 1px solid #2a2a40; color: #665; font-family: inherit;
-}
-.q-skip-btn:hover { color: #88a; border-color: #3a3a5a; }
+.conn-subhead { font-size: 13px; color: #8a8aa0; margin: 18px 0 10px; font-weight: 600; }
+#integrations-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 14px; }
+.integ-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 14px; }
+.integ-card .ic-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.integ-card .ic-icon { font-size: 18px; }
+.integ-card .ic-name { font-weight: bold; font-size: 14px; color: #d8d8e8; flex: 1; }
+.integ-card .ic-status { font-size: 10px; padding: 2px 8px; border-radius: 10px; }
+.integ-card .ic-status.on { background: #133a26; color: #6ee7a8; border: 1px solid #1e5a3a; }
+.integ-card .ic-status.off { background: #2a2a33; color: #99a; border: 1px solid #3a3a44; }
+.integ-card .ic-desc { font-size: 11px; color: #99a; line-height: 1.6; margin-bottom: 8px; }
+.integ-card .ic-actions-list { font-size: 10px; color: #778; margin-bottom: 10px; }
+.integ-card .ic-btns { display: flex; gap: 8px; }
+.integ-card .ic-howto { font-size: 10px; color: #667; white-space: pre-line; margin: 6px 0 8px; border-left: 2px solid #2a4a78; padding-left: 8px; }
 
 /* ─────────────── HINT ─────────────── */
 #hint {
@@ -230,39 +235,6 @@ canvas { display: block; }
   padding: 6px 16px; border-radius: 20px; border: 1px solid var(--border);
   pointer-events: none; white-space: nowrap;
 }
-
-/* ─────────────── CHAT ─────────────── */
-#chat-window {
-  position: absolute; bottom: 16px; right: 16px; width: 360px; height: 460px;
-  background: #0d0d1c; border: 1px solid var(--border2); border-radius: 10px;
-  display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.7); z-index: 30;
-}
-#chat-window.hidden { display: none; }
-#chat-header {
-  padding: 10px 14px; background: #141428; display: flex;
-  justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);
-}
-#chat-title { font-weight: bold; font-size: 13px; }
-#chat-close { cursor: pointer; color: #555; font-size: 14px; }
-#chat-close:hover { color: #f06292; }
-#chat-messages {
-  flex: 1; overflow-y: auto; padding: 10px;
-  display: flex; flex-direction: column; gap: 7px; font-size: 12px; line-height: 1.45;
-}
-.msg { padding: 7px 11px; border-radius: 8px; max-width: 88%; word-wrap: break-word; white-space: pre-wrap; }
-.msg.user { align-self: flex-end; background: #1e3558; color: #c8e0f8; }
-.msg.agent { align-self: flex-start; background: #141428; color: #c8c8e0; }
-.msg.typing { align-self: flex-start; background: #141428; color: #555; font-style: italic; }
-#chat-input-row { display: flex; padding: 8px; gap: 6px; border-top: 1px solid #1a1a2e; }
-#chat-input {
-  flex: 1; background: #0f0f20; border: 1px solid var(--border2); border-radius: 6px;
-  padding: 8px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none;
-}
-#chat-input:focus { border-color: var(--accent); }
-#chat-send { background: #1e3558; border: none; border-radius: 6px; color: #8fd3ff; padding: 0 14px; cursor: pointer; font-size: 13px; }
-#chat-send:hover { background: #2a4a78; }
-#chat-send:disabled { opacity: 0.35; cursor: default; }
 
 /* ─────────────── AGENT DETAIL DRAWER ─────────────── */
 #agent-drawer {
@@ -491,9 +463,8 @@ canvas { display: block; }
       <div class="nav-item" data-view="results"><span class="ni-icon">📦</span><span class="ni-label">Результаты</span><span class="ni-badge" id="badge-results"></span></div>
       <div class="nav-item" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
       <div class="nav-item" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">События</span></div>
-      <div class="nav-item" data-view="questions"><span class="ni-icon">❓</span><span class="ni-label">Вопросы</span><span class="ni-badge" id="badge-questions"></span></div>
       <div class="nav-item" data-view="progress"><span class="ni-icon">📈</span><span class="ni-label">Этапы</span></div>
-      <div class="nav-item" data-view="chat"><span class="ni-icon">💬</span><span class="ni-label">Чат</span><span class="ni-badge" id="badge-chat"></span></div>
+      <div class="nav-item" data-view="chat"><span class="ni-icon">💬</span><span class="ni-label">Чаты</span><span class="ni-badge" id="badge-chat"></span></div>
     </div>
 
     <!-- Main -->
@@ -503,18 +474,7 @@ canvas { display: block; }
       <div class="view active" id="view-office">
         <div id="game-wrap">
           <canvas id="canvas"></canvas>
-          <div id="hint">👆 Кликни на сотрудника, чтобы поговорить</div>
-          <div id="chat-window" class="hidden">
-            <div id="chat-header">
-              <span id="chat-title">Агент</span>
-              <span id="chat-close">✕</span>
-            </div>
-            <div id="chat-messages"></div>
-            <div id="chat-input-row">
-              <input id="chat-input" type="text" placeholder="Напиши агенту..." autocomplete="off">
-              <button id="chat-send">▶</button>
-            </div>
-          </div>
+          <div id="hint">👆 Кликни на сотрудника, чтобы открыть с ним чат</div>
         </div>
       </div>
 
@@ -552,6 +512,11 @@ canvas { display: block; }
         </div>
         <div id="conn-wrap">
           <div id="conn-hint">Здесь агенты берут доступы к внешним платформам. Если агенту не хватает доступа — он спросит, и вы добавите его сюда.</div>
+          <div id="integrations-section">
+            <h3 class="conn-subhead">⚙️ Готовые интеграции</h3>
+            <div id="integrations-catalog"></div>
+          </div>
+          <h3 class="conn-subhead">🔑 Сохранённые подключения</h3>
           <div id="conn-list">
             <div class="empty-note" id="no-conns">Пока нет ни одного подключения</div>
           </div>
@@ -564,17 +529,6 @@ canvas { display: block; }
         <div id="log-wrap"></div>
       </div>
 
-      <!-- Questions view -->
-      <div class="view" id="view-questions">
-        <div class="view-head">
-          <h2>❓ Вопросы агентов</h2>
-          <div class="vh-sub">Ответьте на вопросы — агенты ждут вашего ответа</div>
-        </div>
-        <div id="questions-wrap">
-          <div class="empty-note" id="no-questions">Нет ожидающих вопросов</div>
-        </div>
-      </div>
-
       <!-- Progress view -->
       <div class="view" id="view-progress">
         <div class="view-head"><h2>📈 Этапы проекта</h2></div>
@@ -583,15 +537,21 @@ canvas { display: block; }
         </div>
       </div>
 
-      <!-- Chat view -->
+      <!-- Chats view -->
       <div class="view" id="view-chat">
-        <div class="view-head"><h2>💬 Общий чат офиса</h2></div>
-        <div id="chat-feed">
-          <div class="empty-note" id="no-chat-msgs">Здесь появятся сообщения агентов и ваши трансляции</div>
-        </div>
-        <div id="chat-compose">
-          <input id="chat-compose-input" type="text" placeholder="Написать всем агентам..." autocomplete="off">
-          <button id="chat-compose-send">▶</button>
+        <div class="view-head"><h2>💬 Чаты</h2></div>
+        <div id="chats-layout">
+          <div id="chats-sidebar"></div>
+          <div id="chats-main">
+            <div id="chats-thread-head"><span id="cth-title">Выберите чат слева</span></div>
+            <div id="chat-feed">
+              <div class="empty-note" id="no-chat-msgs">Выберите чат слева, чтобы начать общение</div>
+            </div>
+            <div id="chat-compose">
+              <input id="chat-compose-input" type="text" placeholder="Сообщение..." autocomplete="off" disabled>
+              <button id="chat-compose-send" disabled>▶</button>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -16,6 +16,7 @@ ROLE_COLORS = {
     "developer": "#ce93d8",
     "marketer": "#80cbc4",
     "analyst": "#fff176",
+    "integrator": "#4dd0e1",
 }
 
 

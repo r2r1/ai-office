@@ -60,6 +60,15 @@ def answer(qid: str, answer: str) -> bool:
     return False
 
 
+def pending_for(agent_id: str) -> str:
+    """Возвращает qid последнего неотвеченного вопроса этого агента ('' если нет)."""
+    cands = [(m["ts"], qid) for qid, m in _meta.items() if m.get("agent_id") == agent_id]
+    if not cands:
+        return ""
+    cands.sort()
+    return cands[-1][1]
+
+
 def list_pending() -> list[dict]:
     """Returns all unanswered questions, oldest first."""
     return sorted(
