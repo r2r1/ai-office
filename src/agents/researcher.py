@@ -22,13 +22,13 @@ DEFAULT_QUESTION = (
 )
 
 _SYSTEM_QUICK = """Ты — исследователь AI-офиса. Отвечай строго на основе данных из поиска.
-Сделай 2-3 целенаправленных запроса через web_search и дай краткий конкретный ответ.
-Максимум 300 слов. Только факты и цифры — без воды."""
+Сделай 1-2 целенаправленных запроса через web_search и сразу дай краткий конкретный ответ.
+Максимум 300 слов. Только факты и цифры — без воды. Не повторяй похожие запросы."""
 
 _SYSTEM_DEEP = """Ты — ведущий исследователь AI-офиса. Принимай решения строго на основе данных.
 
 Процесс:
-1. Сделай 6-10 целенаправленных запросов через web_search.
+1. Сделай 3-5 целенаправленных запросов через web_search (не больше — не дублируй запросы).
 2. Охвати: тренды, кейсы, цифры, российский и мировой рынки.
 3. Синтезируй в структурированный отчёт.
 
@@ -40,8 +40,9 @@ _SYSTEM_DEEP = """Ты — ведущий исследователь AI-офис
 
 Пиши по-русски. Конкретные цифры, сроки, примеры."""
 
-_MAX_TOKENS = {"quick": 1200, "deep": 6000}
-_MAX_ITERS = {"quick": 4, "deep": 12}
+_MAX_TOKENS = {"quick": 1000, "deep": 4000}
+_MAX_ITERS = {"quick": 3, "deep": 7}
+_MAX_SEARCHES = {"quick": 2, "deep": 5}
 
 
 async def run_async(
@@ -64,6 +65,7 @@ async def run_async(
         model=models_module.for_agent(agent_id),
         max_tokens=_MAX_TOKENS[depth],
         max_iterations=_MAX_ITERS[depth],
+        max_searches=_MAX_SEARCHES[depth],
         use_search=True,
         publish=publish,
         agent_id=agent_id,
@@ -95,9 +97,8 @@ async def deep(question: str, publish=None, agent_id="researcher_1") -> str:
 
 
 def _save_report(content: str, depth: str) -> Path:
-    path = Path("reports")
-    path.mkdir(parents=True, exist_ok=True)
+    from src.saas import context as ctx
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    p = path / f"research_{depth}_{ts}.md"
+    p = ctx.tenant_dir() / f"research_{depth}_{ts}.md"
     p.write_text(content, encoding="utf-8")
     return p

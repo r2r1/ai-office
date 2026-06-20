@@ -43,6 +43,7 @@ class Integration:
     how_to: str            # как получить учётные данные (3-5 шагов)
     cred_fields: list[CredField] = field(default_factory=list)
     actions: dict[str, Action] = field(default_factory=dict)
+    oauth_url: str = ""   # если задан — подключение через кнопку «Войти», а не ввод ключа
 
     def cred_keys(self) -> list[str]:
         return [c.key for c in self.cred_fields]
@@ -55,6 +56,7 @@ class Integration:
             "icon": self.icon,
             "description": self.description,
             "how_to": self.how_to,
+            "oauth_url": self.oauth_url,
             "cred_fields": [
                 {"key": c.key, "label": c.label, "secret": c.secret}
                 for c in self.cred_fields

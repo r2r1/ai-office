@@ -1,45 +1,33 @@
 """
 Бриф клиента — то, что превращает универсальный офис в офис «под клиента».
 
-Клиент присылает идею / соцсети / инструкции → онбординг формирует бриф →
-офис работает именно над задачей клиента, а не над дефолтной.
+Хранится по тенанту (data/tenants/<tid>/brief.json). Готовность брифа офис-цикл
+определяет опросом файла (без глобального asyncio.Event — он не мультиарендный).
 """
 
-import asyncio
-import json
-from pathlib import Path
-from typing import Optional
+from src.saas import context as ctx
 
-BRIEF_FILE = Path("reports/brief.json")
-
-# Событие: бриф готов, офис может стартовать
-ready = asyncio.Event()
-
-_brief: dict = {}
+_FILE = "brief.json"
 
 
 def set_brief(data: dict) -> None:
-    """Сохраняет готовый бриф и сигналит офису о старте."""
-    global _brief
-    _brief = data
-    _save()
-    ready.set()
+    ctx.write_json(_FILE, data or {})
 
 
 def get() -> dict:
-    return _brief
+    return ctx.read_json(_FILE, {})
 
 
 def is_ready() -> bool:
-    return bool(_brief.get("summary"))
+    return bool(get().get("summary"))
 
 
 def research_question() -> str:
-    """Вопрос для ресёрчера на основе брифа клиента."""
-    if _brief.get("research_question"):
-        return _brief["research_question"]
-    niche = _brief.get("niche", "")
-    goal = _brief.get("goal", "")
+    b = get()
+    if b.get("research_question"):
+        return b["research_question"]
+    niche = b.get("niche", "")
+    goal = b.get("goal", "")
     if niche or goal:
         return (
             f"Проанализируй актуальные тренды 2026 года в нише: {niche}. "
@@ -50,31 +38,12 @@ def research_question() -> str:
 
 
 def summary() -> str:
-    return _brief.get("summary", "")
-
-
-def _save() -> None:
-    BRIEF_FILE.parent.mkdir(parents=True, exist_ok=True)
-    BRIEF_FILE.write_text(json.dumps(_brief, ensure_ascii=False, indent=2), encoding="utf-8")
+    return get().get("summary", "")
 
 
 def load() -> bool:
-    """Загружает сохранённый бриф при перезапуске. True если бриф был."""
-    global _brief
-    if BRIEF_FILE.exists():
-        try:
-            _brief = json.loads(BRIEF_FILE.read_text(encoding="utf-8"))
-            if is_ready():
-                ready.set()
-                return True
-        except (json.JSONDecodeError, OSError):
-            pass
-    return False
+    return is_ready()
 
 
 def reset() -> None:
-    global _brief
-    _brief = {}
-    ready.clear()
-    if BRIEF_FILE.exists():
-        BRIEF_FILE.unlink()
+    ctx.delete_file(_FILE)

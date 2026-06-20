@@ -93,6 +93,7 @@ button { font-family: inherit; }
 
 #tb-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 #status-bar { font-size: 11px; color: #3a3a5a; white-space: nowrap; }
+#cost-meter { font-size: 11px; color: #6ee7a8; white-space: nowrap; cursor: default; padding: 2px 8px; border: 1px solid #1e3a2a; border-radius: 10px; background: #0e1a12; }
 #btn-reset {
   font-size: 11px; padding: 6px 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid #2a2a3e; color: #998; background: #100e0a;
@@ -215,6 +216,17 @@ canvas { display: block; }
 .conn-card .cc-note { font-size: 11px; color: #667; margin-bottom: 8px; font-style: italic; }
 .conn-card .cc-actions { display: flex; gap: 8px; }
 .conn-subhead { font-size: 13px; color: #8a8aa0; margin: 18px 0 10px; font-weight: 600; }
+#llm-key-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; }
+#llm-key-card .conn-subhead { margin-top: 2px; }
+.lk-status { font-size: 11px; margin-bottom: 10px; }
+.lk-status.shared { color: #c9a24a; }
+.lk-status.own { color: #6ee7a8; }
+.lk-row { margin-bottom: 8px; }
+.lk-row label { display: block; font-size: 10px; color: #7878a0; margin-bottom: 4px; }
+.lk-row input { width: 100%; background: #0f0f20; border: 1px solid var(--border2); border-radius: 6px; padding: 9px; color: #e0e0e0; font-size: 12px; outline: none; }
+.lk-row input:focus { border-color: var(--accent); }
+.lk-actions { display: flex; gap: 8px; margin-top: 4px; }
+.lk-hint { font-size: 10px; color: #667; margin-top: 8px; line-height: 1.5; }
 #integrations-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 14px; }
 .integ-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 14px; }
 .integ-card .ic-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -227,6 +239,30 @@ canvas { display: block; }
 .integ-card .ic-actions-list { font-size: 10px; color: #778; margin-bottom: 10px; }
 .integ-card .ic-btns { display: flex; gap: 8px; }
 .integ-card .ic-howto { font-size: 10px; color: #667; white-space: pre-line; margin: 6px 0 8px; border-left: 2px solid #2a4a78; padding-left: 8px; }
+
+/* ── Leads / sites ── */
+#sites-list, #leads-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.site-card, .lead-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 12px 14px; }
+.site-card { display: flex; align-items: center; gap: 12px; }
+.site-card .sc-body { flex: 1; min-width: 0; }
+.site-card .sc-title { font-weight: 600; font-size: 13px; color: #d8d8e8; }
+.site-card .sc-url { font-size: 11px; }
+.site-card .sc-url a { color: #8fd3ff; text-decoration: none; }
+.site-card .sc-url a:hover { text-decoration: underline; }
+.site-card .sc-count { font-size: 11px; color: #6ee7a8; background: #133a26; border: 1px solid #1e5a3a; border-radius: 10px; padding: 3px 10px; flex-shrink: 0; }
+.lead-card .lc-top { display: flex; justify-content: space-between; gap: 8px; }
+.lead-card .lc-name { font-weight: 600; font-size: 13px; color: #d8d8e8; }
+.lead-card .lc-time { font-size: 10px; color: #667; }
+.lead-card .lc-contact { font-size: 12px; color: #8fd3ff; margin-top: 3px; }
+.lead-card .lc-msg { font-size: 12px; color: #99a; margin-top: 5px; }
+.lead-card .lc-src { font-size: 10px; color: #667; margin-top: 5px; }
+
+/* ── Code files ── */
+#code-files { display: flex; flex-direction: column; gap: 6px; }
+.file-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-family: 'SFMono-Regular', Consolas, monospace; }
+.file-row:hover { border-color: var(--accent); }
+.file-row .fr-path { flex: 1; font-size: 12px; color: #c8d8ee; }
+.file-row .fr-size { font-size: 10px; color: #667; }
 
 /* ─────────────── HINT ─────────────── */
 #hint {
@@ -342,6 +378,36 @@ canvas { display: block; }
 .add-conn-btn:hover { background: #16314f; }
 
 /* ─────────────── ONBOARDING ─────────────── */
+#login-gate {
+  position: fixed; inset: 0; z-index: 1100;
+  background: radial-gradient(ellipse at 50% 20%, #141438, #060610);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+#login-gate.hidden { display: none; }
+#login-card {
+  width: 100%; max-width: 440px; background: #0d0d1c; border: 1px solid var(--border2);
+  border-radius: 16px; padding: 40px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+}
+#login-card h1 { font-size: 26px; margin-bottom: 8px; color: var(--accent); }
+#login-card .sub { color: #8080a8; font-size: 12px; line-height: 1.6; margin-bottom: 24px; }
+.gh-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+  padding: 14px; border-radius: 10px; background: #1f2430; border: 1px solid #3a4150;
+  color: #fff; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer;
+}
+.gh-btn:hover { background: #2a3140; }
+.login-or { color: #55557a; font-size: 11px; margin: 18px 0 12px; }
+#dev-email { width: 100%; padding: 11px; border-radius: 8px; background: #0f0f20;
+  border: 1px solid var(--border2); color: #e0e0e0; font-size: 13px; outline: none; }
+#dev-email:focus { border-color: var(--accent); }
+#btn-dev-login { width: 100%; margin-top: 10px; padding: 11px; border: none; border-radius: 8px;
+  background: #1e3558; color: #8fd3ff; font-size: 13px; font-weight: 600; cursor: pointer; }
+#btn-dev-login:hover { background: #2a4a78; }
+#user-chip { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #aab; white-space: nowrap; }
+#user-chip img { width: 20px; height: 20px; border-radius: 50%; }
+#user-chip .uc-logout { cursor: pointer; color: #667; }
+#user-chip .uc-logout:hover { color: #f06292; }
+
 #intake {
   position: fixed; inset: 0; z-index: 1000;
   background: radial-gradient(ellipse at 50% 20%, #141438, #060610);
@@ -404,6 +470,26 @@ canvas { display: block; }
 <body>
 
 <!-- Онбординг -->
+<!-- Login gate (Phase 0) -->
+<div id="login-gate" class="hidden">
+  <div id="login-card">
+    <h1>🏢 AI-Office</h1>
+    <p class="sub">Войдите, чтобы создать свой изолированный AI-офис. Вход через GitHub
+      сразу подключает ваш аккаунт для будущего деплоя кода.</p>
+    <a id="btn-github-login" href="/auth/github/login" class="gh-btn">
+      <span>⌥</span> Войти через GitHub
+    </a>
+    <div id="github-missing" class="hidden" style="font-size:11px;color:#c98;margin-top:10px;">
+      GitHub OAuth не настроен оператором. Используйте вход для разработки ниже.
+    </div>
+    <div id="dev-login-block" class="hidden">
+      <div class="login-or">— или для разработки —</div>
+      <input id="dev-email" type="email" placeholder="email (например you@biz.ru)" autocomplete="off">
+      <button id="btn-dev-login">Войти локально</button>
+    </div>
+  </div>
+</div>
+
 <div id="intake">
   <div id="intake-card">
     <h1>⚡ Запусти свой AI-офис</h1>
@@ -443,6 +529,8 @@ canvas { display: block; }
       <div id="progress-note"></div>
     </div>
     <div id="tb-right">
+      <span id="user-chip" class="hidden"></span>
+      <span id="cost-meter" title="Потрачено на токены за всё время">💸 $0.0000</span>
       <span id="status-bar">● ожидание...</span>
       <div id="model-switcher">
         <span class="ms-label">🤖</span>
@@ -461,6 +549,8 @@ canvas { display: block; }
       <div class="nav-item active" data-view="office"><span class="ni-icon">🏢</span><span class="ni-label">Офис</span></div>
       <div class="nav-item" data-view="team"><span class="ni-icon">👥</span><span class="ni-label">Команда</span><span class="ni-badge" id="badge-team"></span></div>
       <div class="nav-item" data-view="results"><span class="ni-icon">📦</span><span class="ni-label">Результаты</span><span class="ni-badge" id="badge-results"></span></div>
+      <div class="nav-item" data-view="leads"><span class="ni-icon">🎯</span><span class="ni-label">Лиды</span><span class="ni-badge" id="badge-leads"></span></div>
+      <div class="nav-item" data-view="code"><span class="ni-icon">💻</span><span class="ni-label">Код</span><span class="ni-badge" id="badge-code"></span></div>
       <div class="nav-item" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
       <div class="nav-item" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">События</span></div>
       <div class="nav-item" data-view="progress"><span class="ni-icon">📈</span><span class="ni-label">Этапы</span></div>
@@ -504,6 +594,31 @@ canvas { display: block; }
         </div>
       </div>
 
+      <!-- Leads view -->
+      <div class="view" id="view-leads">
+        <div class="view-head">
+          <h2>🎯 Лиды и лендинги</h2>
+          <div class="vh-sub">Реальные заявки с опубликованных страниц</div>
+        </div>
+        <div id="leads-wrap">
+          <h3 class="conn-subhead">🌐 Опубликованные лендинги</h3>
+          <div id="sites-list"><div class="empty-note" id="no-sites">Пока нет лендингов — агент опубликует их сам</div></div>
+          <h3 class="conn-subhead">📨 Заявки</h3>
+          <div id="leads-list"><div class="empty-note" id="no-leads">Заявки появятся, когда посетители заполнят форму</div></div>
+        </div>
+      </div>
+
+      <!-- Code view -->
+      <div class="view" id="view-code">
+        <div class="view-head">
+          <h2>💻 Код проекта</h2>
+          <div class="vh-sub">Файлы, которые написали разработчики (рабочая папка)</div>
+        </div>
+        <div id="code-wrap">
+          <div id="code-files"><div class="empty-note" id="no-files">Пока нет файлов — разработчик напишет код сюда</div></div>
+        </div>
+      </div>
+
       <!-- Connections view -->
       <div class="view" id="view-connections">
         <div class="view-head">
@@ -512,6 +627,17 @@ canvas { display: block; }
         </div>
         <div id="conn-wrap">
           <div id="conn-hint">Здесь агенты берут доступы к внешним платформам. Если агенту не хватает доступа — он спросит, и вы добавите его сюда.</div>
+          <div id="llm-key-card">
+            <h3 class="conn-subhead">🔑 Ваш доступ к AI-моделям</h3>
+            <div class="lk-status" id="lk-status">Загрузка…</div>
+            <div class="lk-row"><label>API base URL</label><input id="lk-base" type="text" placeholder="https://apinet.cloud/v1" autocomplete="off"></div>
+            <div class="lk-row"><label>Ваш API-ключ</label><input id="lk-key" type="password" placeholder="sk-..." autocomplete="off"></div>
+            <div class="lk-actions">
+              <button id="lk-save" class="primary-btn">Сохранить ключ</button>
+              <button id="lk-clear" class="dc-btn">Использовать общий</button>
+            </div>
+            <div class="lk-hint">Агенты вашего офиса будут расходовать токены по этому ключу — оплата идёт с вашего счёта у провайдера. Ключ хранится в зашифрованном виде.</div>
+          </div>
           <div id="integrations-section">
             <h3 class="conn-subhead">⚙️ Готовые интеграции</h3>
             <div id="integrations-catalog"></div>

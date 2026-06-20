@@ -15,7 +15,8 @@ SYSTEM_PROMPT = """Ты — главный стратег AI-офиса. На в
 Твоя задача — превратить рекомендацию в конкретный исполнимый план, по которому
 другие агенты офиса (продажник, разработчик, контент-менеджер) смогут работать.
 
-Используй web_search, чтобы уточнить детали: реальные цены, инструменты, площадки.
+Опирайся на данные из переданного отчёта — он уже содержит результаты исследования,
+повторно искать в интернете не нужно.
 
 ВАЖНО про сроки: это автономный AI-офис, агенты работают 24/7 без перерывов, сна и
 выходных. НЕ оценивай сроки как для людей (недели/месяцы). Оцени реалистичное время
@@ -57,9 +58,9 @@ async def run_async(
         system=SYSTEM_PROMPT,
         user=user,
         model=models_module.for_agent(agent_id),
-        max_tokens=6000,
-        max_iterations=10,
-        use_search=True,
+        max_tokens=3000,
+        max_iterations=2,
+        use_search=False,
         publish=publish,
         agent_id=agent_id,
     )
@@ -83,9 +84,8 @@ def run(research_report: str, reports_dir: str = "reports") -> str:
 
 
 def _save_plan(content: str) -> Path:
-    path = Path("reports")
-    path.mkdir(parents=True, exist_ok=True)
+    from src.saas import context as ctx
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    p = path / f"plan_{ts}.md"
+    p = ctx.tenant_dir() / f"plan_{ts}.md"
     p.write_text(content, encoding="utf-8")
     return p

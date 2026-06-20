@@ -11,8 +11,9 @@ from src.core import llm
 from src.office import registry, agent_inbox
 from src.office import brief as brief_module
 from src.office import models as models_module
+from src.saas import context as ctx
 
-HISTORY_FILE = Path("reports/chat_histories.json")
+_HIST_FILE = "chat_histories.json"
 
 # Системные промпты по ролям — задают характер и компетенции агента
 ROLE_SYSTEM = {
@@ -52,28 +53,15 @@ ROLE_SYSTEM = {
     ),
 }
 
-# История диалогов: agent_id -> [{role, content}]
-_histories: dict[str, list[dict[str, str]]] = {}
-
 MAX_HISTORY = 12  # храним последние N реплик, чтобы не раздувать токены
 
 
-def _load_histories() -> None:
-    if HISTORY_FILE.exists():
-        try:
-            data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                _histories.update(data)
-        except Exception:
-            pass
+def _all_histories() -> dict:
+    return ctx.read_json(_HIST_FILE, {})
 
 
-def _save_histories() -> None:
-    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    HISTORY_FILE.write_text(json.dumps(_histories, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-_load_histories()
+def _save_all(h: dict) -> None:
+    ctx.write_json(_HIST_FILE, h)
 
 
 _SEND_MESSAGE_TOOL = {
@@ -138,7 +126,8 @@ async def ask(
     """Задаёт вопрос конкретному агенту и возвращает его ответ."""
     rec = registry.get(agent_id)
     system = _build_system(agent_id, rec)
-    history = _histories.setdefault(agent_id, [])
+    histories = _all_histories()
+    history = histories.get(agent_id, [])
 
     if publish:
         await publish({"type": "thinking", "agent_id": agent_id,
@@ -176,7 +165,8 @@ async def ask(
     history.append({"role": "assistant", "content": reply})
     if len(history) > MAX_HISTORY:
         del history[:len(history) - MAX_HISTORY]
-    _save_histories()
+    histories[agent_id] = history
+    _save_all(histories)
 
     # Ответ агента доставляется в личный чат вызывающей стороной (server /api/ask
     # публикует agent_message). Здесь намеренно НЕ публикуем speech/chat_reply,
@@ -185,10 +175,10 @@ async def ask(
 
 
 def clear_history(agent_id: str) -> None:
-    _histories.pop(agent_id, None)
-    _save_histories()
+    h = _all_histories()
+    h.pop(agent_id, None)
+    _save_all(h)
 
 
 def clear_all() -> None:
-    _histories.clear()
-    _save_histories()
+    ctx.delete_file(_HIST_FILE)

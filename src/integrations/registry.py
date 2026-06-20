@@ -8,11 +8,15 @@
 
 from src.integrations.base import Integration
 from src.integrations.telegram import INTEGRATION as _telegram
+from src.integrations.website import INTEGRATION as _website
+from src.integrations.github import INTEGRATION as _github
 from src.office import connections
 
 # Все зарегистрированные интеграции (name -> Integration)
 _ALL: dict[str, Integration] = {
+    _website.name: _website,
     _telegram.name: _telegram,
+    _github.name: _github,
 }
 
 
@@ -42,7 +46,12 @@ def credentials_for(integ: Integration) -> dict:
 
 
 def is_connected(integ: Integration) -> bool:
-    """Подключено, если есть учётка с непустым основным секретом."""
+    """Подключено, если есть учётка с непустым секретом.
+
+    Интеграции без обязательных кредов (cred_fields пуст) — всегда доступны.
+    """
+    if not integ.cred_fields:
+        return True
     creds = credentials_for(integ)
     if not creds:
         return False

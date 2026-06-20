@@ -1,34 +1,22 @@
 """
-Управление моделями ИИ — глобальная модель по умолчанию + индивидуальные
-модели для отдельных агентов.
-
-Пользователь может задать одну модель всему офису или назначить каждому
-агенту свою. Сохраняется в reports/models.json, переживает перезапуски.
+Выбор LLM-модели: глобальная модель тенанта + индивидуальные на агента (по тенанту).
+Хранится в data/tenants/<tid>/models.json. PRESETS — общий каталог с расценками.
 """
 
-import json
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.saas import context as ctx
+
 load_dotenv()
 
-MODELS_FILE = Path("reports/models.json")
+_FILE = "models.json"
 
-# Стартовая модель по умолчанию (из .env или дефолт).
-# glm-4.5-flash — практически бесплатна ($0.01/$0.01 за 1M) и умеет tools/reasoning,
-# что подходит для агентного офиса. Идеально для демо и первого запуска.
 DEFAULT_FREE_MODEL = "glm-4.5-flash"
-_default: str = os.getenv("LLM_MODEL", DEFAULT_FREE_MODEL)
+ENV_DEFAULT = os.getenv("LLM_MODEL", DEFAULT_FREE_MODEL)
 
-# agent_id -> модель (если не задано — используется _default)
-_per_agent: dict[str, str] = {}
-
-# Подсказки моделей для выпадающего списка в UI — с расценками apinet.cloud
-# (вход/выход за 1M токенов), отсортированы от дешёвых к топовым, чтобы пользователь
-# мог сравнить цену и возможности. Можно ввести и любую другую модель вручную.
-# Цены актуальны на момент составления (apinet.cloud/pricing) и могут меняться.
+# Каталог моделей с расценками apinet (вход/выход за 1M) — от дешёвых к топовым.
 PRESETS = [
     {"id": "glm-4.5-flash",          "label": "GLM-4.5 Flash · $0.01/$0.01 за 1M · почти бесплатно ⭐"},
     {"id": "gpt-5-nano",             "label": "GPT-5 nano · $0.05/$0.40 за 1M · дёшево"},
@@ -46,54 +34,46 @@ PRESETS = [
 ]
 
 
+def _cfg() -> dict:
+    return ctx.read_json(_FILE, {"default": ENV_DEFAULT, "per_agent": {}})
+
+
 def get_default() -> str:
-    return _default
+    return _cfg().get("default", ENV_DEFAULT)
 
 
 def set_default(model: str) -> None:
-    global _default
     if model.strip():
-        _default = model.strip()
-        _save()
+        cfg = _cfg()
+        cfg["default"] = model.strip()
+        ctx.write_json(_FILE, cfg)
 
 
 def for_agent(agent_id: str) -> str:
-    """Модель конкретного агента — индивидуальная или глобальная."""
-    return _per_agent.get(agent_id, _default)
+    cfg = _cfg()
+    return cfg.get("per_agent", {}).get(agent_id, cfg.get("default", ENV_DEFAULT))
 
 
 def set_for_agent(agent_id: str, model: str) -> None:
-    """Назначает агенту индивидуальную модель. Пустая строка — сбросить к общей."""
+    cfg = _cfg()
+    pa = cfg.setdefault("per_agent", {})
     if not model.strip():
-        _per_agent.pop(agent_id, None)
+        pa.pop(agent_id, None)
     else:
-        _per_agent[agent_id] = model.strip()
-    _save()
+        pa[agent_id] = model.strip()
+    ctx.write_json(_FILE, cfg)
 
 
-def assignments() -> dict[str, str]:
-    return dict(_per_agent)
-
-
-def reset() -> None:
-    """Сбрасывает индивидуальные модели (глобальную оставляем как выбрана)."""
-    global _per_agent
-    _per_agent = {}
-    _save()
+def assignments() -> dict:
+    return dict(_cfg().get("per_agent", {}))
 
 
 def load() -> None:
-    global _default, _per_agent
-    if MODELS_FILE.exists():
-        try:
-            d = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
-            _default = d.get("default", _default)
-            _per_agent = d.get("per_agent", {})
-        except (json.JSONDecodeError, OSError):
-            pass
+    pass
 
 
-def _save() -> None:
-    MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data = {"default": _default, "per_agent": _per_agent}
-    MODELS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def reset() -> None:
+    """Сбрасывает индивидуальные модели, глобальную оставляет."""
+    cfg = _cfg()
+    cfg["per_agent"] = {}
+    ctx.write_json(_FILE, cfg)

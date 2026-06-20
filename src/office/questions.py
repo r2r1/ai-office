@@ -1,32 +1,35 @@
+"""
+Блокирующие вопросы агентов пользователю — по тенанту.
+
+Futures живут в памяти (на время ожидания ответа), сгруппированы по tenant_id.
+Дедуп одинаковых вопросов в пределах тенанта: общий future.
+"""
+
 import asyncio
 import time
 import uuid
+from collections import defaultdict
 
-_pending: dict[str, asyncio.Future] = {}
-_meta: dict[str, dict] = {}  # qid -> {text, agent_id, ts}
+from src.saas import context as ctx
 
-# Dedup index: normalized text -> qid of the existing pending question
-# Multiple agents asking the same question share one future.
-_by_text: dict[str, str] = {}
+_pending: dict[str, dict[str, asyncio.Future]] = defaultdict(dict)
+_meta: dict[str, dict[str, dict]] = defaultdict(dict)
+_by_text: dict[str, dict[str, str]] = defaultdict(dict)
 
 
 def _normalize(text: str) -> str:
     return " ".join(text.lower().strip().split())
 
 
-def ask(question: str, publish_fn, agent_id: str = "") -> tuple[str, asyncio.Future]:
-    """Returns (question_id, future). Await the future to get the user's answer.
-
-    If an identical question is already pending, returns the existing (qid, future)
-    so all agents waiting on the same info share one question card and one answer.
-    """
+def ask(question: str, publish_fn=None, agent_id: str = "") -> tuple[str, asyncio.Future]:
+    tid = ctx.get_tenant()
+    pend, meta, by_text = _pending[tid], _meta[tid], _by_text[tid]
     key = _normalize(question)
-    existing_qid = _by_text.get(key)
-    if existing_qid and existing_qid in _pending:
-        # Attach another waiter to the same future via a wrapper future
+    existing_qid = by_text.get(key)
+    if existing_qid and existing_qid in pend:
         loop = asyncio.get_event_loop()
         proxy = loop.create_future()
-        orig = _pending[existing_qid]
+        orig = pend[existing_qid]
 
         def _forward(f):
             if not proxy.done():
@@ -39,21 +42,19 @@ def ask(question: str, publish_fn, agent_id: str = "") -> tuple[str, asyncio.Fut
         return existing_qid, proxy
 
     qid = str(uuid.uuid4())[:8]
-    loop = asyncio.get_event_loop()
-    fut = loop.create_future()
-    _pending[qid] = fut
-    _meta[qid] = {"text": question, "agent_id": agent_id, "ts": time.time()}
-    _by_text[key] = qid
+    fut = asyncio.get_event_loop().create_future()
+    pend[qid] = fut
+    meta[qid] = {"text": question, "agent_id": agent_id, "ts": time.time()}
+    by_text[key] = qid
     return qid, fut
 
 
 def answer(qid: str, answer: str) -> bool:
-    """Called when user answers. Returns True if question existed."""
-    fut = _pending.pop(qid, None)
-    meta = _meta.pop(qid, None)
+    tid = ctx.get_tenant()
+    fut = _pending[tid].pop(qid, None)
+    meta = _meta[tid].pop(qid, None)
     if meta:
-        key = _normalize(meta.get("text", ""))
-        _by_text.pop(key, None)
+        _by_text[tid].pop(_normalize(meta.get("text", "")), None)
     if fut and not fut.done():
         fut.set_result(answer)
         return True
@@ -61,8 +62,8 @@ def answer(qid: str, answer: str) -> bool:
 
 
 def pending_for(agent_id: str) -> str:
-    """Возвращает qid последнего неотвеченного вопроса этого агента ('' если нет)."""
-    cands = [(m["ts"], qid) for qid, m in _meta.items() if m.get("agent_id") == agent_id]
+    meta = _meta[ctx.get_tenant()]
+    cands = [(m["ts"], qid) for qid, m in meta.items() if m.get("agent_id") == agent_id]
     if not cands:
         return ""
     cands.sort()
@@ -70,8 +71,5 @@ def pending_for(agent_id: str) -> str:
 
 
 def list_pending() -> list[dict]:
-    """Returns all unanswered questions, oldest first."""
-    return sorted(
-        [{"question_id": qid, **m} for qid, m in _meta.items()],
-        key=lambda x: x["ts"],
-    )
+    meta = _meta[ctx.get_tenant()]
+    return sorted([{"question_id": qid, **m} for qid, m in meta.items()], key=lambda x: x["ts"])

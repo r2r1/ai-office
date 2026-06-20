@@ -5,3 +5,6 @@ reports/*.md
 reports/*.json
 !reports/.gitkeep
 .claude/
+
+workspace/
+data/

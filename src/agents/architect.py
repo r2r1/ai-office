@@ -12,13 +12,12 @@ Architect Agent — технический архитектор офиса.
 когда разработчики сами придумывают непоследовательные решения.
 """
 
-from datetime import datetime
-from pathlib import Path
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
+from src.saas import context as ctx
 
-TECH_DESIGN_FILE = Path("reports/tech_design.md")
+_TECH_DESIGN = "tech_design.md"
 
 SYSTEM_PROMPT = """Ты — технический архитектор AI-офиса. На вход ты получаешь бизнес-стратегию
 и цель клиента. Твоя задача — создать Техническое Задание (ТЗ) для рабочих агентов.
@@ -107,12 +106,10 @@ async def run_async(
 
 
 def load() -> str:
-    """Загружает ТЗ из файла (пустая строка если нет)."""
-    if TECH_DESIGN_FILE.exists():
-        return TECH_DESIGN_FILE.read_text(encoding="utf-8")
-    return ""
+    """Загружает ТЗ текущего тенанта (пустая строка если нет)."""
+    f = ctx.tenant_dir() / _TECH_DESIGN
+    return f.read_text(encoding="utf-8") if f.exists() else ""
 
 
 def _save(content: str) -> None:
-    TECH_DESIGN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TECH_DESIGN_FILE.write_text(content, encoding="utf-8")
+    (ctx.tenant_dir() / _TECH_DESIGN).write_text(content, encoding="utf-8")

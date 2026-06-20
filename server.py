@@ -11,19 +11,26 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.requests import Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
 from src.office import memory
 from src.office import threads as threads_module
 from src.office import questions as questions_module
+from src.office import sites as sites_module
+from src.office import leads as leads_module
+from src.office import costs as costs_module
+from src.office import workspace as workspace_module
 from src.office import milestones
 from src.office import office_channel
 from src.office import models as models_module
+from src.office import llm_settings as llm_settings_module
 from src.agents import onboarding
 from src.core import llm as llm_core
 from src.integrations import registry as integrations_registry
+from src.saas import db as saas_db, store as saas_store, auth as saas_auth
+from src.saas import context as saas_context
 
 load_dotenv()
 
@@ -32,19 +39,10 @@ DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Загружаем сохранённый бриф и историю (если были) — офис продолжит с того же места
-    if not DEMO_MODE:
-        brief.load()
-        state.load()
-        progress.load()
-        milestones.load()
-        connections.load()
-        memory.load()
-        threads_module.load()
-        office_channel.load()
-        models_module.load()
-        registry.restore(state.saved_agents())
-    # Стартуем офис в фоне: демо-сценарий или реальный автономный цикл
+    # БД SaaS-слоя (пользователи/тенанты). Данные офиса теперь per-tenant (ленивые,
+    # загружаются из data/tenants/<tid>/ при обращении) — глобальная загрузка не нужна.
+    saas_db.init_db()
+    # Менеджер офисов по тенантам (демо — отдельный сценарий под тенантом default)
     runner = demo.run if DEMO_MODE else office_loop.run
     task = asyncio.create_task(runner())
     yield
@@ -55,18 +53,124 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+@app.middleware("http")
+async def tenant_middleware(request: Request, call_next):
+    """Ставит контекст тенанта из сессии (аноним → 'default')."""
+    uid = saas_auth.read_session(request.cookies.get(saas_auth.SESSION_COOKIE, ""))
+    tid = "default"
+    if uid:
+        ws = saas_store.workspace_for_user(uid)
+        if ws:
+            tid = ws["id"]
+    saas_context.set_tenant(tid)
+    return await call_next(request)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return Path("static/index.html").read_text(encoding="utf-8")
 
 
+# ============================================================
+# АУТЕНТИФИКАЦИЯ (Phase 0): вход через GitHub + dev-вход + сессии
+# ============================================================
+
+def current_user(request: Request) -> dict | None:
+    """Текущий пользователь из подписанной session-cookie (или None)."""
+    uid = saas_auth.read_session(request.cookies.get(saas_auth.SESSION_COOKIE, ""))
+    return saas_store.get_user(uid) if uid else None
+
+
+def _set_session_cookie(resp, user_id: str) -> None:
+    secure = saas_auth.APP_BASE_URL.startswith("https")
+    resp.set_cookie(
+        saas_auth.SESSION_COOKIE, saas_auth.make_session(user_id),
+        max_age=saas_auth.SESSION_TTL, httponly=True, samesite="lax", secure=secure,
+    )
+
+
+@app.get("/api/me")
+async def get_me(request: Request):
+    """Кто вошёл + его рабочее пространство (тенант). Фронт строит интерфейс по этому."""
+    user = current_user(request)
+    if not user:
+        return {
+            "authenticated": False,
+            "github_available": saas_auth.github_configured(),
+            "dev_login": saas_auth.ALLOW_DEV_LOGIN,
+        }
+    ws = saas_store.workspace_for_user(user["id"])
+    return {
+        "authenticated": True,
+        "user": saas_store.public_user(user),
+        "workspace": ({"id": ws["id"], "name": ws["name"], "plan": ws["plan"]} if ws else None),
+    }
+
+
+@app.get("/auth/github/login")
+async def github_login():
+    if not saas_auth.github_configured():
+        return JSONResponse(
+            {"error": "GitHub OAuth не настроен. Задайте GITHUB_CLIENT_ID и "
+                      "GITHUB_CLIENT_SECRET в .env (создайте OAuth App на github.com)."},
+            status_code=400,
+        )
+    return RedirectResponse(saas_auth.github_login_url())
+
+
+@app.get("/auth/github/callback")
+async def github_callback(request: Request, code: str = "", state: str = ""):
+    if not saas_auth.verify_state(state):
+        return JSONResponse({"error": "неверный state"}, status_code=400)
+    token = await saas_auth.github_exchange_code(code)
+    if not token:
+        return JSONResponse({"error": "не удалось получить токен GitHub"}, status_code=400)
+    profile = await saas_auth.github_fetch_profile(token)
+    if not profile:
+        return JSONResponse({"error": "не удалось получить профиль GitHub"}, status_code=400)
+    # Если пользователь уже вошёл (напр. dev-вход) — ПОДКЛЮЧАЕМ GitHub к его аккаунту,
+    # не подменяя личность. Иначе — это вход через GitHub.
+    existing = current_user(request)
+    user = existing or saas_store.get_or_create_by_github(profile)
+    ws = saas_store.workspace_for_user(user["id"])
+    if ws:
+        saas_context.set_tenant(ws["id"])
+        connections.save({"name": "GitHub", "type": "token", "fields": {"token": token},
+                          "note": "Подключено через вход GitHub (OAuth)"})
+    resp = RedirectResponse("/")
+    _set_session_cookie(resp, user["id"])
+    return resp
+
+
+@app.post("/auth/dev-login")
+async def dev_login(request: Request):
+    """Локальный вход без GitHub (только если ALLOW_DEV_LOGIN=1)."""
+    if not saas_auth.ALLOW_DEV_LOGIN:
+        return JSONResponse({"error": "dev-вход отключён"}, status_code=403)
+    data = await request.json()
+    email = (data.get("email") or "dev@local").strip()
+    user = saas_store.get_or_create_dev_user(email)
+    resp = JSONResponse({"ok": True, "user": saas_store.public_user(user)})
+    _set_session_cookie(resp, user["id"])
+    return resp
+
+
+@app.post("/auth/logout")
+async def logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(saas_auth.SESSION_COOKIE)
+    return resp
+
+
 @app.get("/events")
 async def events():
-    """SSE endpoint — браузер подключается и получает все события офиса."""
-    q = bus.subscribe()
+    """SSE endpoint — события только своего тенанта (из контекста запроса)."""
+    tid = saas_context.get_tenant()
+    q = bus.subscribe(tid)
 
     # Отправляем текущее состояние реестра при подключении
     async def stream():
+        saas_context.set_tenant(tid)  # контекст для чтения снапшота внутри генератора
         try:
             # Снапшот текущих агентов
             for agent in registry.all_agents():
@@ -190,6 +294,14 @@ async def get_logs():
     for aid, m in models_module.assignments().items():
         lines.append(f"  {aid}: {m}")
 
+    # Расход токенов и стоимость
+    ct = costs_module.totals()
+    lines.append("\n## РАСХОД (токены / стоимость)")
+    lines.append(f"  Итого: ${ct['cost']:.4f} | токенов вход {ct['in_tokens']} / выход {ct['out_tokens']} | вызовов {ct['calls']}")
+    for a in costs_module.by_agent():
+        lines.append(f"  {a['agent_id']} ({a.get('model','')}): ${a['cost']:.4f} | "
+                     f"вход {a['in_tokens']} / выход {a['out_tokens']} | вызовов {a['calls']}")
+
     # Команда
     lines.append("\n## КОМАНДА")
     for a in registry.all_agents():
@@ -276,6 +388,7 @@ async def get_agent_detail(agent_id: str):
         "activity": state.events_for(agent_id),
         "model": models_module.for_agent(agent_id),
         "model_custom": agent_id in models_module.assignments(),
+        "cost": costs_module.for_agent(agent_id),
     }
 
 
@@ -328,24 +441,78 @@ async def test_integration(name: str):
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=200)
 
 
+@app.get("/site/{tenant}/{slug}", response_class=HTMLResponse)
+async def serve_site(tenant: str, slug: str):
+    """Отдаёт опубликованный лендинг конкретного тенанта (публично)."""
+    saas_context.set_tenant(tenant)
+    site = sites_module.get(slug)
+    if site is None:
+        return HTMLResponse("<h1>Страница не найдена</h1>", status_code=404)
+    return HTMLResponse(site["html"])
+
+
+@app.post("/api/lead/{tenant}/{slug}")
+async def capture_lead(tenant: str, slug: str, request: Request):
+    """Приём заявки с формы лендинга — реальный лид для тенанта (публично)."""
+    saas_context.set_tenant(tenant)
+    if sites_module.get(slug) is None:
+        return JSONResponse({"error": "страница не найдена"}, status_code=404)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    name = (data.get("name") or "").strip()
+    contact = (data.get("contact") or "").strip()
+    if not contact:
+        return JSONResponse({"error": "нужен контакт"}, status_code=400)
+    lead = leads_module.add(slug, name, contact, data.get("message", ""))
+    await bus.publish({"type": "lead_captured", "slug": slug, "lead": lead,
+                       "text": f"🎯 Новая заявка: {lead['name'] or 'без имени'} — {lead['contact']}"})
+    return {"ok": True}
+
+
+@app.get("/api/files")
+async def get_files():
+    """Список файлов кода, написанных агентами в рабочей папке проекта."""
+    return {"files": workspace_module.list_files()}
+
+
+@app.get("/api/file")
+async def get_file(path: str):
+    """Содержимое одного файла из рабочей папки (для вкладки «Код»)."""
+    from fastapi.responses import PlainTextResponse
+    content = workspace_module.read_file(path)
+    return PlainTextResponse(content)
+
+
+@app.get("/api/costs")
+async def get_costs():
+    """Расход токенов и стоимость по агентам и суммарно (ROI-панель)."""
+    return costs_module.payload()
+
+
+@app.get("/api/sites")
+async def get_sites():
+    """Список опубликованных лендингов (с числом заявок)."""
+    tid = saas_context.get_tenant()
+    out = []
+    for s in sites_module.all_sites():
+        out.append({**s, "leads": len(leads_module.for_site(s["slug"])),
+                    "url": f"/site/{tid}/{s['slug']}"})
+    return {"sites": out}
+
+
+@app.get("/api/leads")
+async def get_leads():
+    """Все собранные лиды."""
+    return {"leads": leads_module.all_leads()}
+
+
 @app.post("/api/brief/reset")
 async def brief_reset():
-    """Полный сброс: новый клиент / новая задача с чистого листа."""
-    brief.reset()
-    state.reset()
-    registry.reset()
-    chat.clear_all()
-    progress.reset()
-    milestones.reset()
-    memory.reset()
-    threads_module.reset()
-    office_channel.reset()
-    models_module.reset()  # сбрасываем индивидуальные модели, глобальную оставляем
-    # удаляем сохранённую стратегию, чтобы офис прошёл bootstrap заново
-    from pathlib import Path as _P
-    sf = _P("reports/strategy.md")
-    if sf.exists():
-        sf.unlink()
+    """Полный сброс ТЕКУЩЕГО тенанта: новый клиент с чистого листа."""
+    models_module.reset()      # сбрасываем индивидуальные модели, глобальную оставляем
+    saas_context.wipe()        # удаляет все файлы данных тенанта (бриф, состояние, код, стратегия, ТЗ…)
     return {"ok": True}
 
 
@@ -363,6 +530,30 @@ async def get_models():
         "per_agent": models_module.assignments(),
         "presets": models_module.PRESETS,
     }
+
+
+@app.get("/api/llm-settings")
+async def get_llm_settings():
+    """Персональные настройки доступа к LLM (свой ключ клиента)."""
+    return llm_settings_module.public()
+
+
+@app.post("/api/llm-settings")
+async def set_llm_settings(request: Request):
+    """Сохранить свой API-ключ и base_url. Ключ шифруется на диске."""
+    data = await request.json()
+    llm_settings_module.set_settings(
+        base_url=(data.get("base_url") or "").strip(),
+        api_key=(data.get("api_key") or "").strip(),
+    )
+    return {"ok": True, **llm_settings_module.public()}
+
+
+@app.post("/api/llm-settings/clear")
+async def clear_llm_key():
+    """Удалить свой ключ — вернуться на общий ключ оператора."""
+    llm_settings_module.clear_key()
+    return {"ok": True, **llm_settings_module.public()}
 
 
 @app.get("/api/model")

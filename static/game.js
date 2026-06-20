@@ -455,7 +455,7 @@ function handleEvent(event) {
   const hist = !!event.historical;  // исторические события — тихо, без переключений
 
   if (event.type === "hired") {
-    spawnAgent(event.agent_id, event.role, event.desk, event.task || "");
+    spawnAgent(event.agent_id, event.role, event.desk, event.task || "", event.skill || "");
     if (!hist) addLog(event.agent_id, `принят на работу как ${event.role}`, event.role);
     // Восстанавливаем реальный статус агента из снапшота
     if (event.status && event.status !== "idle") {
@@ -485,6 +485,7 @@ function handleEvent(event) {
     if (!hist) {
       updateAgentStatus(event.agent_id, "done", (event.summary||"").slice(0,80));
       loadDeliverables();
+      loadCosts();
     }
   }
   else if (event.type === "progress") {
@@ -506,7 +507,29 @@ function handleEvent(event) {
     if (!hist) showToast(`❌ ${event.platform}: ${event.error}`, "err");
   }
   else if (event.type === "integration_used") {
-    if (!hist) showToast(event.text || "⚙️ Действие во внешнем сервисе", "ok");
+    if (!hist) {
+      showToast(event.text || "⚙️ Действие во внешнем сервисе", "ok");
+      if (event.integration === "website") loadLeads();  // опубликован/обновлён лендинг
+    }
+  }
+  else if (event.type === "file_written") {
+    if (!hist) {
+      loadFiles();
+      if (_currentView !== "code") {
+        const badge = document.getElementById("badge-code");
+        if (badge) { badge.classList.add("badge-pulse"); setTimeout(() => badge.classList.remove("badge-pulse"), 2000); }
+      }
+    }
+  }
+  else if (event.type === "lead_captured") {
+    if (!hist) {
+      showToast(event.text || "🎯 Новая заявка", "ok");
+      loadLeads();
+      if (_currentView !== "leads") {
+        const badge = document.getElementById("badge-leads");
+        if (badge) { badge.classList.add("badge-pulse"); setTimeout(() => badge.classList.remove("badge-pulse"), 2000); }
+      }
+    }
   }
   else if (event.type === "question_answered") {
     // Вопрос закрыт (ответили в чате или таймаут) — обновим открытый тред
@@ -520,14 +543,32 @@ function getRole(agent_id) {
   return agents[agent_id]?.role || "unknown";
 }
 
-function spawnAgent(agent_id, role, desk, task) {
+function agentDisplayName(id) {
+  const a = agents[id];
+  if (!a) return ROLE_NAMES[roleFromId(id)] || id;
+  const base = ROLE_NAMES[a.role] || a.role;
+  // Если в офисе несколько агентов одной роли — добавляем номер, чтобы различать
+  const sameRole = Object.values(agents).filter(x => x.role === a.role).length;
+  if (sameRole > 1) {
+    const m = id.match(/_(\d+)$/);
+    return base + (m ? " " + m[1] : "");
+  }
+  return base;
+}
+
+function spawnAgent(agent_id, role, desk, task, skill = "") {
   if (agents[agent_id]) return;
+  // При восстановлении скилл приходит внутри задачи: "[Скилл: ...] ..."
+  if (!skill && task) {
+    const m = task.match(/^\[Скилл:\s*([^\]]+)\]/);
+    if (m) skill = m[1].trim();
+  }
   const dp = getDeskPosition(desk);
   const center = tileToScreen(Math.floor(COLS / 2), Math.floor(ROWS / 2));
   const target = tileToScreen(dp.tx, dp.ty);
 
   agents[agent_id] = {
-    role, desk, task,
+    role, desk, task, skill,
     x: center.x, y: center.y,
     tx: target.x, ty: target.y,
     color: ROLE_COLORS[role] || "#aaaaaa",
@@ -625,9 +666,9 @@ function updateSidebar() {
     card.innerHTML = `
       <div class="ac-name">
         <span class="status-dot ${dotClass}">${dotIcon}</span>
-        <span style="color:${a.color}">${ROLE_ICONS[a.role]||""} ${a.role}</span>
+        <span style="color:${a.color}">${ROLE_ICONS[a.role]||""} ${escapeHtml(agentDisplayName(id))}</span>
       </div>
-      <div class="ac-status">${escapeHtml((a.lastMsg || a.task || id).slice(0,120))}</div>
+      <div class="ac-status">${escapeHtml((a.skill || a.lastMsg || a.task || id).slice(0,120))}</div>
     `;
   }
   // Nav badge: number of agents
@@ -653,7 +694,7 @@ async function openAgentDrawer(agentId) {
 
   const localColor = (a && a.color) || "#4fc3f7";
   const localRole = (a && a.role) || roleFromId(agentId);
-  roleEl.textContent = `${ROLE_ICONS[localRole] || "🤖"} ${localRole}`;
+  roleEl.textContent = `${ROLE_ICONS[localRole] || "🤖"} ${agentDisplayName(agentId)}`;
   roleEl.style.color = localColor;
   curEl.textContent = "Загрузка...";
   delivWrap.innerHTML = "";
@@ -668,7 +709,11 @@ async function openAgentDrawer(agentId) {
   const status = (data && (data.status || (a && a.status))) || "idle";
   const current = (data && (data.current || data.task)) || (a && (a.lastMsg || a.task)) || "—";
   const statusWord = status === "thinking" ? "⟳ работает" : status === "done" ? "✓ готово" : "○ ожидает";
-  curEl.innerHTML = `<b style="color:${localColor}">${escapeHtml(statusWord)}</b><br>Сейчас делает: ${escapeHtml(current)}`;
+  const c = (data && data.cost) || {};
+  const costLine = (c.calls)
+    ? `<br><span style="color:#6ee7a8;font-size:11px">💸 ${fmtCost(c.cost)} · ${fmtTokens((c.in_tokens||0)+(c.out_tokens||0))} токенов · ${c.calls} вызовов</span>`
+    : "";
+  curEl.innerHTML = `<b style="color:${localColor}">${escapeHtml(statusWord)}</b><br>Сейчас делает: ${escapeHtml(current)}${costLine}`;
 
   // Модель этого агента
   setupAgentModelSelector(agentId, data && data.model, data && data.model_custom);
@@ -856,12 +901,16 @@ function setupClickHandler() {
   });
 
   window.addEventListener("mouseup", (e) => {
+    const wasPanning = _panActive;
     _panActive = false;
+    // Реагируем на клик по агенту ТОЛЬКО если кликнули по самому канвасу.
+    // Иначе клики по оверлеям/полям ввода (онбординг, формы) крали бы фокус.
+    if (e.target !== canvas) return;
     const rect = canvas.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
     canvas.style.cursor = findAgentAt(px, py) ? "pointer" : "grab";
-    if (!moved) {
+    if (!moved && !wasPanning) {
       const id = findAgentAt(px, py);
       if (id) openChat(id);
     }
@@ -912,9 +961,10 @@ function renderThreadList() {
   Object.keys(agents).sort().forEach((id) => {
     const a = agents[id];
     const meta = threadMeta[id] || {};
+    const subtitle = meta.last_text || (a.skill ? "спец.: " + a.skill : "");
     sb.appendChild(buildChatItem(
-      id, ROLE_ICONS[a.role] || "🤖", ROLE_NAMES[a.role] || a.role,
-      meta.last_text || "", a.color));
+      id, ROLE_ICONS[a.role] || "🤖", agentDisplayName(id),
+      subtitle, a.color));
   });
 }
 
@@ -948,7 +998,7 @@ async function selectThread(id) {
     await loadOfficeFeed();
   } else {
     const a = agents[id];
-    head.textContent = `${ROLE_ICONS[a?.role] || "🤖"} ${ROLE_NAMES[a?.role] || id}`;
+    head.textContent = `${ROLE_ICONS[a?.role] || "🤖"} ${agentDisplayName(id)}` + (a?.skill ? ` · ${a.skill}` : "");
     input.placeholder = "Сообщение агенту...";
     await loadAgentThread(id);
   }
@@ -985,7 +1035,7 @@ function renderOfficeMsg(msg) {
   const isSystem = from === "system" || role === "system";
   renderBubble({
     icon: isUser ? "🧑" : isSystem ? "🏢" : (ROLE_ICONS[role] || "🤖"),
-    who: isUser ? "Вы" : isSystem ? "Офис" : (ROLE_NAMES[role] || role),
+    who: isUser ? "Вы" : isSystem ? "Офис" : (agents[from] ? agentDisplayName(from) : (ROLE_NAMES[role] || role)),
     text: msg.text,
     cls: isUser ? " user-msg" : isSystem ? " system-msg" : "",
   });
@@ -997,7 +1047,7 @@ function renderThreadMsg(id, m) {
   const isSystem = m.from === "system";
   renderBubble({
     icon: isUser ? "🧑" : isSystem ? "🏢" : (ROLE_ICONS[a?.role] || "🤖"),
-    who: isUser ? "Вы" : isSystem ? "Офис" : (ROLE_NAMES[a?.role] || a?.role || id),
+    who: isUser ? "Вы" : isSystem ? "Офис" : agentDisplayName(id),
     text: m.text,
     cls: isUser ? " user-msg" : isSystem ? " system-msg" : "",
     question: m.kind === "question",
@@ -1150,6 +1200,62 @@ const intakeQuestions = document.getElementById("intake-questions");
 let intakeClientInput = "";
 let intakeQuestionList = [];
 
+// ---- Аутентификация (Phase 0) ----
+let _githubAvailable = false;
+
+async function checkAuth() {
+  let d;
+  try { d = await (await fetch("/api/me")).json(); }
+  catch { d = { authenticated: false, github_available: false, dev_login: true }; }
+  const gate = document.getElementById("login-gate");
+  if (!d.authenticated) {
+    _githubAvailable = !!d.github_available;
+    gate.classList.remove("hidden");
+    // Кнопка «Войти через GitHub» — основной способ, показываем всегда
+    document.getElementById("btn-github-login").classList.remove("hidden");
+    document.getElementById("github-missing").classList.toggle("hidden", d.github_available);
+    document.getElementById("dev-login-block").classList.toggle("hidden", !d.dev_login);
+    return false;
+  }
+  gate.classList.add("hidden");
+  renderUserChip(d.user);
+  return true;
+}
+
+function renderUserChip(user) {
+  const chip = document.getElementById("user-chip");
+  if (!chip || !user) return;
+  const name = user.name || user.github_login || user.email || "Профиль";
+  const av = user.avatar ? `<img src="${user.avatar}" alt="">` : "👤";
+  chip.innerHTML = `${av}<span>${escapeHtml(name)}</span><span class="uc-logout" title="Выйти">⎋</span>`;
+  chip.classList.remove("hidden");
+  chip.querySelector(".uc-logout").addEventListener("click", async () => {
+    await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+    location.reload();
+  });
+}
+
+function setupLogin() {
+  const gh = document.getElementById("btn-github-login");
+  if (gh) gh.addEventListener("click", (e) => {
+    if (!_githubAvailable) {
+      e.preventDefault();
+      showToast("GitHub-вход не настроен оператором: задайте GITHUB_CLIENT_ID и GITHUB_CLIENT_SECRET в .env", "err");
+    }
+  });
+  const dev = document.getElementById("btn-dev-login");
+  if (dev) dev.addEventListener("click", async () => {
+    const email = (document.getElementById("dev-email").value || "").trim();
+    try {
+      await fetch("/auth/dev-login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      location.reload();
+    } catch { showToast("❌ Не удалось войти", "err"); }
+  });
+}
+
 async function checkBriefStatus() {
   try {
     const r = await fetch("/api/brief/status");
@@ -1253,6 +1359,12 @@ function switchView(name) {
   if (name === "progress") {
     loadProgress();
   }
+  if (name === "leads") {
+    loadLeads();
+  }
+  if (name === "code") {
+    loadFiles();
+  }
   if (name === "chat") {
     loadThreadList();
     if (!activeThread) selectThread("office");
@@ -1339,6 +1451,193 @@ async function openMilestone(stageId) {
 }
 
 // ============================================================
+// ЛИДЫ И ЛЕНДИНГИ
+// ============================================================
+let sitesCache = [];
+let leadsCache = [];
+
+async function loadLeads() {
+  try {
+    const [rs, rl] = await Promise.all([fetch("/api/sites"), fetch("/api/leads")]);
+    sitesCache = (await rs.json()).sites || [];
+    leadsCache = (await rl.json()).leads || [];
+  } catch { sitesCache = []; leadsCache = []; }
+  renderSites();
+  renderLeads();
+  updateLeadsBadge();
+}
+
+function renderSites() {
+  const list = document.getElementById("sites-list");
+  if (!list) return;
+  const no = document.getElementById("no-sites");
+  list.querySelectorAll(".site-card").forEach(c => c.remove());
+  if (no) no.style.display = sitesCache.length ? "none" : "block";
+  sitesCache.forEach((s) => {
+    const card = document.createElement("div");
+    card.className = "site-card";
+    const url = s.url || `/site/${s.slug}`;
+    card.innerHTML = `
+      <div class="sc-body">
+        <div class="sc-title">🌐 ${escapeHtml(s.title || s.slug)}</div>
+        <div class="sc-url"><a href="${url}" target="_blank" rel="noopener">${location.origin}${url} ↗</a></div>
+      </div>
+      <span class="sc-count">${s.leads || 0} заявок</span>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function renderLeads() {
+  const list = document.getElementById("leads-list");
+  if (!list) return;
+  const no = document.getElementById("no-leads");
+  list.querySelectorAll(".lead-card").forEach(c => c.remove());
+  if (no) no.style.display = leadsCache.length ? "none" : "block";
+  leadsCache.forEach((l) => {
+    const card = document.createElement("div");
+    card.className = "lead-card";
+    const t = l.ts ? new Date(l.ts * 1000).toLocaleString("ru", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    const site = sitesCache.find(s => s.slug === l.slug);
+    card.innerHTML = `
+      <div class="lc-top">
+        <span class="lc-name">${escapeHtml(l.name || "Без имени")}</span>
+        <span class="lc-time">${t}</span>
+      </div>
+      <div class="lc-contact">${escapeHtml(l.contact || "")}</div>
+      ${l.message ? `<div class="lc-msg">${escapeHtml(l.message)}</div>` : ""}
+      <div class="lc-src">с лендинга: ${escapeHtml(site ? (site.title || l.slug) : l.slug)}</div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function updateLeadsBadge() {
+  const badge = document.getElementById("badge-leads");
+  if (!badge) return;
+  badge.textContent = leadsCache.length ? String(leadsCache.length) : "";
+  badge.style.display = leadsCache.length ? "block" : "none";
+}
+
+// ============================================================
+// КОД ПРОЕКТА (рабочая папка агентов)
+// ============================================================
+let filesCache = [];
+
+async function loadFiles() {
+  try {
+    const r = await fetch("/api/files");
+    filesCache = (await r.json()).files || [];
+  } catch { filesCache = []; }
+  renderFiles();
+  const badge = document.getElementById("badge-code");
+  if (badge) { badge.textContent = filesCache.length || ""; badge.style.display = filesCache.length ? "block" : "none"; }
+}
+
+function renderFiles() {
+  const list = document.getElementById("code-files");
+  if (!list) return;
+  const no = document.getElementById("no-files");
+  list.querySelectorAll(".file-row").forEach(c => c.remove());
+  if (no) no.style.display = filesCache.length ? "none" : "block";
+  filesCache.forEach((f) => {
+    const row = document.createElement("div");
+    row.className = "file-row";
+    row.innerHTML = `<span class="fr-path">📄 ${escapeHtml(f.path)}</span><span class="fr-size">${f.size} б</span>`;
+    row.addEventListener("click", () => openFile(f.path));
+    list.appendChild(row);
+  });
+}
+
+async function openFile(path) {
+  try {
+    const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+    const content = await r.text();
+    ftCurrentIdx = -1;
+    ftRawContent = content;
+    document.getElementById("ft-who").innerHTML = `💻 <b>${escapeHtml(path)}</b>`;
+    document.getElementById("fulltext-body").textContent = content;
+    document.getElementById("fulltext-overlay").classList.remove("hidden");
+  } catch (e) { showToast("❌ Не удалось открыть файл", "err"); }
+}
+
+// ============================================================
+// УЧЁТ ТОКЕНОВ И СТОИМОСТИ (ROI)
+// ============================================================
+function fmtCost(c) {
+  c = c || 0;
+  if (c === 0) return "$0.0000";
+  return c >= 0.01 ? "$" + c.toFixed(4) : "$" + c.toFixed(5);
+}
+
+function fmtTokens(n) {
+  n = n || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return String(n);
+}
+
+async function loadCosts() {
+  try {
+    const r = await fetch("/api/costs");
+    const d = await r.json();
+    const t = d.total || {};
+    const el = document.getElementById("cost-meter");
+    if (el) {
+      el.textContent = `💸 ${fmtCost(t.cost)}`;
+      const tok = (t.in_tokens || 0) + (t.out_tokens || 0);
+      el.title = `Токенов: ${fmtTokens(tok)} (вход ${fmtTokens(t.in_tokens)} / выход ${fmtTokens(t.out_tokens)}), вызовов: ${t.calls||0}`;
+    }
+  } catch {}
+}
+
+// ============================================================
+// ПЕРСОНАЛЬНЫЙ КЛЮЧ К AI (per-tenant)
+// ============================================================
+async function loadLlmSettings() {
+  let d;
+  try { d = await (await fetch("/api/llm-settings")).json(); }
+  catch { return; }
+  const st = document.getElementById("lk-status");
+  const base = document.getElementById("lk-base");
+  const key = document.getElementById("lk-key");
+  if (base && !base.value) base.value = d.base_url || "";
+  if (st) {
+    if (d.has_own_key) {
+      st.className = "lk-status own";
+      st.textContent = `✅ Используется ваш ключ (${d.key_mask})`;
+    } else {
+      st.className = "lk-status shared";
+      st.textContent = "⚠ Сейчас используется общий ключ оператора. Укажите свой — расход пойдёт с вашего счёта.";
+    }
+  }
+  if (key) key.placeholder = d.has_own_key ? "•••• (задан, введите новый для замены)" : "sk-...";
+}
+
+function setupLlmSettings() {
+  const save = document.getElementById("lk-save");
+  const clear = document.getElementById("lk-clear");
+  if (save) save.addEventListener("click", async () => {
+    const base_url = document.getElementById("lk-base").value.trim();
+    const api_key = document.getElementById("lk-key").value.trim();
+    try {
+      await fetch("/api/llm-settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base_url, api_key }),
+      });
+      document.getElementById("lk-key").value = "";
+      showToast("✅ Ключ сохранён", "ok");
+      loadLlmSettings();
+    } catch { showToast("❌ Не удалось сохранить", "err"); }
+  });
+  if (clear) clear.addEventListener("click", async () => {
+    if (!confirm("Удалить свой ключ и вернуться на общий ключ оператора?")) return;
+    await fetch("/api/llm-settings/clear", { method: "POST" }).catch(() => {});
+    loadLlmSettings();
+  });
+}
+
+// ============================================================
 // CONNECTIONS
 // ============================================================
 let connectionsCache = [];
@@ -1419,11 +1718,17 @@ function renderIntegrations() {
       <div class="ic-actions-list">Действия: ${escapeHtml(acts)}</div>
       ${it.connected ? "" : `<div class="ic-howto">${escapeHtml(it.how_to||"")}</div>`}
       <div class="ic-btns">
-        <button class="dc-btn integ-connect">${it.connected ? "✎ Изменить доступ" : "🔌 Подключить"}</button>
+        <button class="dc-btn integ-connect">${
+          it.connected ? "✎ Изменить доступ"
+          : it.oauth_url ? `🔗 Подключить через ${escapeHtml(it.title)}`
+          : "🔌 Подключить"}</button>
         ${it.connected ? `<button class="dc-btn integ-test">🧪 Проверить</button>` : ""}
       </div>
     `;
-    card.querySelector(".integ-connect").addEventListener("click", () => connectIntegration(it));
+    card.querySelector(".integ-connect").addEventListener("click", () => {
+      if (it.oauth_url && !it.connected) { window.location.href = it.oauth_url; return; }
+      connectIntegration(it);
+    });
     const testBtn = card.querySelector(".integ-test");
     if (testBtn) testBtn.addEventListener("click", () => testIntegration(it));
     wrap.appendChild(card);
@@ -1662,7 +1967,9 @@ window.addEventListener("load", () => {
   resize();
   connectSSE();
   setupClickHandler();
-  checkBriefStatus();
+  setupLogin();
+  // Сначала проверяем вход: онбординг показываем только авторизованным
+  checkAuth().then((ok) => { if (ok) checkBriefStatus(); });
   replayHistory();
   loadDeliverables();
   gameLoop();
@@ -1717,10 +2024,22 @@ window.addEventListener("load", () => {
   // Connections
   setupConnections();
   loadConnections();
+  setupLlmSettings();
+  loadLlmSettings();
 
   // Чаты (общий + личные с агентами)
   setupChat();
   loadThreadList();
+
+  // Лиды и лендинги
+  loadLeads();
+
+  // Расход токенов/стоимость
+  loadCosts();
+  setInterval(loadCosts, 20000);
+
+  // Код проекта
+  loadFiles();
 
   // Model switcher (topbar global) + onboarding model picker
   setupModelSwitcher();

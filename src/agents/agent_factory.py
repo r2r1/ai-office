@@ -20,6 +20,7 @@ from src.office import memory as memory_module
 from src.office import models as models_module
 from src.office import office_channel
 from src.office import threads as threads_module
+from src.office import workspace as workspace_module
 from src.integrations import registry as integrations_registry
 
 _AUTONOMY_RULES = """
@@ -51,6 +52,9 @@ _INTER_AGENT_SUFFIX = (
     "\nНИКОГДА не проси пользователя делать ручную работу — если нужен внешний сервис, используй API."
     "\nЕсли нужны данные для подключения к платформе — сначала проверь get_connection, затем если нет — спроси через ask_user с инструкцией как получить API-ключ."
     "\nЕсли подключение не работает (ошибка API, неверный ключ) — опиши ошибку конкретно: что пробовал, какой ответ получил."
+    "\nГЛАВНОЕ: выдавай РЕАЛЬНЫЙ результат, а не его описание. Нужен лендинг/сайт — публикуй через "
+    "use_integration('website','publish_landing', ...) и дай ссылку. Нужен пост — публикуй через интеграцию. "
+    "Сначала вызови list_integrations и используй доступное (например website не требует ключей)."
 )
 
 ROLE_PROMPTS = {
@@ -60,8 +64,18 @@ ROLE_PROMPTS = {
         "Используй web_search для актуальных данных."
     ),
     "developer": (
-        "Ты — технический агент AI-агентства. Спроектируй автоматизацию для клиента: "
-        "стек, архитектура, шаги. Используй web_search для актуальных инструментов."
+        "Ты — разработчик AI-агентства. Ты ПИШЕШЬ РЕАЛЬНЫЙ КОД, а не описываешь его. "
+        "Рабочий цикл:\n"
+        "1. list_files — посмотри, что уже написано (не дублируй).\n"
+        "2. write_file — пиши код: бот/сайт на Python (aiogram/FastAPI), requirements.txt, README.md "
+        "с инструкцией запуска. Платные конструкторы (BotsBox/Tilda) не используй без одобрения клиента.\n"
+        "3. verify_code — проверь компиляцию. Есть ошибки → исправь через write_file и проверь снова, "
+        "пока не станет ✅.\n"
+        "4. Когда код готов и проверен — СПРОСИ пользователя через ask_user: всё ли устраивает и можно ли "
+        "запушить в GitHub (укажи имя репозитория). Без явного одобрения НЕ пушь.\n"
+        "5. После одобрения — use_integration('github','create_repo',{name}) затем "
+        "use_integration('github','push',{repo}).\n"
+        "Используй web_search для актуального синтаксиса библиотек."
     ),
     "marketer": (
         "Ты — маркетинговый агент AI-агентства. Создай контент-план и посты для "
@@ -205,6 +219,62 @@ _USE_INTEGRATION_TOOL = {
             },
             "required": ["name", "action"],
         },
+    },
+}
+
+# Инструменты: писать реальный код в рабочую папку проекта
+_WRITE_FILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "write_file",
+        "description": (
+            "Создаёт/перезаписывает файл с РЕАЛЬНЫМ кодом в рабочей папке проекта "
+            "(например 'bot/main.py', 'requirements.txt', 'README.md'). "
+            "Используй это, чтобы писать настоящий код, а не описывать его словами."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Путь файла внутри проекта (относительный)"},
+                "content": {"type": "string", "description": "Полное содержимое файла"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+}
+
+_READ_FILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "description": "Читает файл из рабочей папки проекта по относительному пути.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Путь файла"}},
+            "required": ["path"],
+        },
+    },
+}
+
+_LIST_FILES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_files",
+        "description": "Показывает все файлы проекта в рабочей папке (что уже написано).",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+_VERIFY_CODE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "verify_code",
+        "description": (
+            "Проверяет работоспособность написанного кода (компиляция всех .py). "
+            "Вызывай ПОСЛЕ написания/правок кода и ДО предложения запушить в GitHub. "
+            "Если есть ошибки — исправь их через write_file и проверь снова."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
 
@@ -405,6 +475,26 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
                           ensure_ascii=False)
 
+    async def _handle_write_file(args: dict) -> str:
+        path = args.get("path", "")
+        content = args.get("content", "")
+        res = workspace_module.write_file(path, content)
+        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📝 {res}"})
+        await publish({"type": "file_written", "agent_id": agent_id, "path": path,
+                       "text": f"📝 {agent_id}: {res}"})
+        return res
+
+    async def _handle_read_file(args: dict) -> str:
+        return workspace_module.read_file(args.get("path", ""))
+
+    async def _handle_list_files(args: dict) -> str:
+        return workspace_module.tree_text()
+
+    async def _handle_verify_code(args: dict) -> str:
+        res = workspace_module.verify_text()
+        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🧪 {res[:120]}"})
+        return res
+
     async def _handle_list_integrations(args: dict) -> str:
         lines = []
         for integ in integrations_registry.all_integrations():
@@ -438,6 +528,12 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
 
         creds = integrations_registry.credentials_for(integ)
         if not integrations_registry.is_connected(integ):
+            if getattr(integ, "oauth_url", ""):
+                return (
+                    f"Сервис '{integ.title}' не подключён. НЕ проси API-ключ. "
+                    f"Попроси пользователя через ask_user нажать кнопку «Подключить {integ.title}» "
+                    f"в разделе «Доступы» (вход по аккаунту, OAuth). После подключения повтори действие."
+                )
             return (
                 f"Сервис '{integ.title}' ещё не подключён — нет учётных данных. "
                 f"Запроси их у пользователя через ask_user. Как получить:\n{integ.how_to}"
@@ -482,14 +578,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             system=system,
             user=task,
             model=model,
-            max_tokens=3000,
-            max_iterations=8,
+            max_tokens=2000,
+            max_iterations=6,
+            max_searches=4,
             use_search=True,
             publish=_publish_and_log,
             agent_id=agent_id,
             extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL,
                          _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
-                         _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL],
+                         _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL,
+                         _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
@@ -499,6 +597,10 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "get_connection": _handle_get_connection,
                 "list_integrations": _handle_list_integrations,
                 "use_integration": _handle_use_integration,
+                "write_file": _handle_write_file,
+                "read_file": _handle_read_file,
+                "list_files": _handle_list_files,
+                "verify_code": _handle_verify_code,
             },
         )
 

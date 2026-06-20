@@ -26,6 +26,15 @@ BASE_URL = os.getenv("LLM_BASE_URL", "https://apinet.cloud/v1")
 API_KEY = os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "glm-4.5-flash")
 
+
+def _resolve_creds() -> tuple[str, str]:
+    """Креды LLM текущего тенанта (свой ключ клиента) или общий из .env."""
+    try:
+        from src.office import llm_settings
+        return llm_settings.credentials()
+    except Exception:
+        return BASE_URL, API_KEY
+
 # Инструмент веб-поиска в формате OpenAI function calling
 WEB_SEARCH_TOOL = {
     "type": "function",
@@ -44,7 +53,8 @@ WEB_SEARCH_TOOL = {
 
 
 def _client() -> AsyncOpenAI:
-    return AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
+    base_url, api_key = _resolve_creds()
+    return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
 
 async def run_agent(
@@ -59,6 +69,7 @@ async def run_agent(
     tool_handlers: Optional[dict[str, Callable[[dict], Awaitable[str]]]] = None,
     max_iterations: int = 8,
     history: Optional[list[dict[str, str]]] = None,
+    max_searches: int = 5,
 ) -> str:
     """
     Запускает агентный цикл: LLM думает, вызывает инструменты, отвечает.
@@ -66,6 +77,7 @@ async def run_agent(
     extra_tools     — дополнительные инструменты (формат OpenAI function).
     tool_handlers   — {имя_инструмента: async-функция(args)->str} для extra_tools.
     history         — предыдущие реплики диалога [{role, content}] для памяти.
+    max_searches    — жёсткий лимит web_search за один запуск (экономия токенов/времени).
     """
     client = _client()
     model = model or DEFAULT_MODEL
@@ -76,6 +88,12 @@ async def run_agent(
     if extra_tools:
         tools.extend(extra_tools)
 
+    # Глобальная директива: дешёвые модели иначе срываются на китайский/воду.
+    system = system + "\n\nПиши только на русском языке. Будь краток и по делу, без воды."
+
+    searches_done = 0
+    in_tokens = 0
+    out_tokens = 0
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     if history:
         messages.extend(history)
@@ -90,13 +108,18 @@ async def run_agent(
             tools=tools or None,
             max_tokens=max_tokens,
         )
+        usage = getattr(resp, "usage", None)
+        if usage:
+            in_tokens += getattr(usage, "prompt_tokens", 0) or 0
+            out_tokens += getattr(usage, "completion_tokens", 0) or 0
         msg = resp.choices[0].message
 
-        if msg.content:
+        if msg.content and msg.content.strip():
             final_text = msg.content
             if publish:
-                snippet = msg.content[:150].replace("\n", " ")
-                await publish({"type": "speech", "agent_id": agent_id, "text": snippet})
+                snippet = msg.content[:150].replace("\n", " ").strip()
+                if snippet:  # не публикуем пустые «мысли» (дешёвые модели их плодят)
+                    await publish({"type": "speech", "agent_id": agent_id, "text": snippet})
 
         # Добавляем ответ ассистента в историю
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": msg.content or ""}
@@ -123,11 +146,16 @@ async def run_agent(
                 args = {}
 
             if name == "web_search":
-                query = args.get("query", "")
-                if publish:
-                    await publish({"type": "speech", "agent_id": agent_id,
-                                   "text": f"🔍 Ищу: {query[:60]}"})
-                result = await _search_async(query)
+                if searches_done >= max_searches:
+                    result = ("Достигнут лимит веб-поисков. Хватит искать — "
+                              "сделай вывод на основе уже собранных данных.")
+                else:
+                    searches_done += 1
+                    query = args.get("query", "")
+                    if publish:
+                        await publish({"type": "speech", "agent_id": agent_id,
+                                       "text": f"🔍 Ищу: {query[:60]}"})
+                    result = await _search_async(query)
             elif tool_handlers and name in tool_handlers:
                 result = await tool_handlers[name](args)
             else:
@@ -138,6 +166,14 @@ async def run_agent(
                 "tool_call_id": tc.id,
                 "content": result[:4000],
             })
+
+    # Учёт расхода токенов/стоимости (ленивый импорт — core не зависит от office)
+    if in_tokens or out_tokens:
+        try:
+            from src.office import costs
+            costs.record(agent_id, model, in_tokens, out_tokens)
+        except Exception:
+            pass
 
     return final_text
 
