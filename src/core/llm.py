@@ -164,7 +164,7 @@ async def run_agent(
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": result[:4000],
+                "content": result[:2500],
             })
 
     # Учёт расхода токенов/стоимости (ленивый импорт — core не зависит от office)

@@ -2,6 +2,19 @@
 // AI OFFICE — Pixel Game Engine
 // ============================================================
 
+// ---- Общий fetch с обработкой 401 ----
+function showLoginGate() {
+  document.getElementById("login-gate")?.classList.remove("hidden");
+}
+
+async function apiFetch(url, opts = {}) {
+  try {
+    const r = await fetch(url, opts);
+    if (r.status === 401) { showLoginGate(); return null; }
+    return r;
+  } catch { return null; }
+}
+
 const COLS = 20;   // ширина карты в тайлах
 const ROWS = 14;   // высота карты в тайлах
 const ISO_W = 52;  // ширина изометрического тайла (пикс при scale=1)
@@ -1235,14 +1248,90 @@ function renderUserChip(user) {
   });
 }
 
+// ---- Device Flow ----
+let _deviceCode = "";
+let _devicePollTimer = null;
+
+function _showDeviceStep(name) {
+  ["code","wait","ok","err"].forEach(s =>
+    document.getElementById(`device-step-${s}`).classList.toggle("hidden", s !== name));
+}
+
+async function startDeviceFlow() {
+  document.getElementById("device-modal").classList.remove("hidden");
+  _showDeviceStep("code");
+  document.getElementById("dv-code").textContent = "…";
+
+  let data;
+  try {
+    const r = await fetch("/auth/github/device/start", { method: "POST" });
+    data = await r.json();
+    if (data.error) throw new Error(data.error);
+  } catch (e) {
+    _showDeviceStep("err");
+    document.getElementById("dv-err-text").textContent = e.message;
+    return;
+  }
+
+  _deviceCode = data.device_code;
+  document.getElementById("dv-code").textContent = data.user_code || "------";
+  document.getElementById("dv-link").href = data.verification_uri || "https://github.com/login/device";
+  document.getElementById("dv-copy").onclick = () => {
+    navigator.clipboard.writeText(data.user_code || "").catch(() => {});
+    showToast("Код скопирован", "ok");
+  };
+}
+
+async function pollDeviceFlow() {
+  if (!_deviceCode) return;
+  _showDeviceStep("wait");
+  clearInterval(_devicePollTimer);
+
+  const tryPoll = async () => {
+    try {
+      const r = await fetch("/auth/github/device/poll", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_code: _deviceCode }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        clearInterval(_devicePollTimer);
+        _showDeviceStep("ok");
+        setTimeout(() => location.reload(), 1200);
+        return;
+      }
+      const err = d.error || "";
+      if (err === "expired_token" || err === "access_denied") {
+        clearInterval(_devicePollTimer);
+        _showDeviceStep("err");
+        document.getElementById("dv-err-text").textContent =
+          err === "expired_token" ? "Код истёк — попробуйте снова." : "Доступ отклонён.";
+      }
+    } catch { /* сетевая ошибка — продолжаем */ }
+  };
+
+  await tryPoll();
+  _devicePollTimer = setInterval(tryPoll, 5000);
+}
+
 function setupLogin() {
   const gh = document.getElementById("btn-github-login");
   if (gh) gh.addEventListener("click", (e) => {
+    e.preventDefault();
     if (!_githubAvailable) {
-      e.preventDefault();
-      showToast("GitHub-вход не настроен оператором: задайте GITHUB_CLIENT_ID и GITHUB_CLIENT_SECRET в .env", "err");
+      document.getElementById("github-missing").classList.remove("hidden");
+      return;
     }
+    startDeviceFlow();
   });
+
+  document.getElementById("dv-confirm")?.addEventListener("click", pollDeviceFlow);
+  document.getElementById("dv-cancel")?.addEventListener("click", () => {
+    clearInterval(_devicePollTimer);
+    document.getElementById("device-modal").classList.add("hidden");
+  });
+  document.getElementById("dv-retry")?.addEventListener("click", startDeviceFlow);
+
   const dev = document.getElementById("btn-dev-login");
   if (dev) dev.addEventListener("click", async () => {
     const email = (document.getElementById("dev-email").value || "").trim();
@@ -1369,6 +1458,9 @@ function switchView(name) {
     loadThreadList();
     if (!activeThread) selectThread("office");
     else selectThread(activeThread);
+  }
+  if (name === "account") {
+    loadAccount();
   }
 }
 
@@ -1828,6 +1920,99 @@ async function deleteConnection(id) {
   } catch (e) { alert("Ошибка: " + e.message); }
 }
 
+// ============================================================
+// ACCOUNT TAB
+// ============================================================
+async function loadAccount() {
+  const r = await apiFetch("/api/me");
+  if (!r) return;
+  const d = await r.json();
+  if (!d.authenticated) return;
+
+  const u = d.user || {};
+  const ws = d.workspace || {};
+
+  const av = document.getElementById("acc-avatar");
+  if (av) av.innerHTML = u.avatar ? `<img src="${u.avatar}" alt="">` : "👤";
+  const nm = document.getElementById("acc-name");
+  if (nm) nm.textContent = u.name || u.github_login || u.email || "—";
+  const em = document.getElementById("acc-email");
+  if (em) em.textContent = [u.email, u.github_login ? `@${u.github_login}` : ""].filter(Boolean).join(" · ") || "—";
+
+  const planEl = document.getElementById("acc-plan");
+  if (planEl) {
+    const plan = (ws.plan || "free").toLowerCase();
+    planEl.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
+    planEl.className = `acc-plan-badge ${plan === "pro" ? "pro" : "free"}`;
+  }
+
+  const wsName = document.getElementById("acc-ws-name");
+  if (wsName && ws.name) wsName.value = ws.name;
+
+  // LLM settings
+  const lr = await apiFetch("/api/llm-settings");
+  if (!lr) return;
+  const ld = await lr.json();
+  const st = document.getElementById("acc-lk-status");
+  const base = document.getElementById("acc-lk-base");
+  const key = document.getElementById("acc-lk-key");
+  if (base && !base.value) base.value = ld.base_url || "";
+  if (st) {
+    st.textContent = ld.has_own_key
+      ? `✅ Используется ваш ключ (${ld.key_mask})`
+      : "⚠ Сейчас используется общий ключ оператора.";
+  }
+  if (key) key.placeholder = ld.has_own_key ? "•••• (задан, введите новый для замены)" : "sk-…";
+}
+
+function setupAccount() {
+  document.getElementById("acc-upgrade-btn")?.addEventListener("click", () =>
+    showToast("Биллинг скоро появится", "ok")
+  );
+
+  document.getElementById("acc-ws-save")?.addEventListener("click", async () => {
+    const name = (document.getElementById("acc-ws-name")?.value || "").trim();
+    if (!name) return;
+    const r = await apiFetch("/api/workspace/name", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (r) { showToast("✅ Название сохранено", "ok"); }
+  });
+
+  document.getElementById("acc-lk-save")?.addEventListener("click", async () => {
+    const base_url = document.getElementById("acc-lk-base")?.value.trim();
+    const api_key = document.getElementById("acc-lk-key")?.value.trim();
+    const r = await apiFetch("/api/llm-settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_url, api_key }),
+    });
+    if (r) {
+      document.getElementById("acc-lk-key").value = "";
+      showToast("✅ Ключ сохранён", "ok");
+      loadAccount();
+    }
+  });
+
+  document.getElementById("acc-lk-clear")?.addEventListener("click", async () => {
+    if (!confirm("Удалить свой ключ и вернуться на общий ключ оператора?")) return;
+    await apiFetch("/api/llm-settings/clear", { method: "POST" });
+    loadAccount();
+  });
+
+  document.getElementById("acc-reset-btn")?.addEventListener("click", async () => {
+    if (!confirm("Сбросить офис? Все данные текущего клиента будут удалены.")) return;
+    await apiFetch("/api/brief/reset", { method: "POST" });
+    showToast("Офис сброшен", "ok");
+    setTimeout(() => location.reload(), 800);
+  });
+
+  document.getElementById("acc-logout-btn")?.addEventListener("click", async () => {
+    await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+    location.reload();
+  });
+}
+
 function setupConnections() {
   document.getElementById("btn-add-conn").addEventListener("click", () => openConnForm(null));
   document.getElementById("cf-add-field").addEventListener("click", () => addFieldRow("", ""));
@@ -2026,6 +2211,9 @@ window.addEventListener("load", () => {
   loadConnections();
   setupLlmSettings();
   loadLlmSettings();
+
+  // Account tab
+  setupAccount();
 
   // Чаты (общий + личные с агентами)
   setupChat();

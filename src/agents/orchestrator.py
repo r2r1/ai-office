@@ -176,11 +176,11 @@ async def decide(
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Анализирую команду и решаю, что делать дальше..."})
 
-    tdd_section = f"\nТехническое задание архитектора:\n{tech_design[:1000]}\n" if tech_design else ""
+    tdd_section = f"\nТЗ архитектора:\n{tech_design[:500]}\n" if tech_design else ""
     directives_section = f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ над стратегией/ТЗ) ===\n{user_directives}\n" if user_directives.strip() else ""
     user = (
         f"Цель: {goal}\n\n"
-        f"Стратегия (кратко):\n{strategy[:800]}\n"
+        f"Стратегия (кратко):\n{strategy[:400]}\n"
         f"{tdd_section}"
         f"{directives_section}\n"
         f"Этапы пути:\n{ms_text}\n\n"

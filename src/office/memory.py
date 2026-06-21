@@ -42,8 +42,8 @@ def context_block() -> str:
     entries = _all()
     if not entries:
         return ""
-    lines = [f"В: {e['question']}\nО: {e['answer']}" for e in entries[-30:]]
-    return "\n\n=== ОТВЕТЫ ПОЛЬЗОВАТЕЛЯ (не спрашивай повторно) ===\n" + "\n---\n".join(lines)
+    lines = [f"В: {e['question']}\nО: {e['answer']}" for e in entries[-8:]]
+    return "\n\n=== ОТВЕТЫ ПОЛЬЗОВАТЕЛЯ ===\n" + "\n---\n".join(lines)
 
 
 def load() -> None:

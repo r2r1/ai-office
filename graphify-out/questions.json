@@ -1,0 +1,37 @@
+[
+  {
+    "type": "bridge_node",
+    "question": "Why does `FastAPI` connect `Core Tech Stack` to `Server Routes`?",
+    "why": "High betweenness centrality (0.104) - this node is a cross-community bridge."
+  },
+  {
+    "type": "verify_inferred",
+    "question": "Are the 10 inferred relationships involving `publish()` (e.g. with `run_async()` and `decide()`) actually correct?",
+    "why": "`publish()` has 10 INFERRED edges - model-reasoned connections that need verification."
+  },
+  {
+    "type": "isolated_nodes",
+    "question": "What connects `Точка входа AI-офиса.  Использование:   python main.py                      #`, `FastAPI сервер — SSE-стрим событий + статика игры.`, `Ставит контекст тенанта из сессии (аноним → 'default').` to the rest of the system?",
+    "why": "194 weakly-connected nodes found - possible documentation gaps or missing edges."
+  },
+  {
+    "type": "low_cohesion",
+    "question": "Should `Frontend Canvas UI` be split into smaller, more focused modules?",
+    "why": "Cohesion score 0.039473684210526314 - nodes in this community are weakly interconnected."
+  },
+  {
+    "type": "low_cohesion",
+    "question": "Should `HTTP Integrations Layer` be split into smaller, more focused modules?",
+    "why": "Cohesion score 0.061224489795918366 - nodes in this community are weakly interconnected."
+  },
+  {
+    "type": "low_cohesion",
+    "question": "Should `Architect Agent` be split into smaller, more focused modules?",
+    "why": "Cohesion score 0.09388335704125178 - nodes in this community are weakly interconnected."
+  },
+  {
+    "type": "low_cohesion",
+    "question": "Should `HR Agent` be split into smaller, more focused modules?",
+    "why": "Cohesion score 0.0761904761904762 - nodes in this community are weakly interconnected."
+  }
+]

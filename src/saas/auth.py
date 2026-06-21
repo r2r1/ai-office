@@ -30,11 +30,52 @@ ALLOW_DEV_LOGIN = os.getenv("ALLOW_DEV_LOGIN", "1") == "1"
 
 GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN = "https://github.com/login/oauth/access_token"
+GITHUB_DEVICE_CODE = "https://github.com/login/device/code"
 GITHUB_API = "https://api.github.com"
 
 
 def github_configured() -> bool:
-    return bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET)
+    """Device Flow работает только с client_id — секрет необязателен."""
+    return bool(GITHUB_CLIENT_ID)
+
+
+# ---- GitHub Device Flow ----
+
+async def github_device_start() -> dict:
+    """Шаг 1: запросить device_code и user_code."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            GITHUB_DEVICE_CODE,
+            headers={"Accept": "application/json"},
+            data={"client_id": GITHUB_CLIENT_ID, "scope": "read:user user:email repo"},
+        )
+    data = r.json()
+    return {
+        "device_code": data.get("device_code", ""),
+        "user_code": data.get("user_code", ""),
+        "verification_uri": data.get("verification_uri", "https://github.com/login/device"),
+        "expires_in": data.get("expires_in", 900),
+        "interval": data.get("interval", 5),
+    }
+
+
+async def github_device_poll(device_code: str) -> dict:
+    """Шаг 2: опросить GitHub — получить токен или статус ожидания."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            GITHUB_TOKEN,
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            },
+        )
+    data = r.json()
+    return {
+        "access_token": data.get("access_token", ""),
+        "error": data.get("error", ""),  # authorization_pending | slow_down | expired_token
+    }
 
 
 # ---- Сессии ----

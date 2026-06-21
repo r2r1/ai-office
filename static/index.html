@@ -385,24 +385,76 @@ canvas { display: block; }
 }
 #login-gate.hidden { display: none; }
 #login-card {
-  width: 100%; max-width: 440px; background: #0d0d1c; border: 1px solid var(--border2);
-  border-radius: 16px; padding: 40px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+  width: 100%; max-width: 420px; background: #0d0d1c; border: 1px solid var(--border2);
+  border-radius: 20px; padding: 44px 40px; text-align: center; box-shadow: 0 24px 80px rgba(0,0,0,0.9);
 }
-#login-card h1 { font-size: 26px; margin-bottom: 8px; color: var(--accent); }
-#login-card .sub { color: #8080a8; font-size: 12px; line-height: 1.6; margin-bottom: 24px; }
+#login-logo { font-size: 38px; margin-bottom: 12px; }
+#login-card h1 { font-size: 22px; margin-bottom: 6px; color: #fff; font-weight: 700; }
+#login-card .sub { color: #7070a0; font-size: 12px; line-height: 1.7; margin-bottom: 28px; }
 .gh-btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
   padding: 14px; border-radius: 10px; background: #1f2430; border: 1px solid #3a4150;
-  color: #fff; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer;
+  color: #fff; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background .15s;
 }
 .gh-btn:hover { background: #2a3140; }
-.login-or { color: #55557a; font-size: 11px; margin: 18px 0 12px; }
-#dev-email { width: 100%; padding: 11px; border-radius: 8px; background: #0f0f20;
-  border: 1px solid var(--border2); color: #e0e0e0; font-size: 13px; outline: none; }
+.gh-btn:disabled { opacity: 0.6; cursor: default; }
+.login-or { color: #44446a; font-size: 11px; margin: 20px 0 14px; display: flex; align-items: center; gap: 10px; }
+.login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: #1e1e38; }
+#dev-email { width: 100%; padding: 12px 14px; border-radius: 9px; background: #0f0f20;
+  border: 1px solid var(--border2); color: #e0e0e0; font-size: 13px; outline: none; font-family: inherit; }
 #dev-email:focus { border-color: var(--accent); }
-#btn-dev-login { width: 100%; margin-top: 10px; padding: 11px; border: none; border-radius: 8px;
-  background: #1e3558; color: #8fd3ff; font-size: 13px; font-weight: 600; cursor: pointer; }
+#btn-dev-login { width: 100%; margin-top: 10px; padding: 12px; border: none; border-radius: 9px;
+  background: #1e3558; color: #8fd3ff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
 #btn-dev-login:hover { background: #2a4a78; }
+#btn-dev-login:disabled { opacity: 0.6; cursor: default; }
+/* ── Account view ── */
+#view-account { overflow-y: auto; }
+#view-account .view-head { padding: 18px 20px; border-bottom: 1px solid var(--border); }
+#view-account .view-head h2 { font-size: 16px; }
+.acc-section { margin: 0 20px 20px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.acc-section-head { padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: #9090c0; text-transform: uppercase; letter-spacing: .5px; }
+.acc-section-body { padding: 18px; }
+.acc-profile { display: flex; align-items: center; gap: 16px; }
+.acc-avatar { width: 52px; height: 52px; border-radius: 50%; background: #1e2a3a; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; overflow: hidden; }
+.acc-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.acc-info { flex: 1; min-width: 0; }
+.acc-name { font-size: 15px; font-weight: 600; color: #dde; }
+.acc-email { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.acc-plan-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; margin-top: 5px; letter-spacing: .5px; }
+.acc-plan-badge.free { background: #1e2a3a; color: #6fa8d8; border: 1px solid #2a4a78; }
+.acc-plan-badge.pro { background: #1e3526; color: #6fd88a; border: 1px solid #2a6040; }
+.acc-row { margin-bottom: 12px; }
+.acc-row label { display: block; font-size: 11px; color: #8080a8; margin-bottom: 5px; }
+.acc-row input { width: 100%; padding: 10px 12px; border-radius: 8px; background: #0f0f20; border: 1px solid var(--border2); color: #e0e0e0; font-family: inherit; font-size: 13px; outline: none; }
+.acc-row input:focus { border-color: var(--accent); }
+.acc-row .lk-status { font-size: 11px; color: #6a6a90; margin-bottom: 10px; padding: 8px 10px; background: #0a0a18; border-radius: 6px; border: 1px solid var(--border); }
+.acc-actions { display: flex; gap: 8px; margin-top: 4px; }
+.acc-danger { border-color: #3a1a1a; }
+.acc-danger .acc-section-head { color: #c07070; }
+.acc-danger-btn { width: 100%; padding: 11px; border: none; border-radius: 8px; background: #2a1010; color: #e07070; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
+.acc-danger-btn:hover { background: #3a1818; }
+.acc-logout-btn { width: 100%; padding: 11px; border: 1px solid var(--border2); border-radius: 8px; background: transparent; color: #8080a8; font-size: 13px; cursor: pointer; font-family: inherit; transition: background .15s; }
+.acc-logout-btn:hover { background: #111122; color: #c0c0d8; }
+.acc-upgrade-btn { padding: 8px 18px; border: none; border-radius: 8px; background: linear-gradient(135deg,#2d6ee0,#4fc3f7); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.acc-workspace-row { display: flex; gap: 8px; }
+.acc-workspace-row input { flex: 1; }
+.acc-workspace-row button { padding: 0 14px; border: none; border-radius: 8px; background: #1e3558; color: #8fd3ff; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.acc-workspace-row button:hover { background: #2a4a78; }
+/* Device Flow modal */
+#device-modal { position: fixed; inset: 0; z-index: 1200; background: rgba(6,6,16,.85);
+  display: flex; align-items: center; justify-content: center; padding: 20px; }
+#device-modal.hidden { display: none; }
+#device-card { width: 100%; max-width: 400px; background: #0d0d1c; border: 1px solid var(--border2);
+  border-radius: 16px; padding: 36px 32px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.9); }
+#device-card h2 { font-size: 20px; margin-bottom: 6px; }
+.dv-icon { font-size: 40px; margin-bottom: 12px; }
+.dv-sub { color: #8080a8; font-size: 12px; line-height: 1.6; margin-bottom: 16px; }
+.dv-hint { color: #666688; font-size: 11px; line-height: 1.6; margin-top: 14px; }
+#dv-code-box { display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: #0a0a1e; border: 1px solid var(--border2); border-radius: 10px; padding: 14px 20px; }
+#dv-code { font-size: 28px; font-weight: 700; letter-spacing: 6px; color: var(--accent); font-family: monospace; }
+#dv-copy { background: none; border: none; color: #667; font-size: 18px; cursor: pointer; padding: 4px; }
+#dv-copy:hover { color: var(--accent); }
 #user-chip { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #aab; white-space: nowrap; }
 #user-chip img { width: 20px; height: 20px; border-radius: 50%; }
 #user-chip .uc-logout { cursor: pointer; color: #667; }
@@ -473,19 +525,58 @@ canvas { display: block; }
 <!-- Login gate (Phase 0) -->
 <div id="login-gate" class="hidden">
   <div id="login-card">
-    <h1>🏢 AI-Office</h1>
-    <p class="sub">Войдите, чтобы создать свой изолированный AI-офис. Вход через GitHub
-      сразу подключает ваш аккаунт для будущего деплоя кода.</p>
-    <a id="btn-github-login" href="/auth/github/login" class="gh-btn">
-      <span>⌥</span> Войти через GitHub
-    </a>
-    <div id="github-missing" class="hidden" style="font-size:11px;color:#c98;margin-top:10px;">
-      GitHub OAuth не настроен оператором. Используйте вход для разработки ниже.
+    <div id="login-logo">🏢</div>
+    <h1>AI Office</h1>
+    <p class="sub">Автономный AI-офис для вашего бизнеса.<br>Войдите, чтобы запустить своих агентов.</p>
+    <button id="btn-github-login" class="gh-btn">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.929.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+      Войти через GitHub
+    </button>
+    <div id="github-missing" class="hidden" style="font-size:11px;color:#c98;margin-top:12px;line-height:1.6;padding:10px;background:#1a1010;border-radius:8px;border:1px solid #3a2020;">
+      GitHub не настроен — добавьте <code style="background:#2a1a1a;padding:2px 5px;border-radius:3px;">GITHUB_CLIENT_ID</code> в .env
+      (<a href="https://github.com/settings/developers" target="_blank" style="color:#4fc3f7">создать OAuth App</a>)
     </div>
     <div id="dev-login-block" class="hidden">
-      <div class="login-or">— или для разработки —</div>
+      <div class="login-or">для разработки</div>
       <input id="dev-email" type="email" placeholder="email (например you@biz.ru)" autocomplete="off">
       <button id="btn-dev-login">Войти локально</button>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно Device Flow -->
+<div id="device-modal" class="hidden">
+  <div id="device-card">
+    <div id="device-step-code">
+      <div class="dv-icon">🐙</div>
+      <h2>Вход через GitHub</h2>
+      <p class="dv-sub">Скопируйте код и введите его на странице GitHub</p>
+      <div id="dv-code-box">
+        <span id="dv-code">––––––</span>
+        <button id="dv-copy" title="Копировать">⧉</button>
+      </div>
+      <a id="dv-link" href="https://github.com/login/device" target="_blank" class="gh-btn" style="margin-top:16px;">
+        Открыть github.com/login/device ↗
+      </a>
+      <p class="dv-hint">После ввода кода на GitHub нажмите «Я ввёл код» — авторизация произойдёт автоматически</p>
+      <button id="dv-confirm" class="primary-btn" style="width:100%;margin-top:12px;">Я ввёл код ✓</button>
+      <button id="dv-cancel" class="dc-btn" style="width:100%;margin-top:8px;">Отмена</button>
+    </div>
+    <div id="device-step-wait" class="hidden">
+      <div class="dv-icon">⏳</div>
+      <h2>Ожидаем авторизацию…</h2>
+      <p class="dv-sub">Проверяем подтверждение на GitHub</p>
+    </div>
+    <div id="device-step-ok" class="hidden">
+      <div class="dv-icon">✅</div>
+      <h2>Вы вошли!</h2>
+      <p class="dv-sub">Загружаем офис…</p>
+    </div>
+    <div id="device-step-err" class="hidden">
+      <div class="dv-icon">❌</div>
+      <h2>Ошибка</h2>
+      <p id="dv-err-text" class="dv-sub"></p>
+      <button id="dv-retry" class="gh-btn" style="margin-top:16px;">Попробовать снова</button>
     </div>
   </div>
 </div>
@@ -552,6 +643,7 @@ canvas { display: block; }
       <div class="nav-item" data-view="leads"><span class="ni-icon">🎯</span><span class="ni-label">Лиды</span><span class="ni-badge" id="badge-leads"></span></div>
       <div class="nav-item" data-view="code"><span class="ni-icon">💻</span><span class="ni-label">Код</span><span class="ni-badge" id="badge-code"></span></div>
       <div class="nav-item" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
+      <div class="nav-item" data-view="account"><span class="ni-icon">⚙️</span><span class="ni-label">Аккаунт</span></div>
       <div class="nav-item" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">События</span></div>
       <div class="nav-item" data-view="progress"><span class="ni-icon">📈</span><span class="ni-label">Этапы</span></div>
       <div class="nav-item" data-view="chat"><span class="ni-icon">💬</span><span class="ni-label">Чаты</span><span class="ni-badge" id="badge-chat"></span></div>
@@ -646,6 +738,71 @@ canvas { display: block; }
           <div id="conn-list">
             <div class="empty-note" id="no-conns">Пока нет ни одного подключения</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Account view -->
+      <div class="view" id="view-account">
+        <div class="view-head"><h2>⚙️ Аккаунт</h2></div>
+        <div style="padding:20px 0;">
+
+          <div class="acc-section">
+            <div class="acc-section-head">Профиль</div>
+            <div class="acc-section-body">
+              <div class="acc-profile">
+                <div class="acc-avatar" id="acc-avatar">👤</div>
+                <div class="acc-info">
+                  <div class="acc-name" id="acc-name">—</div>
+                  <div class="acc-email" id="acc-email">—</div>
+                  <span class="acc-plan-badge free" id="acc-plan">Free</span>
+                </div>
+                <button class="acc-upgrade-btn" id="acc-upgrade-btn" title="Скоро">Upgrade →</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="acc-section">
+            <div class="acc-section-head">Рабочее пространство</div>
+            <div class="acc-section-body">
+              <div class="acc-row">
+                <label>Название офиса</label>
+                <div class="acc-workspace-row">
+                  <input id="acc-ws-name" type="text" placeholder="Мой офис" autocomplete="off">
+                  <button id="acc-ws-save">Сохранить</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="acc-section">
+            <div class="acc-section-head">AI-модели — ваш ключ</div>
+            <div class="acc-section-body">
+              <div class="acc-row">
+                <div class="lk-status" id="acc-lk-status">Загрузка…</div>
+              </div>
+              <div class="acc-row">
+                <label>API base URL</label>
+                <input id="acc-lk-base" type="text" placeholder="https://apinet.cloud/v1" autocomplete="off">
+              </div>
+              <div class="acc-row">
+                <label>API-ключ</label>
+                <input id="acc-lk-key" type="password" placeholder="sk-…" autocomplete="off">
+              </div>
+              <div class="acc-actions">
+                <button class="primary-btn" id="acc-lk-save">Сохранить ключ</button>
+                <button class="dc-btn" id="acc-lk-clear">Использовать общий</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="acc-section acc-danger">
+            <div class="acc-section-head">Опасная зона</div>
+            <div class="acc-section-body" style="display:flex;flex-direction:column;gap:10px;">
+              <button class="acc-danger-btn" id="acc-reset-btn">↺ Сбросить офис (новый клиент)</button>
+              <button class="acc-logout-btn" id="acc-logout-btn">⎋ Выйти из аккаунта</button>
+            </div>
+          </div>
+
         </div>
       </div>
 

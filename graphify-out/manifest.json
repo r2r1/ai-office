@@ -1,0 +1,272 @@
+{
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\main.py": {
+    "mtime": 1781806175.9227686,
+    "ast_hash": "a7971217bba938ad7a88ae26f6cfdfd3",
+    "semantic_hash": "a7971217bba938ad7a88ae26f6cfdfd3"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\server.py": {
+    "mtime": 1782024892.9621155,
+    "ast_hash": "b7e01d2a26c77263c463c4694825277e",
+    "semantic_hash": "b7e01d2a26c77263c463c4694825277e"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\__init__.py": {
+    "mtime": 1781806175.9307866,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\__init__.py": {
+    "mtime": 1781806175.9327855,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\agent_factory.py": {
+    "mtime": 1782024949.6560674,
+    "ast_hash": "c35da2e9b4357da841e645767af204e0",
+    "semantic_hash": "c35da2e9b4357da841e645767af204e0"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\architect.py": {
+    "mtime": 1781970383.1804495,
+    "ast_hash": "7e759c839f1c142f08ef3f0adb43691a",
+    "semantic_hash": "7e759c839f1c142f08ef3f0adb43691a"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\hr.py": {
+    "mtime": 1781861019.9198194,
+    "ast_hash": "839bf2c62e76d3a48394ffcba0659c26",
+    "semantic_hash": "839bf2c62e76d3a48394ffcba0659c26"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\onboarding.py": {
+    "mtime": 1781861019.9198194,
+    "ast_hash": "b03a951efe3bc08bac8ad31be49471ec",
+    "semantic_hash": "b03a951efe3bc08bac8ad31be49471ec"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\orchestrator.py": {
+    "mtime": 1782024903.148796,
+    "ast_hash": "35a0ea11c5ed3ce68455e4fc67db40fa",
+    "semantic_hash": "35a0ea11c5ed3ce68455e4fc67db40fa"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\researcher.py": {
+    "mtime": 1781970393.7997248,
+    "ast_hash": "2af7876bf53300bdb46e97b754a09687",
+    "semantic_hash": "2af7876bf53300bdb46e97b754a09687"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\agents\\strategist.py": {
+    "mtime": 1781970402.203708,
+    "ast_hash": "fdac68e3cf620ad2aeb16a35839e4227",
+    "semantic_hash": "fdac68e3cf620ad2aeb16a35839e4227"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\core\\__init__.py": {
+    "mtime": 1781812355.6077428,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\core\\llm.py": {
+    "mtime": 1782024954.2223094,
+    "ast_hash": "d57ed5f8fb23f8882f67e261f4a747e7",
+    "semantic_hash": "d57ed5f8fb23f8882f67e261f4a747e7"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\core\\search.py": {
+    "mtime": 1781812355.6161604,
+    "ast_hash": "3d3812c326a0bab8ed1bd4d8be4f4e4f",
+    "semantic_hash": "3d3812c326a0bab8ed1bd4d8be4f4e4f"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\integrations\\__init__.py": {
+    "mtime": 1781894897.717448,
+    "ast_hash": "741137007694158b39c455d97e98d258",
+    "semantic_hash": "741137007694158b39c455d97e98d258"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\integrations\\base.py": {
+    "mtime": 1781990835.18015,
+    "ast_hash": "07d9630ec9fcaff93831478706a841d3",
+    "semantic_hash": "07d9630ec9fcaff93831478706a841d3"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\integrations\\github.py": {
+    "mtime": 1781990850.7569008,
+    "ast_hash": "94c7429444630d0f34a36309ddf0604d",
+    "semantic_hash": "94c7429444630d0f34a36309ddf0604d"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\integrations\\registry.py": {
+    "mtime": 1781989777.1773975,
+    "ast_hash": "1a664353ce49aaa8dbd4c40ebee4a6c0",
+    "semantic_hash": "1a664353ce49aaa8dbd4c40ebee4a6c0"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\integrations\\telegram.py": {
+    "mtime": 1781894935.3557384,
+    "ast_hash": "91d1727362883677596c91b2dd257717",
+    "semantic_hash": "91d1727362883677596c91b2dd257717"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\integrations\\website.py": {
+    "mtime": 1781970604.5306983,
+    "ast_hash": "4f5310d5a5ae501b0b5daf1c425fa4ee",
+    "semantic_hash": "4f5310d5a5ae501b0b5daf1c425fa4ee"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\__init__.py": {
+    "mtime": 1781806736.3829608,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\agent_inbox.py": {
+    "mtime": 1781970262.9207468,
+    "ast_hash": "1fce1cf6604500c8866d33ab7ed5e946",
+    "semantic_hash": "1fce1cf6604500c8866d33ab7ed5e946"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\brief.py": {
+    "mtime": 1781970022.23352,
+    "ast_hash": "f08941502d81fd707de502a6ef2b268a",
+    "semantic_hash": "f08941502d81fd707de502a6ef2b268a"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\bus.py": {
+    "mtime": 1781970240.1623938,
+    "ast_hash": "b690c63b6fbc90cc68fce1462a54e135",
+    "semantic_hash": "b690c63b6fbc90cc68fce1462a54e135"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\chat.py": {
+    "mtime": 1781970333.6267161,
+    "ast_hash": "1695b8930501228ee11efa27b37d4a74",
+    "semantic_hash": "1695b8930501228ee11efa27b37d4a74"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\connections.py": {
+    "mtime": 1781971711.7464254,
+    "ast_hash": "a00415b0de84911114040120557caa7b",
+    "semantic_hash": "a00415b0de84911114040120557caa7b"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\costs.py": {
+    "mtime": 1781970171.8784988,
+    "ast_hash": "22256135c86810ea000697549c9582df",
+    "semantic_hash": "22256135c86810ea000697549c9582df"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\demo.py": {
+    "mtime": 1781820523.6665814,
+    "ast_hash": "595a7631a685810b77d7ccc6e0bd9a62",
+    "semantic_hash": "595a7631a685810b77d7ccc6e0bd9a62"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\leads.py": {
+    "mtime": 1781970153.8036928,
+    "ast_hash": "1f3c04f7721f5462805244cebe5ce2bd",
+    "semantic_hash": "1f3c04f7721f5462805244cebe5ce2bd"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\llm_settings.py": {
+    "mtime": 1781971655.7501528,
+    "ast_hash": "e2dba54a309432ab5cddc4b3e656b5da",
+    "semantic_hash": "e2dba54a309432ab5cddc4b3e656b5da"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\loop.py": {
+    "mtime": 1781970470.7118552,
+    "ast_hash": "52cb018793f71a042adf0c82c4c07f5a",
+    "semantic_hash": "52cb018793f71a042adf0c82c4c07f5a"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\memory.py": {
+    "mtime": 1782024880.8200867,
+    "ast_hash": "11de1cf58469c67c8ef11e807eb6aed3",
+    "semantic_hash": "11de1cf58469c67c8ef11e807eb6aed3"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\milestones.py": {
+    "mtime": 1781970090.7962248,
+    "ast_hash": "00a9cc17dd6ccb17043a5e464b2f31f0",
+    "semantic_hash": "00a9cc17dd6ccb17043a5e464b2f31f0"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\models.py": {
+    "mtime": 1781970068.9471033,
+    "ast_hash": "1138544c4dd5f785ebdb96923f23bffc",
+    "semantic_hash": "1138544c4dd5f785ebdb96923f23bffc"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\office_channel.py": {
+    "mtime": 1781970116.234652,
+    "ast_hash": "275a4a290ac175b201daaab98a7b5e18",
+    "semantic_hash": "275a4a290ac175b201daaab98a7b5e18"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\progress.py": {
+    "mtime": 1781970044.1093132,
+    "ast_hash": "cf3af641e3fc6ea43c8160e7b1575fd0",
+    "semantic_hash": "cf3af641e3fc6ea43c8160e7b1575fd0"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\questions.py": {
+    "mtime": 1781970255.1273043,
+    "ast_hash": "ea66750de45968268df4a9710cd38277",
+    "semantic_hash": "ea66750de45968268df4a9710cd38277"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\registry.py": {
+    "mtime": 1781970223.6475117,
+    "ast_hash": "760d4f8f70ae439360cba695959e6c52",
+    "semantic_hash": "760d4f8f70ae439360cba695959e6c52"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\sites.py": {
+    "mtime": 1781970138.6622112,
+    "ast_hash": "2c480129fc39773ea9998da9d3ab43d9",
+    "semantic_hash": "2c480129fc39773ea9998da9d3ab43d9"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\state.py": {
+    "mtime": 1781970206.0983548,
+    "ast_hash": "85c0bbdbea393ab45ee3c5e620a165bc",
+    "semantic_hash": "85c0bbdbea393ab45ee3c5e620a165bc"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\threads.py": {
+    "mtime": 1781970127.115257,
+    "ast_hash": "c0475f3cf3f90950d172720723515c0e",
+    "semantic_hash": "c0475f3cf3f90950d172720723515c0e"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\office\\workspace.py": {
+    "mtime": 1781989742.4952374,
+    "ast_hash": "083164b7e94dde266a04887d64a5af04",
+    "semantic_hash": "083164b7e94dde266a04887d64a5af04"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\saas\\__init__.py": {
+    "mtime": 1781969196.913925,
+    "ast_hash": "6647058a298c3c8c7e8a8fd95ea6c62c",
+    "semantic_hash": "6647058a298c3c8c7e8a8fd95ea6c62c"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\saas\\auth.py": {
+    "mtime": 1782024543.0783255,
+    "ast_hash": "448550289e861300c76c844dd7e2654b",
+    "semantic_hash": "448550289e861300c76c844dd7e2654b"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\saas\\context.py": {
+    "mtime": 1781970007.825282,
+    "ast_hash": "d782dcb4c5c886f4e53e23694d120ce6",
+    "semantic_hash": "d782dcb4c5c886f4e53e23694d120ce6"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\saas\\crypto.py": {
+    "mtime": 1781971585.2761378,
+    "ast_hash": "de3e97680716ef5bd6c4f071d92aecac",
+    "semantic_hash": "de3e97680716ef5bd6c4f071d92aecac"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\saas\\db.py": {
+    "mtime": 1781969211.3275151,
+    "ast_hash": "3148abc5ad39a7bf7ca2f5cc9fb073a4",
+    "semantic_hash": "3148abc5ad39a7bf7ca2f5cc9fb073a4"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\src\\saas\\store.py": {
+    "mtime": 1781970420.9883254,
+    "ast_hash": "36bdccf26a68de6837cfe74f03bce7e4",
+    "semantic_hash": "36bdccf26a68de6837cfe74f03bce7e4"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\static\\game.js": {
+    "mtime": 1782024663.6361141,
+    "ast_hash": "9b3f8fd10e551ab3cbec82d973eaceeb",
+    "semantic_hash": "9b3f8fd10e551ab3cbec82d973eaceeb"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\CLAUDE.md": {
+    "mtime": 1781989944.6173253,
+    "ast_hash": "b8e1b9ad4b97c40ce009dee439ccbf17",
+    "semantic_hash": "b8e1b9ad4b97c40ce009dee439ccbf17"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\README.md": {
+    "mtime": 1781944303.9719214,
+    "ast_hash": "d28af4e4650fa72b1ff193e9357c2687",
+    "semantic_hash": "d28af4e4650fa72b1ff193e9357c2687"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\docs\\SAAS_ARCHITECTURE.md": {
+    "mtime": 1781968941.2103603,
+    "ast_hash": "a108b8c36e98597c7adba399b79f0663",
+    "semantic_hash": "a108b8c36e98597c7adba399b79f0663"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\requirements.txt": {
+    "mtime": 1781989359.5292428,
+    "ast_hash": "b371b8b077e9d0c8ae8172b5373dd8a2",
+    "semantic_hash": "b371b8b077e9d0c8ae8172b5373dd8a2"
+  },
+  "C:\\Users\\grish\\Desktop\\\u0410\u0418\u041a\u0410 ai\\ai-office\\static\\index.html": {
+    "mtime": 1782024619.5728745,
+    "ast_hash": "77c804ccba0a5510c7b5765067330186",
+    "semantic_hash": "77c804ccba0a5510c7b5765067330186"
+  }
+}

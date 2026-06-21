@@ -5,6 +5,7 @@ FastAPI сервер — SSE-стрим событий + статика игры
 import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -52,6 +53,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ---- Rate limiting для /auth/* (без внешних зависимостей) ----
+_auth_attempts: dict[str, list[float]] = {}
+_MAX_AUTH_PER_MIN = 10
+
+
+def _check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    attempts = [t for t in _auth_attempts.get(ip, []) if now - t < 60]
+    _auth_attempts[ip] = attempts
+    if len(attempts) >= _MAX_AUTH_PER_MIN:
+        return False
+    _auth_attempts[ip].append(now)
+    return True
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or request.client.host or "unknown"
+
 
 @app.middleware("http")
 async def tenant_middleware(request: Request, call_next):
@@ -63,6 +83,21 @@ async def tenant_middleware(request: Request, call_next):
         if ws:
             tid = ws["id"]
     saas_context.set_tenant(tid)
+    return await call_next(request)
+
+
+# Пути /api/*, доступные без авторизации
+_PUBLIC_API = {"/api/me"}
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Блокирует неавторизованные запросы к /api/* в обычном (не demo) режиме."""
+    path = request.url.path
+    if not DEMO_MODE and path.startswith("/api/") and path not in _PUBLIC_API \
+            and not path.startswith("/api/lead/"):
+        uid = saas_auth.read_session(request.cookies.get(saas_auth.SESSION_COOKIE, ""))
+        if not uid:
+            return JSONResponse({"error": "Требуется авторизация", "auth": False}, status_code=401)
     return await call_next(request)
 
 
@@ -109,12 +144,57 @@ async def get_me(request: Request):
 
 @app.get("/auth/github/login")
 async def github_login():
+    """Redirect-OAuth (опционально). Основной метод — Device Flow (/auth/github/device/start)."""
     if not saas_auth.github_configured():
-        return JSONResponse(
-            {"error": "GitHub OAuth не настроен. Задайте GITHUB_CLIENT_ID и "
-                      "GITHUB_CLIENT_SECRET в .env (создайте OAuth App на github.com)."},
-            status_code=400,
-        )
+        return JSONResponse({"error": "Задайте GITHUB_CLIENT_ID в .env"}, status_code=400)
+    if saas_auth.GITHUB_CLIENT_SECRET:
+        return RedirectResponse(saas_auth.github_login_url())
+    return JSONResponse({"error": "Используйте Device Flow (/auth/github/device/start)"}, status_code=400)
+
+
+@app.post("/auth/github/device/start")
+async def github_device_start(request: Request):
+    """Device Flow шаг 1: получить код для ввода на github.com/login/device."""
+    if not _check_rate_limit(_client_ip(request)):
+        return JSONResponse({"error": "Слишком много попыток — подождите минуту"}, status_code=429)
+    if not saas_auth.github_configured():
+        return JSONResponse({"error": "Задайте GITHUB_CLIENT_ID в .env"}, status_code=400)
+    try:
+        data = await saas_auth.github_device_start()
+        return data
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/auth/github/device/poll")
+async def github_device_poll(request: Request):
+    """Device Flow шаг 2: опросить GitHub на наличие токена."""
+    body = await request.json()
+    device_code = body.get("device_code", "")
+    result = await saas_auth.github_device_poll(device_code)
+    if result.get("access_token"):
+        token = result["access_token"]
+        profile = await saas_auth.github_fetch_profile(token)
+        if not profile:
+            return JSONResponse({"error": "Не удалось получить профиль"}, status_code=400)
+        existing = current_user(request)
+        user = existing or saas_store.get_or_create_by_github(profile)
+        ws = saas_store.workspace_for_user(user["id"])
+        if ws:
+            saas_context.set_tenant(ws["id"])
+            connections.save({"name": "GitHub", "type": "token", "fields": {"token": token},
+                              "note": "Подключено через GitHub Device Flow"})
+        resp = JSONResponse({"ok": True, "user": saas_store.public_user(user)})
+        _set_session_cookie(resp, user["id"])
+        return resp
+    return JSONResponse({"pending": True, "error": result.get("error", "")})
+
+
+@app.get("/auth/github/login-redirect")
+async def github_login_redirect():
+    """Redirect-OAuth (только если настроен CLIENT_SECRET)."""
+    if not saas_auth.GITHUB_CLIENT_SECRET:
+        return JSONResponse({"error": "Задайте GITHUB_CLIENT_SECRET для redirect-OAuth"}, status_code=400)
     return RedirectResponse(saas_auth.github_login_url())
 
 
@@ -145,10 +225,14 @@ async def github_callback(request: Request, code: str = "", state: str = ""):
 @app.post("/auth/dev-login")
 async def dev_login(request: Request):
     """Локальный вход без GitHub (только если ALLOW_DEV_LOGIN=1)."""
+    if not _check_rate_limit(_client_ip(request)):
+        return JSONResponse({"error": "Слишком много попыток — подождите минуту"}, status_code=429)
     if not saas_auth.ALLOW_DEV_LOGIN:
         return JSONResponse({"error": "dev-вход отключён"}, status_code=403)
     data = await request.json()
     email = (data.get("email") or "dev@local").strip()
+    if not email or "@" not in email:
+        return JSONResponse({"error": "Укажите корректный email"}, status_code=400)
     user = saas_store.get_or_create_dev_user(email)
     resp = JSONResponse({"ok": True, "user": saas_store.public_user(user)})
     _set_session_cookie(resp, user["id"])
@@ -186,7 +270,7 @@ async def events():
                 yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
 
             # Исторические события из прошлых сессий
-            for evt in state.history()[-200:]:
+            for evt in state.history()[-50:]:
                 historical = dict(evt, historical=True)
                 yield f"data: {json.dumps(historical, ensure_ascii=False)}\n\n"
 
@@ -208,6 +292,34 @@ async def events():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/workspace")
+async def get_workspace(request: Request):
+    """Данные текущего рабочего пространства (тенанта)."""
+    user = current_user(request)
+    if not user:
+        return JSONResponse({"error": "auth required"}, status_code=401)
+    ws = saas_store.workspace_for_user(user["id"])
+    if not ws:
+        return JSONResponse({"error": "workspace not found"}, status_code=404)
+    return {"id": ws["id"], "name": ws["name"], "plan": ws["plan"], "created_at": ws["created_at"]}
+
+
+@app.post("/api/workspace/name")
+async def rename_workspace(request: Request):
+    """Переименовать рабочее пространство."""
+    user = current_user(request)
+    if not user:
+        return JSONResponse({"error": "auth required"}, status_code=401)
+    data = await request.json()
+    name = (data.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"error": "name обязателен"}, status_code=400)
+    from src.saas import db as saas_db
+    saas_db.execute("UPDATE workspaces SET name=? WHERE owner_user_id=?", (name, user["id"]))
+    ws = saas_store.workspace_for_user(user["id"])
+    return {"ok": True, "workspace": {"id": ws["id"], "name": ws["name"], "plan": ws["plan"]}}
 
 
 @app.get("/api/agents")

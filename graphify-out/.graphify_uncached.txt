@@ -1,0 +1,5 @@
+C:\Users\grish\Desktop\АИКА ai\ai-office\CLAUDE.md
+C:\Users\grish\Desktop\АИКА ai\ai-office\README.md
+C:\Users\grish\Desktop\АИКА ai\ai-office\docs\SAAS_ARCHITECTURE.md
+C:\Users\grish\Desktop\АИКА ai\ai-office\requirements.txt
+C:\Users\grish\Desktop\АИКА ai\ai-office\static\index.html

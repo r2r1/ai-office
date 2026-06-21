@@ -24,37 +24,15 @@ from src.office import workspace as workspace_module
 from src.integrations import registry as integrations_registry
 
 _AUTONOMY_RULES = """
-
-=== ПРАВИЛО АВТОНОМНОСТИ (СТРОГО ОБЯЗАТЕЛЬНО) ===
-Никогда не проси пользователя делать что-то руками, если это можно сделать через API.
-ЗАПРЕЩЕНО говорить: "создайте таблицу", "заполните колонки", "зайдите в сервис и добавьте".
-ОБЯЗАТЕЛЬНО: если нужен внешний сервис — сначала проверь get_connection, потом ask_user
-об API-ключе с инструкцией как его получить.
-
-Инструкции по получению API-ключей:
-- Google Sheets/Drive: console.cloud.google.com → APIs → Enable Sheets API → Credentials → Service Account → скачать JSON
-- Telegram Bot: @BotFather в Telegram → /newbot → получить TOKEN
-- Notion: notion.so/my-integrations → New Integration → скопировать API key
-- Airtable: airtable.com/account → API → Generate API key
-- OpenAI: platform.openai.com/api-keys → Create new key
-- Anthropic: console.anthropic.com/account/keys → Create Key
-- VK: vk.com/dev → Мои приложения → Создать приложение → ключ доступа
-- Instagram/Facebook: developers.facebook.com → My Apps → Create App
-- GitHub: github.com/settings/tokens → Generate new token
-- Stripe: dashboard.stripe.com/apikeys
-
-Когда спрашиваешь API-ключ — объясняй конкретно ГДЕ взять (3-5 шагов).
-После получения ключа — СРАЗУ начинай работать через API, не жди дополнительных инструкций.
-"""
+=== АВТОНОМНОСТЬ (ОБЯЗАТЕЛЬНО) ===
+Никогда не проси пользователя делать что-то руками — делай через API сам.
+Нужен сервис: 1) get_connection, 2) если нет — ask_user за API-ключом с инструкцией где взять.
+Выдавай РЕАЛЬНЫЙ результат: лендинг — publish через website, пост — через интеграцию.
+Сначала вызови list_integrations, чтобы узнать что доступно."""
 
 _INTER_AGENT_SUFFIX = (
-    "\nТы можешь отправлять сообщения другим агентам через send_message и читать входящие через read_messages."
-    "\nНИКОГДА не проси пользователя делать ручную работу — если нужен внешний сервис, используй API."
-    "\nЕсли нужны данные для подключения к платформе — сначала проверь get_connection, затем если нет — спроси через ask_user с инструкцией как получить API-ключ."
-    "\nЕсли подключение не работает (ошибка API, неверный ключ) — опиши ошибку конкретно: что пробовал, какой ответ получил."
-    "\nГЛАВНОЕ: выдавай РЕАЛЬНЫЙ результат, а не его описание. Нужен лендинг/сайт — публикуй через "
-    "use_integration('website','publish_landing', ...) и дай ссылку. Нужен пост — публикуй через интеграцию. "
-    "Сначала вызови list_integrations и используй доступное (например website не требует ключей)."
+    "\nМожешь писать агентам через send_message / read_messages."
+    "\nЕсли подключение не работает — опиши ошибку конкретно."
 )
 
 ROLE_PROMPTS = {
@@ -104,7 +82,7 @@ _ASK_USER_TOOL = {
     "type": "function",
     "function": {
         "name": "ask_user",
-        "description": "Задаёт вопрос пользователю. ТОЛЬКО для запроса API-ключей/доступов с инструкцией как их получить, или для уточнений бизнес-требований. НЕ используй чтобы просить пользователя делать ручную работу.",
+        "description": "Задаёт вопрос пользователю (только для API-ключей или бизнес-уточнений).",
         "parameters": {
             "type": "object",
             "properties": {
@@ -151,11 +129,7 @@ _GET_CONNECTION_TOOL = {
     "type": "function",
     "function": {
         "name": "get_connection",
-        "description": (
-            "Получает сохранённые доступы к внешней платформе (API-ключ, логин/пароль, токен) "
-            "по названию. Используй когда нужно подключиться к сервису. "
-            "Если подключения нет — спроси пользователя через ask_user, чтобы он его добавил."
-        ),
+        "description": "Возвращает сохранённые учётные данные платформы (API-ключ/токен). Если нет — запроси через ask_user.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -171,10 +145,7 @@ _READ_OFFICE_CHAT_TOOL = {
     "type": "function",
     "function": {
         "name": "read_office_chat",
-        "description": (
-            "Читает последние сообщения из общего чата офиса — там пишут другие агенты и пользователь. "
-            "Проверяй перед ask_user: вдруг нужный API-ключ уже получен другим агентом."
-        ),
+        "description": "Читает общий чат офиса. Проверяй перед ask_user — ключ мог получить другой агент.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -190,11 +161,7 @@ _LIST_INTEGRATIONS_TOOL = {
     "type": "function",
     "function": {
         "name": "list_integrations",
-        "description": (
-            "Показывает каталог реальных интеграций с внешними сервисами (Telegram и др.): "
-            "что умеет каждая, какие действия доступны и подключена ли она. "
-            "Вызови ПЕРЕД тем как что-то делать во внешнем сервисе."
-        ),
+        "description": "Список интеграций с внешними сервисами: доступные действия и статус подключения. Вызови перед use_integration.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
@@ -204,12 +171,7 @@ _USE_INTEGRATION_TOOL = {
     "type": "function",
     "function": {
         "name": "use_integration",
-        "description": (
-            "Выполняет РЕАЛЬНОЕ действие во внешнем сервисе (например отправить пост в Telegram). "
-            "Учётные данные подтягиваются автоматически из подключений. "
-            "Если сервис не подключён — вернётся инструкция, после чего запроси ключ через ask_user. "
-            "Сначала вызови list_integrations, чтобы узнать имена действий и параметры."
-        ),
+        "description": "Выполняет действие во внешнем сервисе. Учётные данные подтягиваются автоматически. Перед вызовом смотри list_integrations.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -227,11 +189,7 @@ _WRITE_FILE_TOOL = {
     "type": "function",
     "function": {
         "name": "write_file",
-        "description": (
-            "Создаёт/перезаписывает файл с РЕАЛЬНЫМ кодом в рабочей папке проекта "
-            "(например 'bot/main.py', 'requirements.txt', 'README.md'). "
-            "Используй это, чтобы писать настоящий код, а не описывать его словами."
-        ),
+        "description": "Создаёт/перезаписывает файл в рабочей папке проекта. Пиши реальный код, а не описание.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -269,11 +227,7 @@ _VERIFY_CODE_TOOL = {
     "type": "function",
     "function": {
         "name": "verify_code",
-        "description": (
-            "Проверяет работоспособность написанного кода (компиляция всех .py). "
-            "Вызывай ПОСЛЕ написания/правок кода и ДО предложения запушить в GitHub. "
-            "Если есть ошибки — исправь их через write_file и проверь снова."
-        ),
+        "description": "Проверяет компиляцию .py файлов. Вызывай после write_file и до предложения пушить в GitHub.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
@@ -283,11 +237,7 @@ _REQUEST_RESEARCH_TOOL = {
     "type": "function",
     "function": {
         "name": "request_research",
-        "description": (
-            "Запрашивает ресёрчера для поиска информации. Используй для свежих трендов, "
-            "данных рынка, идей контента. depth='quick' — быстро и дёшево (по умолчанию), "
-            "depth='deep' — полное исследование."
-        ),
+        "description": "Запрашивает ресёрчера. depth='quick' (по умолчанию) или 'deep'.",
         "parameters": {
             "type": "object",
             "properties": {
