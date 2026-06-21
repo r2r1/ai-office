@@ -25,6 +25,8 @@ from src.office import costs as costs_module
 from src.office import workspace as workspace_module
 from src.office import milestones
 from src.office import office_channel
+from src.office import bot_config as bot_config_module
+from src.office import bot_engine as bot_engine_module
 from src.office import models as models_module
 from src.office import llm_settings as llm_settings_module
 from src.agents import onboarding
@@ -46,8 +48,13 @@ async def lifespan(app: FastAPI):
     # Менеджер офисов по тенантам (демо — отдельный сценарий под тенантом default)
     runner = demo.run if DEMO_MODE else office_loop.run
     task = asyncio.create_task(runner())
+    # Polling Telegram: запускаем всегда — bot_runtime сам решит, нужно ли слушать
+    # (на localhost без APP_BASE_URL — всегда, в проде с HTTPS — только если BOT_POLLING=1).
+    from src.office import bot_runtime
+    poll_task = asyncio.create_task(bot_runtime.run())
     yield
     task.cancel()
+    poll_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -555,12 +562,40 @@ async def test_integration(name: str):
 
 @app.get("/site/{tenant}/{slug}", response_class=HTMLResponse)
 async def serve_site(tenant: str, slug: str):
-    """Отдаёт опубликованный лендинг конкретного тенанта (публично)."""
+    """Отдаёт опубликованный сайт тенанта (публично). Инлайн-лендинг или папка с файлами."""
     saas_context.set_tenant(tenant)
     site = sites_module.get(slug)
     if site is None:
         return HTMLResponse("<h1>Страница не найдена</h1>", status_code=404)
-    return HTMLResponse(site["html"])
+    if site.get("html") is not None:
+        return HTMLResponse(site["html"])  # шаблонный лендинг (publish_landing)
+    return _serve_site_file(site, "index.html")  # многофайловый сайт (publish_site)
+
+
+@app.get("/site/{tenant}/{slug}/{path:path}")
+async def serve_site_asset(tenant: str, slug: str, path: str):
+    """Отдаёт ресурс многофайлового сайта (css/js/картинки/доп. страницы)."""
+    saas_context.set_tenant(tenant)
+    site = sites_module.get(slug)
+    if site is None or site.get("html") is not None:
+        return HTMLResponse("<h1>Не найдено</h1>", status_code=404)
+    return _serve_site_file(site, path or "index.html")
+
+
+def _serve_site_file(site: dict, subpath: str):
+    """Отдаёт файл из папки опубликованного сайта с корректным content-type."""
+    import mimetypes
+    from fastapi.responses import Response
+    root = (site.get("root") or "").strip("/")
+    rel = (f"{root}/{subpath}").strip("/") if root else subpath
+    full = workspace_module.resolve(rel)
+    if full is None or not full.is_file():
+        idx = (f"{root}/index.html").strip("/") if root else "index.html"
+        full = workspace_module.resolve(idx)
+        if full is None or not full.is_file():
+            return HTMLResponse("<h1>Страница не найдена</h1>", status_code=404)
+    ctype = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
+    return Response(content=full.read_bytes(), media_type=ctype)
 
 
 @app.post("/api/lead/{tenant}/{slug}")
@@ -583,6 +618,76 @@ async def capture_lead(tenant: str, slug: str, request: Request):
     return {"ok": True}
 
 
+@app.post("/api/site-lead")
+async def capture_site_lead(request: Request):
+    """
+    Приём заявки с многофайлового сайта. Тенант и slug берутся из Referer
+    (страница хостится по /site/{tenant}/{slug}/...), поэтому форма может слать
+    POST на стабильный /api/site-lead, не зная slug заранее.
+    """
+    import re as _re
+    ref = request.headers.get("referer") or request.headers.get("origin") or ""
+    m = _re.search(r"/site/([^/]+)/([^/?#]+)", ref)
+    if not m:
+        return JSONResponse({"error": "не удалось определить сайт"}, status_code=400)
+    tenant, slug = m.group(1), m.group(2)
+    saas_context.set_tenant(tenant)
+    if sites_module.get(slug) is None:
+        return JSONResponse({"error": "сайт не найден"}, status_code=404)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    name = (data.get("name") or data.get("имя") or "").strip()
+    contact = (data.get("contact") or data.get("phone") or data.get("telefon")
+               or data.get("email") or data.get("телефон") or "").strip()
+    if not contact:
+        return JSONResponse({"error": "нужен контакт (телефон или email)"}, status_code=400)
+    msg = data.get("message") or data.get("comment") or data.get("комментарий") or ""
+    lead = leads_module.add(slug, name, contact, msg)
+    await bus.publish({"type": "lead_captured", "slug": slug, "lead": lead,
+                       "text": f"🎯 Новая заявка: {lead['name'] or 'без имени'} — {lead['contact']}"})
+    return {"ok": True}
+
+
+@app.post("/tg/{tenant}/{secret}")
+async def telegram_webhook(tenant: str, secret: str, request: Request):
+    """Вебхук Telegram: апдейты бота клиента (публично — вызывает Telegram).
+
+    Безопасность: secret в URL должен совпадать с конфигом тенанта. Движок один
+    (bot_engine), поведение бота определяется конфигом этого тенанта.
+    """
+    saas_context.set_tenant(tenant)
+    cfg = bot_config_module.get()
+    if not cfg.get("enabled") or secret != cfg.get("webhook_secret"):
+        return {"ok": True}  # тихо игнорируем чужие/выключенные
+    try:
+        update = await request.json()
+    except Exception:
+        return {"ok": True}
+    try:
+        await bot_engine_module.handle_update(update)
+    except Exception:
+        pass  # не отдаём Telegram ошибку, чтобы он не ретраил бесконечно
+    return {"ok": True}
+
+
+@app.get("/api/bot")
+async def get_bot_config():
+    """Текущий конфиг Telegram-бота тенанта (для UI/агентов)."""
+    cfg = bot_config_module.get()
+    cfg["has_token"] = bool(bot_config_module.resolve_token())
+    cfg.pop("webhook_secret", None)  # секрет наружу не отдаём
+    return cfg
+
+
+@app.post("/api/bot")
+async def set_bot_config(request: Request):
+    """Обновить конфиг бота (услуги, приветствие, поля и т.д.)."""
+    data = await request.json()
+    return bot_config_module.update(data)
+
+
 @app.get("/api/files")
 async def get_files():
     """Список файлов кода, написанных агентами в рабочей папке проекта."""
@@ -591,10 +696,23 @@ async def get_files():
 
 @app.get("/api/file")
 async def get_file(path: str):
-    """Содержимое одного файла из рабочей папки (для вкладки «Код»)."""
+    """Содержимое одного файла из рабочей папки (для вкладки «Папки»)."""
     from fastapi.responses import PlainTextResponse
     content = workspace_module.read_file(path)
     return PlainTextResponse(content)
+
+
+@app.post("/api/run")
+async def run_file(request: Request):
+    """Запустить файл из рабочей папки (.py / .js / .sh) и вернуть вывод."""
+    data = await request.json()
+    path = (data.get("path") or "").strip()
+    stdin = data.get("stdin") or ""
+    if not path:
+        return JSONResponse({"ok": False, "output": "Нужен path файла."})
+    output = workspace_module.execute_code(path, stdin)
+    ok = not output.startswith("❌")
+    return JSONResponse({"ok": ok, "output": output})
 
 
 @app.get("/api/costs")
@@ -754,7 +872,10 @@ async def ask_agent(request: Request):
                            "kind": "msg", "text": message})
         return {"agent_id": agent_id, "answered": True}
 
-    # 2) Иначе — обычный диалог с агентом
+    # 2) Иначе — обычный диалог с агентом. Сообщение пользователя агенту тоже считаем
+    # директивой (например «запусти бота») — иначе автономный цикл его не увидит.
+    role = registry.get(agent_id).role
+    memory.remember(f"Указание пользователя ({role})", message)
     await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "user",
                        "kind": "msg", "text": message})
     try:
@@ -781,6 +902,9 @@ async def post_chat(request: Request):
     if not text:
         return JSONResponse({"error": "text обязателен"}, status_code=400)
     msg = office_channel.post("user", "user", text)
+    # Команда пользователя в общий чат — это директива: подмешиваем её в решения
+    # CEO/лидеров (блок «УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ)»), иначе цикл её не увидит.
+    memory.remember("Указание пользователя офису", text)
     await bus.publish({"type": "office_chat", "from": "user", "role": "user",
                        "text": text, "id": msg["id"]})
     return {"ok": True, "message": msg}

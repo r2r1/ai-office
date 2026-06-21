@@ -103,6 +103,27 @@ async def _publish_landing(creds: dict, params: dict) -> str:
             f"Разошли ссылку аудитории.")
 
 
+async def _publish_site(creds: dict, params: dict) -> str:
+    """Публикует МНОГОСТРАНИЧНЫЙ сайт из папки рабочей директории (живой хостинг)."""
+    from src.office import workspace
+    directory = (params.get("directory") or "").strip().strip("/")
+    title = (params.get("title") or "").strip()
+    idx_rel = f"{directory}/index.html" if directory else "index.html"
+    idx = workspace.resolve(idx_rel)
+    if idx is None or not idx.is_file():
+        return (f"Не найден {idx_rel}. Сначала напиши через write_file полноценный сайт: "
+                "index.html (главная) + при необходимости другие страницы (about.html, services.html), "
+                "css/style.css, js/script.js, картинки. Затем опубликуй папку через publish_site.")
+    files = workspace.list_dir(directory)
+    tid = ctx.get_tenant()
+    slug = sites.make_slug(title or directory or "site")
+    site = sites.save_dir(title or slug, directory, slug)
+    return (f"🌐 Сайт опубликован: /site/{tid}/{site['slug']} "
+            f"(файлов: {len(files)}, заголовок «{site['title']}»). "
+            f"Все страницы и ресурсы папки доступны. Форма с POST на /api/site-lead собирает заявки в «Лиды». "
+            f"Сайт обновляется автоматически при изменении файлов. Разошли ссылку аудитории.")
+
+
 async def _list_pages(creds: dict, params: dict) -> str:
     items = sites.all_sites()
     if not items:
@@ -138,6 +159,19 @@ INTEGRATION = Integration(
                 "accent_color": {"type": "string", "description": "Акцентный цвет hex, опц. (#4f7cff)"},
             },
             required=["headline"],
+        ),
+        "publish_site": Action(
+            name="publish_site",
+            description="Опубликовать ПОЛНОЦЕННЫЙ многостраничный сайт из папки рабочей директории "
+                        "(index.html + другие страницы, css, js, картинки). Хостинг живой — сайт "
+                        "обновляется при изменении файлов. Используй для настоящих сайтов, не лендингов-заглушек.",
+            handler=_publish_site,
+            params={
+                "directory": {"type": "string", "description": "Папка сайта в рабочей директории "
+                              "(например 'site' или '' для корня). Должна содержать index.html."},
+                "title": {"type": "string", "description": "Название сайта (определяет адрес)"},
+            },
+            required=[],
         ),
         "list_pages": Action(
             name="list_pages",

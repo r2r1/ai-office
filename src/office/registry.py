@@ -15,6 +15,8 @@ ROLE_COLORS = {
     "orchestrator": "#ffd54f", "researcher": "#4fc3f7", "strategist": "#81c784",
     "hr": "#ffb74d", "salesman": "#f06292", "developer": "#ce93d8",
     "marketer": "#80cbc4", "analyst": "#fff176", "integrator": "#4dd0e1",
+    # Лидеры отделов (C-suite)
+    "cto": "#9575cd", "cmo": "#4db6ac", "sales_lead": "#ec407a",
 }
 
 
@@ -26,6 +28,8 @@ class AgentRecord:
     status: str = "idle"
     last_message: str = ""
     task: str = ""
+    department: str = ""   # id отдела ('' = штаб CEO)
+    manager: str = ""      # agent_id руководителя ('' = подчиняется CEO)
 
 
 def _load() -> dict:
@@ -39,15 +43,18 @@ def _save(d: dict) -> None:
 def _rec(d: dict) -> AgentRecord:
     return AgentRecord(agent_id=d["agent_id"], role=d.get("role", ""), desk=d.get("desk", 0),
                        status=d.get("status", "idle"), last_message=d.get("last_message", ""),
-                       task=d.get("task", ""))
+                       task=d.get("task", ""), department=d.get("department", ""),
+                       manager=d.get("manager", ""))
 
 
-def register(agent_id: str, role: str, task: str = "") -> Optional[AgentRecord]:
+def register(agent_id: str, role: str, task: str = "",
+             department: str = "", manager: str = "") -> Optional[AgentRecord]:
     agents = _load()
     used = {a.get("desk", 0) for a in agents.values()}
     desk = next(i for i in range(MAX_DESKS) if i not in used)
     agents[agent_id] = {"agent_id": agent_id, "role": role, "desk": desk,
-                        "status": "idle", "last_message": "", "task": task}
+                        "status": "idle", "last_message": "", "task": task,
+                        "department": department, "manager": manager}
     _save(agents)
     return _rec(agents[agent_id])
 
@@ -59,6 +66,22 @@ def update_status(agent_id: str, status: str, message: str = "") -> None:
         if message:
             agents[agent_id]["last_message"] = message[:200]
         _save(agents)
+
+
+def reset_stuck_statuses() -> list[str]:
+    """
+    Сбрасывает в idle всех агентов, зависших в 'thinking' (их задачи убил рестарт).
+    Возвращает id сброшенных — иначе лидер считает их занятыми и не переназначает.
+    """
+    agents = _load()
+    reset = []
+    for aid, a in agents.items():
+        if a.get("status") == "thinking":
+            a["status"] = "idle"
+            reset.append(aid)
+    if reset:
+        _save(agents)
+    return reset
 
 
 def get(agent_id: str) -> Optional[AgentRecord]:
@@ -76,6 +99,16 @@ def count() -> int:
 
 def has_role(role: str) -> bool:
     return any(a.get("role") == role for a in _load().values())
+
+
+def members_of(department: str) -> list[AgentRecord]:
+    """Все агенты отдела (по полю department)."""
+    return [_rec(a) for a in _load().values() if a.get("department") == department]
+
+
+def by_manager(manager_id: str) -> list[AgentRecord]:
+    """Все прямые подчинённые руководителя."""
+    return [_rec(a) for a in _load().values() if a.get("manager") == manager_id]
 
 
 def restore(saved: list[dict]) -> None:

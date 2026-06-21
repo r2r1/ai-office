@@ -3,83 +3,128 @@
 без обращения к API. Полезно, чтобы увидеть игру без расхода кредитов.
 
 Включается переменной окружения: DEMO_MODE=1
+
+Сценарий повторяет НОВУЮ модель «реальная компания» (см. src/office/loop.py):
+CEO (orchestrator) открывает отделы по необходимости → нанимается лидер отдела
+(CTO/CMO/Head of Sales) → лидер нанимает работников и ставит им задачи.
+Типы событий и префиксы реплик совпадают с реальными (_apply_company_decision,
+_hire_leader, _run_leaders): 🧭 — мысль CEO, 👔 — мысль лидера, → — поручение.
 """
 
 import asyncio
 
-from src.office import bus, registry
+from src.saas import context as ctx
+from src.office import bus, registry, org
 
-# Сценарий: список событий с задержками (секунды до следующего события)
+# Сценарий: список событий с задержками (секунды до следующего события).
+# Поддерживаемые шаги:
+#   {"delay": n, "event": {...}}                       — произвольное событие в шину
+#   {"delay": n, "hire": (id, role, task)}             — наём работника лидером
+#   {"delay": n, "open_dept": (dept_id, objective)}    — CEO открывает отдел + лидер
 SCENARIO = [
-    # --- Стартовая команда ---
+    # --- Стартовая команда: CEO + штаб стратегии (как _hire_initial) ---
     {"delay": 1, "event": {"type": "system", "text": "=== Офис открывается (ДЕМО-режим) ==="}},
-    {"delay": 1.5, "hire": ("researcher_1", "researcher", "Исследование рынка AI-агентств")},
+    {"delay": 1.2, "hire": ("orchestrator_1", "orchestrator", "Управление компанией и отделами")},
+    {"delay": 1.0, "hire": ("researcher_1", "researcher", "Исследование рынка и трендов")},
     {"delay": 1.0, "hire": ("strategist_1", "strategist", "Построение бизнес-стратегии")},
-    {"delay": 1.0, "hire": ("hr_1", "hr", "Найм новых агентов")},
+    {"delay": 1.0, "hire": ("architect_1", "architect", "Техническое задание (ТЗ)")},
 
-    # --- Цикл 1: исследование ---
-    {"delay": 2, "event": {"type": "system", "text": "=== Цикл #1 начался ==="}},
-    {"delay": 1.5, "event": {"type": "thinking", "agent_id": "researcher_1", "text": "Начинаю исследование рынка AI-агентов 2026..."}},
+    # --- BOOTSTRAP: исследование → стратегия → ТЗ ---
+    {"delay": 1.5, "event": {"type": "system", "text": "=== BOOTSTRAP: исследуем нишу клиента ==="}},
+    {"delay": 1.5, "event": {"type": "thinking", "agent_id": "researcher_1", "text": "Начинаю глубокое исследование рынка AI-агентов 2026..."}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Ищу: 'AI automation agency revenue 2026'"}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Рынок AI-агентов вырос с $5 млрд до $13 млрд за год!"}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Соло-основатели выходят на $25K MRR — узкое место не работа, а ответы клиентов"}},
     {"delay": 2.5, "event": {"type": "speech", "agent_id": "researcher_1", "text": "Маржинальность 70-85%, накладные всего $75-150/мес"}},
     {"delay": 2, "event": {"type": "task_done", "agent_id": "researcher_1", "summary": "Вывод: AI Automation Agency — самый реалистичный путь к 1М руб."}},
 
-    # --- Стратег строит план ---
-    {"delay": 2, "event": {"type": "thinking", "agent_id": "strategist_1", "text": "Анализирую отчёт ресёрчера, строю план..."}},
+    {"delay": 1.5, "event": {"type": "thinking", "agent_id": "strategist_1", "text": "Анализирую отчёт ресёрчера, строю стратегию..."}},
     {"delay": 3, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Юнит-экономика: 4 ретейнера × 30,000₽ = 120,000₽/мес"}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Ниша: автоматизация для e-commerce и медклиник"}},
-    {"delay": 2.5, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Этапы 24/7: фундамент (часы) → первые лиды (1-2 дня) → сделки → масштаб"}},
-    {"delay": 2, "event": {"type": "task_done", "agent_id": "strategist_1", "summary": "План готов: первый результат ~сутки, цель 1М руб. — недели (упор в скорость ответов клиентов)"}},
+    {"delay": 2.5, "event": {"type": "speech", "agent_id": "strategist_1", "text": "Ниша: автоматизация для e-commerce и медклиник"}},
+    {"delay": 2, "event": {"type": "task_done", "agent_id": "strategist_1", "summary": "Стратегия готова: цель 1М руб., упор в скорость ответов клиентам"}},
 
-    # --- HR нанимает ---
-    {"delay": 2, "event": {"type": "thinking", "agent_id": "hr_1", "text": "Анализирую команду, решаю кого нанять..."}},
-    {"delay": 2.5, "event": {"type": "speech", "agent_id": "hr_1", "text": "Нужен продажник — некому искать клиентов!"}},
+    {"delay": 1.5, "event": {"type": "thinking", "agent_id": "architect_1", "text": "Проектирую техническое решение под стратегию..."}},
+    {"delay": 2.5, "event": {"type": "speech", "agent_id": "architect_1", "text": "Стек: FastAPI + Claude API + Telegram Bot API, лендинг для лидов"}},
+    {"delay": 2, "event": {"type": "task_done", "agent_id": "architect_1", "summary": "ТЗ готово → reports/tech_design.md"}},
+
+    # --- Цикл 1: CEO открывает Технический отдел ---
+    {"delay": 2, "event": {"type": "system", "text": "=== Цикл #1: CEO принимает решение ==="}},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "orchestrator_1", "text": "🧭 Сначала нужен продукт — открываю Технический отдел"}},
+    {"delay": 1.0, "open_dept": ("tech", "Собрать MVP: лендинг + Telegram-бот квалификации лидов")},
+
+    # CTO нанимает разработчика и ставит задачу (👔 — мысль лидера, → — поручение)
+    {"delay": 2, "event": {"type": "speech", "agent_id": "cto_1", "text": "👔 Беру разработчика — соберём лендинг и бота"}},
+    {"delay": 1.5, "hire": ("developer_1", "developer", "Собрать лендинг и Telegram-бота для квалификации лидов")},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "orchestrator_1", "text": "→ Поручаю developer_1: собрать лендинг и Telegram-бота"}},
+    {"delay": 2, "event": {"type": "thinking", "agent_id": "developer_1", "text": "Проектирую структуру проекта..."}},
+    {"delay": 2.5, "event": {"type": "file_written", "agent_id": "developer_1", "path": "app/main.py", "text": "📝 developer_1: записан app/main.py"}},
+    {"delay": 2.5, "event": {"type": "file_written", "agent_id": "developer_1", "path": "app/bot.py", "text": "📝 developer_1: записан app/bot.py"}},
+    {"delay": 2.5, "event": {"type": "file_written", "agent_id": "developer_1", "path": "static/landing.html", "text": "📝 developer_1: записан static/landing.html"}},
+    {"delay": 2, "event": {"type": "speech", "agent_id": "developer_1", "text": "Бот квалифицирует лид за 3 сек, лендинг собирает заявки"}},
+    {"delay": 2, "event": {"type": "task_done", "agent_id": "developer_1", "summary": "MVP готов: лендинг + Telegram-бот, код в рабочей папке"}},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "cto_1", "text": "👔 Отдел сдал MVP — докладываю CEO, продукт готов"}},
+
+    # --- Цикл 2: CEO открывает Отдел продаж ---
+    {"delay": 2, "event": {"type": "system", "text": "=== Цикл #2: CEO принимает решение ==="}},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "orchestrator_1", "text": "🧭 Продукт есть — нужны клиенты, открываю Отдел продаж"}},
+    {"delay": 1.0, "open_dept": ("sales", "Найти 5 клиентов в нише e-commerce и закрыть сделки")},
+    {"delay": 2, "event": {"type": "speech", "agent_id": "sales_lead_1", "text": "👔 Беру продажника на cold outreach"}},
     {"delay": 1.5, "hire": ("salesman_1", "salesman", "Найти 5 клиентов в нише e-commerce")},
-    {"delay": 2, "event": {"type": "thinking", "agent_id": "salesman_1", "text": "Начинаю поиск клиентов..."}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "salesman_1", "text": "Нашёл 12 интернет-магазинов без автоматизации заявок"}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "salesman_1", "text": "Готовлю cold outreach в Telegram: оффер за 40,000₽"}},
-    {"delay": 2.5, "event": {"type": "task_done", "agent_id": "salesman_1", "summary": "5 лидов готовы к контакту, 2 ответили положительно"}},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "orchestrator_1", "text": "→ Поручаю salesman_1: найти 5 клиентов в e-commerce"}},
+    {"delay": 2, "event": {"type": "thinking", "agent_id": "salesman_1", "text": "Ищу интернет-магазины без автоматизации заявок..."}},
+    {"delay": 3, "event": {"type": "speech", "agent_id": "salesman_1", "text": "Нашёл 12 магазинов, готовлю оффер за 40,000₽"}},
+    {"delay": 2, "event": {"type": "task_done", "agent_id": "salesman_1", "summary": "5 лидов готовы, 2 ответили положительно"}},
 
-    # --- HR нанимает разработчика ---
-    {"delay": 2, "event": {"type": "thinking", "agent_id": "hr_1", "text": "Клиенты есть — нужен тот, кто построит автоматизации"}},
-    {"delay": 1.5, "event": {"type": "speech", "agent_id": "hr_1", "text": "Нанимаю разработчика!"}},
-    {"delay": 1.5, "hire": ("developer_1", "developer", "Построить AI-чатбот для первого клиента")},
-    {"delay": 2, "event": {"type": "thinking", "agent_id": "developer_1", "text": "Проектирую автоматизацию заявок на n8n + Claude..."}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "developer_1", "text": "Стек: n8n + Claude API + Telegram Bot API"}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "developer_1", "text": "Бот обрабатывает заявку и квалифицирует лид за 3 сек"}},
-    {"delay": 2.5, "event": {"type": "task_done", "agent_id": "developer_1", "summary": "MVP чатбота готов, демо для клиента собрано"}},
-
-    # --- HR нанимает маркетолога ---
-    {"delay": 2, "event": {"type": "speech", "agent_id": "hr_1", "text": "Нужен маркетолог для потока входящих клиентов"}},
+    # --- Цикл 3: CEO открывает Отдел маркетинга ---
+    {"delay": 2, "event": {"type": "system", "text": "=== Цикл #3: CEO принимает решение ==="}},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "orchestrator_1", "text": "🧭 Нужен поток входящих — открываю Отдел маркетинга"}},
+    {"delay": 1.0, "open_dept": ("marketing", "Запустить контент-канал для привлечения клиентов")},
+    {"delay": 2, "event": {"type": "speech", "agent_id": "cmo_1", "text": "👔 Беру маркетолога на контент-план"}},
     {"delay": 1.5, "hire": ("marketer_1", "marketer", "Создать контент-план для Telegram-канала")},
+    {"delay": 1.5, "event": {"type": "speech", "agent_id": "orchestrator_1", "text": "→ Поручаю marketer_1: контент-план Telegram-канала"}},
     {"delay": 2, "event": {"type": "thinking", "agent_id": "marketer_1", "text": "Готовлю контент-стратегию..."}},
-    {"delay": 3, "event": {"type": "speech", "agent_id": "marketer_1", "text": "10 постов: кейсы автоматизации + цифры ROI клиентов"}},
-    {"delay": 2.5, "event": {"type": "task_done", "agent_id": "marketer_1", "summary": "Контент-план на месяц готов, первый пост опубликован"}},
+    {"delay": 2.5, "event": {"type": "speech", "agent_id": "marketer_1", "text": "10 постов: кейсы автоматизации + цифры ROI клиентов"}},
+    {"delay": 2, "event": {"type": "task_done", "agent_id": "marketer_1", "summary": "Контент-план на месяц готов, первый пост опубликован"}},
 
-    # --- Итог цикла ---
+    # --- Итог ---
     {"delay": 2, "event": {"type": "system", "text": "💰 Прогресс: 2 клиента подписали договор = 80,000₽"}},
-    {"delay": 2, "event": {"type": "system", "text": "=== Цикл #1 завершён. Команда из 6 агентов работает ==="}},
+    {"delay": 2, "event": {"type": "system", "text": "=== Компания работает: 3 отдела, CEO + штаб + 3 работника ==="}},
     {"delay": 3, "event": {"type": "system", "text": "🔁 Демо завершено. В реальном режиме офис работает бесконечно."}},
 ]
 
 
 async def run() -> None:
-    """Проигрывает демо-сценарий по кругу."""
+    """Проигрывает демо-сценарий по кругу (в контексте тенанта 'default')."""
+    ctx.set_tenant("default")
     await bus.publish({"type": "system", "text": "ДЕМО-РЕЖИМ: проигрываю сценарий без API"})
 
     while True:
-        # Сбрасываем реестр для нового прогона
-        registry._agents.clear()
-        registry._used_desks.clear()
+        # Сбрасываем состояние тенанта для нового прогона
+        registry.reset()
+        org.reset()
 
         for step in SCENARIO:
             await asyncio.sleep(step["delay"])
 
-            if "hire" in step:
+            if "open_dept" in step:
+                dept_id, objective = step["open_dept"]
+                org.open_department(dept_id, reason="демо", objective=objective)
+                info = org.catalog().get(dept_id, {})
+                # Нанимаем лидера отдела (как _hire_leader)
+                role = info.get("lead_role", "")
+                agent_id = f"{role}_1"
+                rec = registry.register(agent_id, role, objective[:100],
+                                        department=dept_id, manager="orchestrator_1")
+                if rec:
+                    await bus.publish({"type": "hired", "agent_id": agent_id, "role": role,
+                                       "desk": rec.desk, "task": objective[:100]})
+                await bus.publish({"type": "system",
+                                   "text": f"📂 CEO открыл «{info.get('name', dept_id)}»"})
+            elif "hire" in step:
                 agent_id, role, task = step["hire"]
-                rec = registry.register(agent_id, role, task)
+                dept = org.department_of_role(role)
+                manager = org.lead_id(dept) or "orchestrator_1"
+                rec = registry.register(agent_id, role, task,
+                                        department=dept, manager=manager)
                 if rec:
                     await bus.publish({
                         "type": "hired",

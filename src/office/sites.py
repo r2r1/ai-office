@@ -36,6 +36,23 @@ def save(title: str, html: str, slug: str = "") -> dict:
     return site
 
 
+def save_dir(title: str, root: str, slug: str = "") -> dict:
+    """
+    Публикует МНОГОФАЙЛОВЫЙ сайт: хостится живая папка `root` рабочей директории
+    (index.html + css/js/картинки/другие страницы). В отличие от save() здесь не
+    инлайн-html, а ссылка на папку — сайт обновляется вместе с файлами агентов.
+    """
+    sites = _all()
+    slug = slug or make_slug(title)
+    now = time.time()
+    existing = sites.get(slug)
+    site = {"slug": slug, "title": (title or "").strip(), "root": (root or "").strip("/"),
+            "created_ts": existing["created_ts"] if existing else now, "updated_ts": now}
+    sites[slug] = site
+    ctx.write_json(_FILE, sites)
+    return site
+
+
 def get(slug: str) -> dict | None:
     return _all().get(slug)
 

@@ -21,10 +21,42 @@ import json
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
-from src.office import registry, models as models_module
+from src.office import registry, models as models_module, org as org_module
 
 HIREABLE_ROLES = {"salesman", "developer", "marketer", "analyst"}
 MAX_PER_ROLE = 1  # один ответственный на роль (единая зона ответственности, без клонов)
+
+_COMPANY_SYSTEM = """Ты — CEO автономной AI-компании. Ты НЕ делаешь работу руками и НЕ ставишь
+задачи отдельным сотрудникам — этим занимаются руководители отделов. Твоя задача — управлять
+СТРУКТУРОЙ компании: открывать отделы по необходимости, закрывать выполнившие свою цель и
+ставить отделам цели. Каждый ход — ОДНО решение.
+
+ОТДЕЛЫ (открывай только когда этого реально требует текущий этап):
+- tech (Технический отдел, лидер CTO): продукт, код, боты, сайты, автоматизации, интеграции.
+- marketing (Отдел маркетинга, лидер CMO): контент, соцсети, реклама, бренд, привлечение аудитории.
+- sales (Отдел продаж, лидер Head of Sales): поиск клиентов, переговоры, конверсия лидов, CRM.
+
+Принципы:
+- Если продукт (бот/сайт/код) ещё не создаётся, а цель/этап его требуют — СРАЗУ открой tech. Не тяни с wait.
+- Открывай отдел ТОЛЬКО при реальной потребности текущего этапа. Нет задачи на клиентов — не открывай продажи.
+- Не открывай уже открытый отдел. Если у открытого отдела выполнена цель — закрой его (close_department).
+- Если все нужные отделы открыты и работают — wait.
+- ПРИОРИТЕТ УКАЗАНИЙ ПОЛЬЗОВАТЕЛЯ: его решения главнее стратегии. Если в указаниях есть прямая
+  просьба (например «запусти бота») — НЕМЕДЛЕННО открой нужный отдел (бот/код/сайт → tech).
+
+Ты также ведёшь бизнес-этапы (вехи): помечай текущий и завершённый этап.
+
+Ответь ТОЛЬКО валидным JSON без markdown:
+{
+  "thought": "краткая мысль CEO (1 предложение, по-русски)",
+  "action": "open_department" | "close_department" | "delegate" | "wait",
+  "department": "tech | marketing | sales (для open/close/delegate)",
+  "objective": "конкретная цель отдела (для open_department/delegate), иначе null",
+  "done_reason": "почему отдел закрывается (для close_department), иначе null",
+  "current_milestone": "id текущего этапа",
+  "milestone_done": "id этапа, если ТОЛЬКО ЧТО завершён, иначе null",
+  "milestone_summary": "что достигнуто на завершённом этапе, иначе null"
+}"""
 
 _MILESTONES_SYSTEM = """Ты — директор автономного AI-офиса. На основе бизнес-стратегии
 раздели путь к цели клиента на 4-6 последовательных этапов (вех). Каждый этап — это
@@ -121,6 +153,77 @@ async def plan_milestones(
             {"id": "scale", "title": "Масштабирование"},
         ]
     return stages[:6]
+
+
+async def decide_company(
+    goal: str,
+    strategy: str,
+    milestones: list[dict],
+    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+) -> dict:
+    """
+    Решение CEO на уровне КОМПАНИИ: какой отдел открыть/закрыть/что ему поручить.
+    Возвращает dict с action: open_department | close_department | delegate | wait.
+    """
+    ms_lines = [f"- [{m['status']}] {m['id']}: {m['title']}" for m in milestones]
+    ms_text = "\n".join(ms_lines) or "этапы ещё не заданы"
+
+    # Статус отделов: открытые — с целью и дайджестом подчинённых (видимость CEO через лидеров)
+    dept_lines = []
+    for did, info in org_module.catalog().items():
+        st = org_module.state_of(did)
+        if st.get("status") == "open":
+            digest = org_module.department_digest(did)
+            obj = st.get("objective") or "цель не задана"
+            dept_lines.append(f"🟢 {did} ({info['name']}) — ОТКРЫТ. Цель: {obj}\n{digest}")
+        else:
+            dept_lines.append(f"⚪ {did} ({info['name']}) — закрыт. Назначение: {info['hint']}")
+    dept_text = "\n\n".join(dept_lines)
+
+    from src.office import memory as memory_module
+    user_directives = memory_module.context_block() or ""
+    directives_section = (
+        f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ) ===\n{user_directives}\n"
+        if user_directives.strip() else ""
+    )
+
+    if publish:
+        await publish({"type": "thinking", "agent_id": "orchestrator_1",
+                       "text": "Решаю, какие отделы нужны компании сейчас..."})
+
+    user = (
+        f"Цель компании: {goal}\n\n"
+        f"Стратегия (кратко):\n{strategy[:400]}\n"
+        f"{directives_section}\n"
+        f"Этапы пути:\n{ms_text}\n\n"
+        f"Отделы сейчас:\n{dept_text}\n\n"
+        f"Прими ОДНО решение: open_department (если этап требует новой способности), "
+        f"close_department (если цель отдела выполнена), delegate (обновить цель открытого отдела) "
+        f"или wait."
+    )
+
+    raw = await llm.run_agent(
+        system=_COMPANY_SYSTEM,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=400,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    decision = _parse_json(raw)
+    if not decision:
+        return {"action": "wait", "thought": "CEO не принял решение, жду следующий цикл"}
+
+    action = decision.get("action", "wait")
+    dept = decision.get("department", "")
+    if action in ("open_department", "close_department", "delegate"):
+        if dept not in org_module.catalog():
+            return {"action": "wait", "thought": f"Неизвестный отдел {dept} — жду"}
+        if action == "open_department" and org_module.is_open(dept):
+            return {"action": "wait", "thought": f"Отдел {dept} уже открыт — жду"}
+        if action in ("close_department", "delegate") and not org_module.is_open(dept):
+            return {"action": "wait", "thought": f"Отдел {dept} не открыт — нечего {action}"}
+    return decision
 
 
 async def decide(

@@ -35,25 +35,90 @@ _INTER_AGENT_SUFFIX = (
     "\nЕсли подключение не работает — опиши ошибку конкретно."
 )
 
+_LEADER_RULES = (
+    "Ты — руководитель отдела в AI-компании. Ты НЕ делаешь работу руками — ты управляешь "
+    "своими подчинёнными, держишь в голове всё, что они сделали (тебе дают дайджест), "
+    "ставишь им конкретные задачи с измеримым результатом и отчитываешься CEO. "
+    "Двигай отдел к цели, поставленной CEO."
+)
+
 ROLE_PROMPTS = {
+    "cto": (
+        "Ты — CTO (технический директор). Руководишь техническим отделом "
+        "(разработчик, интегратор, дизайнер). Отвечаешь за продукт, код, ботов, сайты, "
+        "дизайн и технические интеграции.\n"
+        "РОЛИ В ТВОЁМ ОТДЕЛЕ: developer (код, Python/JS), integrator (API, боты), designer (UI/UX, красивые сайты).\n"
+        "Если нужен красивый дизайн сайта — найми designer через hire.\n"
+        "МАРШРУТИЗАЦИЯ ТELEGRAM-БОТА:\n"
+        "- Бот ЗАПИСИ / сбора лидов → поручай ИНТЕГРАТОРУ: у платформы есть готовый движок записи, "
+        "интегратор предложит его клиенту и запустит (launch_bot). Разработчику код НЕ поручай, "
+        "пока клиент не отверг готового бота как слишком простого.\n"
+        "- Бот с НЕСТАНДАРТНОЙ логикой (постинг, парсинг, кастом) → разработчику (код), потом интегратору (запуск).\n"
+        + _LEADER_RULES
+    ),
+    "cmo": (
+        "Ты — CMO (директор по маркетингу). Руководишь отделом маркетинга. "
+        "Отвечаешь за контент, соцсети, рекламу, бренд и привлечение аудитории. " + _LEADER_RULES
+    ),
+    "sales_lead": (
+        "Ты — Head of Sales (руководитель продаж). Руководишь отделом продаж. "
+        "Отвечаешь за поиск клиентов, переговоры, конверсию лидов и CRM. " + _LEADER_RULES
+    ),
     "salesman": (
         "Ты — агент продаж AI-агентства. Найди потенциальных клиентов, придумай "
         "оффер и напиши холодное сообщение. Конкретно: компании, каналы, текст. "
         "Используй web_search для актуальных данных."
     ),
     "developer": (
-        "Ты — разработчик AI-агентства. Ты ПИШЕШЬ РЕАЛЬНЫЙ КОД, а не описываешь его. "
+        "Ты — разработчик AI-агентства. Ты ПИШЕШЬ И ЗАПУСКАЕШЬ РЕАЛЬНЫЙ КОД.\n"
+        "🚫 НЕ используй и НЕ исследуй Tilda/Webflow/Wix/конструкторы — даже если так написано в ТЗ. "
+        "Сайт = собственный HTML/CSS/JS в index.html, публикуется через website. НЕ трать циклы на "
+        "web_search про конструкторы и их интеграции с CRM — сразу пиши код в write_file.\n"
+        "ВАЖНО: для обычного Telegram-бота ЗАПИСИ клиентов код НЕ нужен — это делает интегратор "
+        "через готовый движок (launch_bot). Пиши код только для НЕСТАНДАРТНОГО функционала.\n\n"
+        "САЙТЫ — делай ПОЛНОЦЕННЫЕ многостраничные, а не один index.html:\n"
+        "• Файловая структура в папке site/: site/index.html (главная), при необходимости "
+        "site/services.html, site/about.html, site/contacts.html; site/css/style.css; "
+        "site/js/script.js; картинки в site/img/. Используй ПАПКИ — это нормальная файловая система.\n"
+        "• Связывай страницы навигацией (<a href=\"services.html\">), подключай общий css/js во все страницы.\n"
+        "• Полноценный HTML5 + CSS3 + Vanilla JS, никаких заглушек. Дизайн: градиенты, анимации, "
+        "hover-эффекты, адаптивность (mobile-first), тёмная/светлая тема.\n"
+        "• Картинки: ВСТРОЕННЫЕ SVG или CSS-градиентные блоки (НЕ внешние Unsplash-ссылки — они не грузятся).\n"
+        "• Форма заявки: отправляет POST на /api/site-lead с JSON {name, contact, message} — "
+        "заявки попадают в раздел «Лиды». Это реальный сбор лидов, не фейк.\n\n"
         "Рабочий цикл:\n"
-        "1. list_files — посмотри, что уже написано (не дублируй).\n"
-        "2. write_file — пиши код: бот/сайт на Python (aiogram/FastAPI), requirements.txt, README.md "
-        "с инструкцией запуска. Платные конструкторы (BotsBox/Tilda) не используй без одобрения клиента.\n"
-        "3. verify_code — проверь компиляцию. Есть ошибки → исправь через write_file и проверь снова, "
-        "пока не станет ✅.\n"
-        "4. Когда код готов и проверен — СПРОСИ пользователя через ask_user: всё ли устраивает и можно ли "
-        "запушить в GitHub (укажи имя репозитория). Без явного одобрения НЕ пушь.\n"
-        "5. После одобрения — use_integration('github','create_repo',{name}) затем "
-        "use_integration('github','push',{repo}).\n"
-        "Используй web_search для актуального синтаксиса библиотек."
+        "1. list_files — посмотри что уже написано.\n"
+        "2. write_file — пиши каждый файл сайта (index.html, css/style.css, js/script.js, доп. страницы). "
+        "Полный рабочий код, не скелеты.\n"
+        "3. verify_code — для .py файлов. Ошибки → исправь и проверь снова.\n"
+        "4. execute_code — ЗАПУСТИ скрипт (для .py/.js), убедись что работает. Если упал — исправь.\n"
+        "5. Опубликуй сайт ЦЕЛИКОМ: use_integration('website','publish_site',{directory:'site', title:'...'}) "
+        "— хостится вся папка, все страницы и ресурсы доступны, форма собирает лиды.\n"
+        "6. Спроси пользователя (ask_user) перед пушем в GitHub. После одобрения: "
+        "use_integration('github','create_repo',{name}) → use_integration('github','push',{repo}).\n"
+        "Используй web_search для актуального синтаксиса."
+    ),
+    "designer": (
+        "Ты — UI/UX дизайнер AI-агентства. Создаёшь красивые, современные визуальные решения.\n"
+        "🚫 НЕ используй и НЕ исследуй Tilda/Webflow/Wix/конструкторы и CRM-интеграции — даже если "
+        "так написано в ТЗ. Ты пишешь СОБСТВЕННЫЙ HTML/CSS/JS-код и публикуешь его через website. "
+        "НЕ вызывай web_search и request_research про конструкторы — сразу пиши код в write_file.\n"
+        "Что ты делаешь:\n"
+        "• ПОЛНОЦЕННЫЕ многостраничные сайты в папке site/: site/index.html (главная), "
+        "site/services.html, site/about.html по необходимости; site/css/style.css; site/js/script.js; "
+        "картинки в site/img/. Используй ПАПКИ и несколько файлов — это нормально.\n"
+        "• Связывай страницы навигацией, общий css/js подключай во все страницы.\n"
+        "• Стиль: тёмная/светлая тема, градиенты, плавные анимации, hover-эффекты, адаптивность.\n"
+        "• Типографика: Google Fonts (Inter, Montserrat, Playfair Display).\n"
+        "• Картинки: ВСТРОЕННЫЕ SVG-иконки и CSS-градиентные блоки (НЕ внешние Unsplash-ссылки — "
+        "они не грузятся и ломают вид).\n"
+        "• Форма заявки: POST на /api/site-lead с JSON {name, contact, message} → заявки в «Лиды».\n\n"
+        "Рабочий цикл:\n"
+        "1. list_files — посмотри что уже есть.\n"
+        "2. write_file — создай каждый файл сайта (index.html, css/style.css, js/script.js, доп. страницы) "
+        "с ПОЛНЫМ кодом. Путь НИКОГДА не оставляй пустым.\n"
+        "3. Опубликуй сайт целиком: use_integration('website','publish_site',{directory:'site', title:'...'}).\n"
+        "КРИТИЧНО: делай настоящий сайт из нескольких файлов и папок, а не одну страницу-заглушку."
     ),
     "marketer": (
         "Ты — маркетинговый агент AI-агентства. Создай контент-план и посты для "
@@ -73,6 +138,19 @@ ROLE_PROMPTS = {
         "3. Как только учётка появилась — проверь подключение реальным действием "
         "(например telegram.get_me через use_integration) и доложи статус.\n"
         "4. Выполняй реальные действия в сервисах через use_integration по запросу команды.\n"
+        "5. TELEGRAM-БОТ — действуй по типу задачи:\n"
+        "   • Бот ЗАПИСИ КЛИЕНТОВ / СБОРА ЗАЯВОК (лиды): сначала ПРЕДЛОЖИ пользователю через ask_user "
+        "готового бота записи (меню услуг → имя/телефон → заявка попадает в «Лиды»). Если согласен — "
+        "при необходимости задай услуги через configure_bot и запусти use_integration('telegram','launch_bot') "
+        "— бот реально заработает. Если клиенту простого мало (нужен нестандартный функционал) — "
+        "передай разработчику через send_message, он напишет кастомный код, а ты потом его запустишь.\n"
+        "   • Бот ДРУГОГО НАЗНАЧЕНИЯ (постинг в группу, рассылки, уведомления): готового бота записи НЕ предлагай. "
+        "Используй send_message/send_photo или передай кастомную логику разработчику.\n"
+        "   НЕ ищи в интернете внутренние функции платформы (launch_bot, bot_engine, configure_bot) — "
+        "они уже есть, смотри list_integrations и вызывай напрямую.\n"
+        "ВАЖНО: Если launch_bot вернул 'ЗАПУЩЕН' или 'enabled' или 'polling' — бот реально работает. "
+        "ЗАДАЧА ВЫПОЛНЕНА. Напиши краткий итог и ОСТАНАВЛИВАЙСЯ — НЕ пиши код, НЕ создавай файлы, "
+        "НЕ ищи альтернативы. Код в workspace НЕ нужен если бот запущен через launch_bot.\n"
         "Никогда не проси пользователя делать ручную работу в сервисе — делай через API сам."
     ),
 }
@@ -193,7 +271,7 @@ _WRITE_FILE_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Путь файла внутри проекта (относительный)"},
+                "path": {"type": "string", "description": "Путь файла внутри проекта (относительный, НЕ пустой). Примеры: index.html, bot.py, styles.css, src/app.js"},
                 "content": {"type": "string", "description": "Полное содержимое файла"},
             },
             "required": ["path", "content"],
@@ -229,6 +307,59 @@ _VERIFY_CODE_TOOL = {
         "name": "verify_code",
         "description": "Проверяет компиляцию .py файлов. Вызывай после write_file и до предложения пушить в GitHub.",
         "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+_EXECUTE_CODE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "execute_code",
+        "description": "Запускает файл из рабочей папки (.py, .js, .sh) и возвращает вывод. "
+                       "Используй чтобы проверить что код реально работает и показать результат.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Путь файла (например 'main.py', 'scripts/calc.py')"},
+                "stdin": {"type": "string", "description": "Входные данные для скрипта (опционально)"},
+            },
+            "required": ["path"],
+        },
+    },
+}
+
+_DELETE_FILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "delete_file",
+        "description": "Удаляет файл из рабочей папки проекта.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Путь файла для удаления"}},
+            "required": ["path"],
+        },
+    },
+}
+
+# Инструмент: настроить встроенного бота записи (услуги/приветствие) перед launch_bot
+_CONFIGURE_BOT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "configure_bot",
+        "description": "Настраивает встроенного Telegram-бота записи ПЕРЕД launch_bot: список услуг "
+                       "(кнопки), какие поля собирать, приветствие. Бери значения из разговора с "
+                       "пользователем, НЕ из брифа. Без вызова бот спрашивает имя+телефон по умолчанию.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "services": {"type": "array", "items": {"type": "string"},
+                             "description": "Список услуг для кнопок (например: ['Кухня','Шкаф-купе'])"},
+                "ask_fields": {"type": "array", "items": {"type": "string"},
+                               "description": "Какие поля собрать (по умолчанию ['Имя','Телефон'])"},
+                "greeting": {"type": "string", "description": "Приветствие бота"},
+                "success_message": {"type": "string", "description": "Сообщение после оформления заявки"},
+            },
+            "required": [],
+        },
     },
 }
 
@@ -430,8 +561,11 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         content = args.get("content", "")
         res = workspace_module.write_file(path, content)
         await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📝 {res}"})
-        await publish({"type": "file_written", "agent_id": agent_id, "path": path,
-                       "text": f"📝 {agent_id}: {res}"})
+        if res.startswith("Файл сохранён:"):
+            # Извлекаем реальный путь из ответа: «Файл сохранён: <path> (N символов).»
+            actual_path = res.split(":", 1)[1].strip().split(" (")[0]
+            await publish({"type": "file_written", "agent_id": agent_id, "path": actual_path,
+                           "text": f"📝 {agent_id}: {res}"})
         return res
 
     async def _handle_read_file(args: dict) -> str:
@@ -444,6 +578,35 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         res = workspace_module.verify_text()
         await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🧪 {res[:120]}"})
         return res
+
+    async def _handle_execute_code(args: dict) -> str:
+        path = args.get("path", "")
+        stdin = args.get("stdin", "")
+        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"▶️ Запускаю {path}…"})
+        res = workspace_module.execute_code(path, stdin)
+        short = res[:200].replace("\n", " ")
+        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📤 {short}"})
+        await publish({"type": "code_executed", "agent_id": agent_id, "path": path,
+                       "text": f"▶️ {agent_id}: {path} → {short}"})
+        return res
+
+    async def _handle_delete_file(args: dict) -> str:
+        path = args.get("path", "")
+        res = workspace_module.delete_file(path)
+        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🗑 {res}"})
+        return res
+
+    async def _handle_configure_bot(args: dict) -> str:
+        from src.office import bot_config
+        patch = {}
+        for k in ("services", "ask_fields", "greeting", "success_message"):
+            if args.get(k) is not None:
+                patch[k] = args[k]
+        cfg = bot_config.update(patch)
+        await _publish_and_log({"type": "speech", "agent_id": agent_id,
+                                "text": f"⚙️ Настроил бота: услуги={cfg.get('services') or '—'}"})
+        return (f"Конфиг бота обновлён. Услуги: {cfg.get('services') or 'нет (спросит имя+телефон)'}, "
+                f"поля: {cfg.get('ask_fields')}. Теперь можно launch_bot.")
 
     async def _handle_list_integrations(args: dict) -> str:
         lines = []
@@ -524,11 +687,15 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         await _publish_and_log({"type": "thinking", "agent_id": agent_id,
                                  "text": f"Начинаю работу: {task[:80]}..."})
 
+        # Роли, пишущие реальный код/HTML, генерируют большие файлы — им нужен
+        # высокий лимит, иначе аргументы write_file обрезаются и файл выходит пустым.
+        max_tok = 16000 if role in ("developer", "designer", "integrator") else 2000
+
         result = await llm.run_agent(
             system=system,
             user=task,
             model=model,
-            max_tokens=2000,
+            max_tokens=max_tok,
             max_iterations=6,
             max_searches=4,
             use_search=True,
@@ -537,7 +704,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL,
                          _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
                          _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL,
-                         _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL],
+                         _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
+                         _EXECUTE_CODE_TOOL, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
@@ -551,6 +719,9 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "read_file": _handle_read_file,
                 "list_files": _handle_list_files,
                 "verify_code": _handle_verify_code,
+                "execute_code": _handle_execute_code,
+                "delete_file": _handle_delete_file,
+                "configure_bot": _handle_configure_bot,
             },
         )
 

@@ -8,6 +8,8 @@
 Это эталонная интеграция — по её образцу добавляются остальные сервисы.
 """
 
+import os
+
 import httpx
 
 from src.integrations.base import Action, CredField, Integration
@@ -75,6 +77,51 @@ async def _get_me(creds: dict, params: dict) -> str:
             f"(id={result.get('id')}, имя «{result.get('first_name')}»).")
 
 
+async def _launch_bot(creds: dict, params: dict) -> str:
+    """Запускает интерактивного бота записи: ставит вебхук на движок платформы.
+
+    Движок один (src/office/bot_engine.py), поведение задаётся конфигом тенанта
+    (услуги, поля, приветствие). Токен берётся из подключения Telegram.
+    """
+    token = _token(creds)
+    from src.office import bot_config
+    from src.saas import context as ctx
+
+    base = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    tenant = ctx.get_tenant()
+    secret = bot_config.ensure_secret()
+    url = f"{base}/tg/{tenant}/{secret}"
+
+    me = await _call(token, "getMe", {})
+    bot_config.update({"bot_username": me.get("username", "")})
+
+    if base.startswith("http://localhost") or "127.0.0.1" in base or base.startswith("http://"):
+        # Telegram требует публичный HTTPS — вебхук не поставить, но polling работает локально.
+        bot_config.set_enabled(True)
+        return (f"✅ Бот @{me.get('username','')} ЗАПУЩЕН в режиме polling (BOT_POLLING=1). "
+                "Бот уже принимает сообщения — пиши ему /start в Telegram. "
+                "В продакшене задай APP_BASE_URL=https://домен для вебхука. "
+                "ЗАДАЧА ВЫПОЛНЕНА — не нужно писать код или искать другие решения.")
+    try:
+        await _call(token, "setWebhook", {"url": url, "drop_pending_updates": True})
+    except RuntimeError as e:
+        return f"Не удалось поставить вебхук: {e}"
+    bot_config.set_enabled(True)
+    return f"Бот @{me.get('username','')} запущен. Принимает сообщения на {url}"
+
+
+async def _stop_bot(creds: dict, params: dict) -> str:
+    """Останавливает бота: удаляет вебхук и выключает приём."""
+    token = _token(creds)
+    from src.office import bot_config
+    try:
+        await _call(token, "deleteWebhook", {})
+    except RuntimeError:
+        pass
+    bot_config.set_enabled(False)
+    return "Бот остановлен — вебхук удалён, приём сообщений выключен."
+
+
 INTEGRATION = Integration(
     name="telegram",
     title="Telegram",
@@ -96,6 +143,17 @@ INTEGRATION = Integration(
             name="get_me",
             description="Проверить подключение бота (getMe). Параметры не нужны.",
             handler=_get_me,
+        ),
+        "launch_bot": Action(
+            name="launch_bot",
+            description="Запустить интерактивного бота записи клиентов (ставит вебхук). "
+                        "Перед запуском настрой конфиг (услуги/поля) через /api/bot. Параметры не нужны.",
+            handler=_launch_bot,
+        ),
+        "stop_bot": Action(
+            name="stop_bot",
+            description="Остановить бота записи (удаляет вебхук). Параметры не нужны.",
+            handler=_stop_bot,
         ),
         "send_message": Action(
             name="send_message",

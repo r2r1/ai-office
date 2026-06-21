@@ -63,18 +63,27 @@ const ROLE_COLORS = {
   marketer:   "#80cbc4",
   analyst:    "#fff176",
   integrator: "#4dd0e1",
+  designer:   "#f48fb1",
+  // Лидеры отделов (C-suite)
+  cto:        "#9575cd",
+  cmo:        "#4db6ac",
+  sales_lead: "#ec407a",
 };
 
 // Иконки ролей (emoji -> рисуем текстом)
 const ROLE_ICONS = {
   orchestrator: "🧭", researcher: "🔍", strategist: "📋", architect: "🏗️", hr: "👔",
   salesman: "💰", developer: "💻", marketer: "📢", analyst: "📊", integrator: "🔌",
+  cto: "🛠️", cmo: "📣", sales_lead: "💼",
+  designer: "🎨",
 };
 
 // Человекочитаемые названия ролей
 const ROLE_NAMES = {
-  orchestrator: "Директор", researcher: "Ресёрчер", strategist: "Стратег", architect: "Архитектор", hr: "HR",
+  orchestrator: "CEO", researcher: "Ресёрчер", strategist: "Стратег", architect: "Архитектор", hr: "HR",
   salesman: "Продажник", developer: "Разработчик", marketer: "Маркетолог", analyst: "Аналитик", integrator: "Интегратор",
+  cto: "CTO", cmo: "CMO", sales_lead: "Head of Sales",
+  designer: "Дизайнер",
 };
 
 // ---- Карта офиса (0=пол, 1=стена, 2=стол, 3=окно, 4=растение) ---
@@ -290,6 +299,8 @@ const HAIR_COLORS = {
   orchestrator: "#8a6d00", researcher: "#1a4a6a", strategist: "#2a5a3a", hr: "#7a4a10",
   salesman: "#7a2a4a", developer: "#5a2a6a", marketer: "#2a5a55", analyst: "#6a6a10",
   architect: "#4a3a6a", integrator: "#0a5a6a",
+  cto: "#3a2a6a", cmo: "#0a4a45", sales_lead: "#7a1a3a",
+  designer: "#7a3a55",
 };
 
 function drawIsoCharacter(cx, cy, color, role, status, agent = null) {
@@ -605,10 +616,7 @@ function handleEvent(event) {
     if (!hist) {
       loadFiles();
       addFeedItem('💻', '', `Файл записан: ${event.path || ''}`, 'system');
-      if (_currentView !== "code") {
-        const badge = document.getElementById("badge-code");
-        if (badge) { badge.classList.add("badge-pulse"); setTimeout(() => badge.classList.remove("badge-pulse"), 2000); }
-      }
+      _refreshFoldersOnWrite(event.path || '');
     }
   }
   else if (event.type === "lead_captured") {
@@ -1559,8 +1567,8 @@ function switchView(name) {
   if (name === "leads") {
     loadLeads();
   }
-  if (name === "code") {
-    loadFiles();
+  if (name === "code" || name === "folders") {
+    loadFolders();
   }
   if (name === "chat") {
     loadThreadList();
@@ -1720,46 +1728,191 @@ function updateLeadsBadge() {
 }
 
 // ============================================================
-// КОД ПРОЕКТА (рабочая папка агентов)
+// ПАПКИ ПРОЕКТА (рабочая папка агентов)
 // ============================================================
 let filesCache = [];
+let _activeFilePath = null;
 
-async function loadFiles() {
-  try {
-    const r = await fetch("/api/files");
-    filesCache = (await r.json()).files || [];
-  } catch { filesCache = []; }
-  renderFiles();
-  const badge = document.getElementById("badge-code");
-  if (badge) { badge.textContent = filesCache.length || ""; badge.style.display = filesCache.length ? "block" : "none"; }
+const FILE_CATS = [
+  { id: "sites",  label: "🌐 Сайты",      exts: [".html", ".htm", ".css"] },
+  { id: "bots",   label: "🤖 Боты",       exts: [".py"],  nameHint: "bot" },
+  { id: "apps",   label: "📦 Приложения", exts: [".py", ".js", ".ts", ".sh"], nameHint: "app|main|server|api" },
+  { id: "docs",   label: "📄 Документы",  exts: [".md", ".txt", ".json", ".yaml", ".yml", ".csv"] },
+  { id: "media",  label: "🖼 Медиа",      exts: [".png", ".jpg", ".jpeg", ".gif", ".svg", ".mp4", ".webp"] },
+  { id: "other",  label: "📁 Остальное",  exts: [] },
+];
+
+const FILE_ICONS = {
+  ".html": "🌐", ".htm": "🌐", ".css": "🎨",
+  ".py": "🐍", ".js": "📜", ".ts": "📜", ".sh": "⚙️",
+  ".md": "📝", ".txt": "📄", ".json": "📋", ".yaml": "📋", ".yml": "📋", ".csv": "📊",
+  ".png": "🖼", ".jpg": "🖼", ".jpeg": "🖼", ".gif": "🎞", ".svg": "🎨", ".mp4": "🎬",
+  ".pdf": "📕", ".req": "📦",
+};
+
+function _fileExt(p) { return p.includes(".") ? p.slice(p.lastIndexOf(".")).toLowerCase() : ""; }
+function _fileIcon(p) { return FILE_ICONS[_fileExt(p)] || "📄"; }
+function _catForFile(f) {
+  const ext = _fileExt(f.path);
+  const name = f.path.toLowerCase();
+  for (const cat of FILE_CATS) {
+    if (cat.id === "other") continue;
+    if (cat.nameHint && !new RegExp(cat.nameHint).test(name)) {
+      if (!cat.exts.includes(ext)) continue;
+    }
+    if (cat.exts.includes(ext)) return cat.id;
+  }
+  return "other";
 }
 
-function renderFiles() {
-  const list = document.getElementById("code-files");
-  if (!list) return;
-  const no = document.getElementById("no-files");
-  list.querySelectorAll(".file-row").forEach(c => c.remove());
-  if (no) no.style.display = filesCache.length ? "none" : "block";
-  filesCache.forEach((f) => {
-    const row = document.createElement("div");
-    row.className = "file-row";
-    row.innerHTML = `<span class="fr-path">📄 ${escapeHtml(f.path)}</span><span class="fr-size">${f.size} б</span>`;
-    row.addEventListener("click", () => openFile(f.path));
-    list.appendChild(row);
+async function loadFolders() {
+  try {
+    const r = await apiFetch("/api/files");
+    filesCache = (await r.json()).files || [];
+  } catch { filesCache = []; }
+  renderFolders();
+  const badge = document.getElementById("badge-folders");
+  if (badge) { badge.textContent = filesCache.length || ""; badge.style.display = filesCache.length ? "block" : "none"; }
+  const cnt = document.getElementById("folders-count");
+  if (cnt) cnt.textContent = filesCache.length ? `${filesCache.length} файл${filesCache.length === 1 ? "" : filesCache.length < 5 ? "а" : "ов"}` : "Файлов пока нет";
+}
+
+function renderFolders() {
+  const sidebar = document.getElementById("folders-cats");
+  if (!sidebar) return;
+  sidebar.innerHTML = "";
+
+  const grouped = {};
+  filesCache.forEach(f => {
+    const cat = _catForFile(f);
+    (grouped[cat] = grouped[cat] || []).push(f);
+  });
+
+  if (!filesCache.length) {
+    sidebar.innerHTML = '<div style="padding:20px 10px;color:#445;font-size:12px;text-align:center">Агенты ещё не создали файлы</div>';
+    return;
+  }
+
+  FILE_CATS.forEach(cat => {
+    const files = grouped[cat.id];
+    if (!files || !files.length) return;
+    const label = document.createElement("div");
+    label.className = "fcat-label";
+    label.textContent = cat.label;
+    sidebar.appendChild(label);
+    files.forEach(f => {
+      const row = document.createElement("div");
+      row.className = "file-row" + (f.path === _activeFilePath ? " active" : "");
+      row.dataset.path = f.path;
+      const kb = f.size > 1024 ? (f.size/1024).toFixed(1) + " КБ" : f.size + " б";
+      const fname = f.path.includes("/") ? f.path.slice(f.path.lastIndexOf("/")+1) : f.path;
+      row.innerHTML = `<span class="fr-icon">${_fileIcon(f.path)}</span><div class="fr-body"><div class="fr-path" title="${escapeHtml(f.path)}">${escapeHtml(fname)}</div><div class="fr-size">${escapeHtml(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")} ${kb}</div></div>`;
+      row.addEventListener("click", () => openFolderFile(f.path));
+      sidebar.appendChild(row);
+    });
   });
 }
 
-async function openFile(path) {
-  try {
-    const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
-    const content = await r.text();
-    ftCurrentIdx = -1;
-    ftRawContent = content;
-    document.getElementById("ft-who").innerHTML = `💻 <b>${escapeHtml(path)}</b>`;
-    document.getElementById("fulltext-body").textContent = content;
-    document.getElementById("fulltext-overlay").classList.remove("hidden");
-  } catch (e) { showToast("❌ Не удалось открыть файл", "err"); }
+async function openFolderFile(path) {
+  _activeFilePath = path;
+  // Подсветить активный
+  document.querySelectorAll("#folders-cats .file-row").forEach(r => r.classList.toggle("active", r.dataset.path === path));
+
+  const empty = document.getElementById("folders-empty");
+  const codeView = document.getElementById("folders-code-view");
+  const iframe = document.getElementById("folders-iframe");
+  const runOut = document.getElementById("folders-run-output");
+  const btnRun = document.getElementById("btn-run-file");
+  const btnDl = document.getElementById("btn-download-file");
+
+  if (empty) empty.style.display = "none";
+  if (runOut) runOut.style.display = "none";
+
+  const ext = _fileExt(path);
+  const isHtml = ext === ".html" || ext === ".htm";
+  const isMedia = [".png",".jpg",".jpeg",".gif",".svg",".webp",".mp4"].includes(ext);
+  const canRun = [".py",".js",".sh"].includes(ext);
+
+  if (btnRun) { btnRun.style.display = canRun ? "block" : "none"; btnRun.onclick = () => runFolderFile(path); }
+  if (btnDl) { btnDl.style.display = "block"; btnDl.onclick = () => downloadFolderFile(path); }
+
+  if (isHtml) {
+    // Показать HTML в iframe
+    if (codeView) codeView.style.display = "none";
+    if (iframe) {
+      try {
+        const r = await apiFetch(`/api/file?path=${encodeURIComponent(path)}`);
+        const html = await r.text();
+        iframe.style.display = "flex";
+        iframe.srcdoc = html;
+      } catch { showToast("❌ Не удалось загрузить файл", "err"); }
+    }
+  } else if (isMedia) {
+    if (codeView) codeView.style.display = "none";
+    if (iframe) {
+      iframe.style.display = "flex";
+      iframe.srcdoc = `<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><img src="/api/file?path=${encodeURIComponent(path)}" style="max-width:100%;max-height:100vh;object-fit:contain"></body>`;
+    }
+  } else {
+    // Показать код
+    if (iframe) iframe.style.display = "none";
+    if (codeView) {
+      codeView.style.display = "flex";
+      const header = document.getElementById("folders-file-header");
+      const content = document.getElementById("folders-file-content");
+      if (header) header.innerHTML = `${_fileIcon(path)} <b>${escapeHtml(path)}</b>`;
+      if (content) content.textContent = "Загрузка…";
+      try {
+        const r = await apiFetch(`/api/file?path=${encodeURIComponent(path)}`);
+        const text = await r.text();
+        if (content) content.textContent = text;
+      } catch { if (content) content.textContent = "Ошибка загрузки"; }
+    }
+  }
+
+  const countEl = document.getElementById("folders-count");
+  if (countEl) countEl.textContent = path;
 }
+
+async function runFolderFile(path) {
+  const btnRun = document.getElementById("btn-run-file");
+  if (btnRun) { btnRun.textContent = "⏳ Запуск…"; btnRun.disabled = true; }
+  const runOut = document.getElementById("folders-run-output");
+  const runContent = document.getElementById("folders-run-content");
+  try {
+    const r = await apiFetch("/api/run", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ path }) });
+    const data = await r.json();
+    if (runOut) runOut.style.display = "flex";
+    if (runContent) runContent.textContent = data.output || "(нет вывода)";
+    const head = document.getElementById("folders-run-head");
+    const ok = data.ok !== false;
+    if (head) head.style.color = ok ? "#6ee7a8" : "#f07070";
+    if (head) head.textContent = (ok ? "✅" : "❌") + " Вывод: " + path;
+  } catch (e) {
+    if (runOut) runOut.style.display = "flex";
+    if (runContent) runContent.textContent = "Ошибка: " + e.message;
+  }
+  if (btnRun) { btnRun.textContent = "▶ Запустить"; btnRun.disabled = false; }
+}
+
+function downloadFolderFile(path) {
+  const a = document.createElement("a");
+  a.href = `/api/file?path=${encodeURIComponent(path)}`;
+  a.download = path.includes("/") ? path.slice(path.lastIndexOf("/")+1) : path;
+  a.click();
+}
+
+// Обновить папки при file_written событии
+function _refreshFoldersOnWrite(path) {
+  const badge = document.getElementById("badge-folders");
+  if (_currentView !== "folders") {
+    if (badge) { badge.style.display = "block"; }
+  } else {
+    loadFolders();
+  }
+}
+
+async function loadFiles() { return loadFolders(); } // обратная совместимость
 
 // ============================================================
 // УЧЁТ ТОКЕНОВ И СТОИМОСТИ (ROI)

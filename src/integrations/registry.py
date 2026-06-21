@@ -10,6 +10,8 @@ from src.integrations.base import Integration
 from src.integrations.telegram import INTEGRATION as _telegram
 from src.integrations.website import INTEGRATION as _website
 from src.integrations.github import INTEGRATION as _github
+from src.integrations.google_sheets import INTEGRATION as _gsheets
+from src.integrations.gmail import INTEGRATION as _gmail
 from src.office import connections
 
 # Все зарегистрированные интеграции (name -> Integration)
@@ -17,6 +19,8 @@ _ALL: dict[str, Integration] = {
     _website.name: _website,
     _telegram.name: _telegram,
     _github.name: _github,
+    _gsheets.name: _gsheets,
+    _gmail.name: _gmail,
 }
 
 

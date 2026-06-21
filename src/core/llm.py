@@ -13,6 +13,7 @@
 
 import json
 import os
+import re
 from typing import Optional, Callable, Awaitable, Any
 
 from dotenv import load_dotenv
@@ -21,6 +22,37 @@ from openai import AsyncOpenAI
 from src.core.search import web_search
 
 load_dotenv()
+
+
+def _parse_tool_args(raw: str) -> dict:
+    """
+    Надёжный парсинг аргументов tool-call.
+
+    Дешёвые модели (glm-4.5-flash и т.п.) часто кладут в строковое поле
+    (например HTML в `content`) ЖИВЫЕ переносы строк и табы — это невалидный
+    строгий JSON, и обычный json.loads падает, теряя весь вызов. Здесь:
+      1. json.loads(strict=False) — разрешает control-символы внутри строк;
+      2. если и это упало — regex-сальваж: вытаскиваем строковые значения
+         известных ключей (path/content/query/...), беря «жадно» всё до
+         закрывающей кавычки перед следующим ключом или концом объекта.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Сальваж: ключ → значение-строка (учитываем экранированные кавычки)
+    out: dict = {}
+    for m in re.finditer(r'"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL):
+        key, val = m.group(1), m.group(2)
+        # Разэкранируем основные последовательности
+        val = (val.replace('\\n', '\n').replace('\\t', '\t')
+                  .replace('\\"', '"').replace('\\\\', '\\').replace("\\/", "/"))
+        out[key] = val
+    return out
+
 
 BASE_URL = os.getenv("LLM_BASE_URL", "https://apinet.cloud/v1")
 API_KEY = os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
@@ -137,13 +169,21 @@ async def run_agent(
         if not msg.tool_calls:
             break
 
+        # Ответ обрезан по длине — аргументы tool-call могли не дописаться (пустой content).
+        truncated = getattr(resp.choices[0], "finish_reason", "") == "length"
+
         # Выполняем инструменты
         for tc in msg.tool_calls:
             name = tc.function.name
-            try:
-                args = json.loads(tc.function.arguments or "{}")
-            except json.JSONDecodeError:
-                args = {}
+            args = _parse_tool_args(tc.function.arguments or "")
+            # write_file с пустым/обрезанным content при обрыве по длине — подсказываем модели
+            if truncated and name == "write_file" and not (args.get("content") or "").strip():
+                messages.append({
+                    "role": "tool", "tool_call_id": tc.id,
+                    "content": ("Файл НЕ сохранён: ответ оборвался по лимиту длины, content пустой. "
+                                "Напиши файл КОРОЧЕ или раздели на несколько файлов (CSS/JS отдельно)."),
+                })
+                continue
 
             if name == "web_search":
                 if searches_done >= max_searches:

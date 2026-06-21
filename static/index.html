@@ -305,12 +305,46 @@ canvas { display: block; }
 .lead-card .lc-msg { font-size: 12px; color: #99a; margin-top: 5px; }
 .lead-card .lc-src { font-size: 10px; color: #667; margin-top: 5px; }
 
-/* ── Code files ── */
-#code-files { display: flex; flex-direction: column; gap: 6px; }
-.file-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-family: 'SFMono-Regular', Consolas, monospace; }
-.file-row:hover { border-color: var(--accent); }
-.file-row .fr-path { flex: 1; font-size: 12px; color: #c8d8ee; }
-.file-row .fr-size { font-size: 10px; color: #667; }
+/* ── Folders view ── */
+#folders-layout { flex: 1; display: flex; min-height: 0; }
+#folders-sidebar {
+  width: 240px; flex-shrink: 0; border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px;
+}
+.fcat-label {
+  font-size: 10px; color: #555575; text-transform: uppercase; letter-spacing: 1px;
+  padding: 10px 8px 4px; font-weight: 600;
+}
+.fcat-label:first-child { padding-top: 2px; }
+.file-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-radius: 7px; cursor: pointer; border: 1px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+}
+.file-row:hover { background: var(--panel2); border-color: var(--border); }
+.file-row.active { background: #16243a; border-color: #2a4a78; }
+.file-row .fr-icon { font-size: 14px; flex-shrink: 0; }
+.file-row .fr-body { flex: 1; min-width: 0; }
+.file-row .fr-path { font-size: 12px; color: #c8d8ee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-row .fr-size { font-size: 10px; color: #556; }
+
+#folders-preview { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+#folders-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#folders-file-header {
+  padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px;
+  color: #8a8aaa; font-family: monospace; flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+}
+#folders-file-content {
+  flex: 1; overflow: auto; padding: 16px 20px; font-size: 12px; line-height: 1.6;
+  color: #c8d8ee; font-family: 'SFMono-Regular', Consolas, monospace;
+  white-space: pre; word-break: break-all; margin: 0;
+}
+#folders-code-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#folders-iframe { flex: 1; border: none; background: #fff; }
+#folders-run-output { border-top: 1px solid var(--border); max-height: 220px; display: flex; flex-direction: column; }
+#folders-run-head { padding: 8px 16px; font-size: 11px; color: #6ee7a8; font-weight: 600; border-bottom: 1px solid var(--border); background: #0a1a0a; flex-shrink: 0; }
+#folders-run-content { flex: 1; overflow-y: auto; padding: 10px 16px; font-size: 11px; font-family: monospace; color: #c8e8c8; white-space: pre-wrap; margin: 0; }
 
 /* ─────────────── HINT ─────────────── */
 #hint {
@@ -974,7 +1008,7 @@ canvas { display: block; }
       <div class="nav-sep"></div>
 
       <!-- Группа: Инструменты -->
-      <div class="nav-item secondary" data-view="code"><span class="ni-icon">💻</span><span class="ni-label">Код</span><span class="ni-badge" id="badge-code"></span></div>
+      <div class="nav-item secondary" data-view="folders"><span class="ni-icon">📁</span><span class="ni-label">Папки</span><span class="ni-badge" id="badge-folders"></span></div>
       <div class="nav-item secondary" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
 
       <!-- Spacer: прижимает нижние пункты ко дну -->
@@ -1043,14 +1077,38 @@ canvas { display: block; }
         </div>
       </div>
 
-      <!-- Code view -->
-      <div class="view" id="view-code">
+      <!-- Folders view -->
+      <div class="view" id="view-folders">
         <div class="view-head">
-          <h2>💻 Код проекта</h2>
-          <div class="vh-sub">Файлы, которые написали разработчики (рабочая папка)</div>
+          <h2>📁 Папки проекта</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="vh-sub" id="folders-count">Загрузка…</div>
+            <button class="dc-btn" id="btn-run-file" style="display:none">▶ Запустить</button>
+            <button class="dc-btn" id="btn-download-file" style="display:none">⬇ Скачать</button>
+          </div>
         </div>
-        <div id="code-wrap">
-          <div id="code-files"><div class="empty-note" id="no-files">Пока нет файлов — разработчик напишет код сюда</div></div>
+        <div id="folders-layout">
+          <!-- Левая панель: категории + дерево файлов -->
+          <div id="folders-sidebar">
+            <div id="folders-cats"></div>
+          </div>
+          <!-- Правая панель: превью / код файла -->
+          <div id="folders-preview">
+            <div id="folders-empty">
+              <div style="font-size:48px;margin-bottom:16px">📂</div>
+              <div style="color:#6a6a90;font-size:14px">Выберите файл для просмотра</div>
+              <div style="color:#444;font-size:12px;margin-top:8px">Агенты сохраняют сайты, боты, скрипты и документы в эту папку</div>
+            </div>
+            <div id="folders-code-view" style="display:none">
+              <div id="folders-file-header"></div>
+              <pre id="folders-file-content"></pre>
+            </div>
+            <iframe id="folders-iframe" style="display:none" sandbox="allow-scripts allow-same-origin"></iframe>
+            <div id="folders-run-output" style="display:none">
+              <div id="folders-run-head">▶ Вывод выполнения</div>
+              <pre id="folders-run-content"></pre>
+            </div>
+          </div>
         </div>
       </div>
 
