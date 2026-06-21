@@ -124,29 +124,48 @@ button { font-family: inherit; }
 
 /* Nav rail */
 #nav {
-  width: 72px; flex-shrink: 0; background: #0a0a14; border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; padding: 10px 0; gap: 4px;
+  width: 68px; flex-shrink: 0; background: #070710; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 8px 0 6px; gap: 2px;
 }
+.nav-group-label {
+  font-size: 8px; letter-spacing: 1px; color: #3a3a58; text-align: center;
+  padding: 6px 0 2px; text-transform: uppercase; user-select: none; font-weight: 600;
+}
+.nav-sep {
+  height: 1px; background: #131328; margin: 6px 12px;
+}
+.nav-spacer { flex: 1; }
 .nav-item {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 10px 4px; cursor: pointer; color: #5a5a78; border-left: 3px solid transparent;
-  transition: all 0.15s; user-select: none; position: relative;
+  padding: 9px 4px 8px; cursor: pointer; color: #50506e; border-left: 2px solid transparent;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  user-select: none; position: relative; margin: 0 6px 0 0;
+  border-radius: 0 8px 8px 0;
 }
-.nav-item:hover { color: #aab; background: #10101e; }
-.nav-item.active { color: var(--accent); border-left-color: var(--accent); background: #0e0e1c; }
-.nav-item .ni-icon { font-size: 20px; }
-.nav-item .ni-label { font-size: 9px; }
+.nav-item:hover { color: #9090b8; background: rgba(255,255,255,0.035); }
+.nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(79,195,247,0.07); }
+.nav-item .ni-icon { font-size: 17px; line-height: 1; }
+.nav-item .ni-label { font-size: 8.5px; font-weight: 500; letter-spacing: 0.2px; }
+/* secondary group items — slightly muted */
+.nav-item.secondary { color: #404060; }
+.nav-item.secondary:hover { color: #7070a0; }
+.nav-item.secondary.active { color: var(--accent); }
+/* bottom group items */
+.nav-item.bottom { color: #383858; }
+.nav-item.bottom:hover { color: #6060a0; }
+.nav-item.bottom.active { color: var(--accent); }
 .nav-item .ni-badge {
-  position: absolute; top: 6px; right: 12px; background: #f06292; color: #fff;
-  border-radius: 9px; padding: 0 5px; font-size: 9px; line-height: 1.5; display: none;
+  position: absolute; top: 5px; right: 8px; background: #e0507a; color: #fff;
+  border-radius: 9px; padding: 0 5px; font-size: 8px; line-height: 1.6; display: none;
+  font-weight: 700;
 }
 .badge-pulse { animation: badge-pop 0.4s ease 0s 3 alternate; }
 @keyframes badge-pop { 0% { transform: scale(1); } 100% { transform: scale(1.6); background: #ff4081; } }
 
 /* Main */
 #main { flex: 1; min-width: 0; position: relative; }
-.view { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden; }
-.view.active { display: flex; }
+.view { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
+.view.active { opacity: 1; pointer-events: auto; }
 
 .view-head {
   padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -156,8 +175,37 @@ button { font-family: inherit; }
 .view-head .vh-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
 /* ── Office view ── */
-#view-office { }
+#view-office { display: flex; flex-direction: column; }
 #game-wrap { flex: 1; position: relative; min-width: 0; }
+
+/* ── Office feed panel ── */
+#office-feed-panel {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 260px;
+  background: rgba(10,10,20,0.92); border-left: 1px solid #1e1e38;
+  display: flex; flex-direction: column; transition: transform 0.2s;
+  z-index: 10; backdrop-filter: blur(8px);
+}
+#office-feed-panel.collapsed { transform: translateX(252px); }
+#office-feed-toggle {
+  position: absolute; left: -30px; top: 50%; transform: translateY(-50%);
+  background: rgba(10,10,22,0.94); border: 1px solid #1e1e38; border-right: none;
+  width: 30px; height: 60px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 16px; border-radius: 8px 0 0 8px; color: #4fc3f7;
+  writing-mode: vertical-rl;
+}
+#office-feed-inner { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 10px 0; }
+#office-feed-head { padding: 8px 14px; font-size: 11px; font-weight: 600; color: #9090c0; border-bottom: 1px solid #1e1e38; margin-bottom: 6px; letter-spacing: .5px; }
+#office-feed-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.feed-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 7px; background: rgba(255,255,255,0.03); border: 1px solid transparent; animation: feedIn 0.3s ease; font-size: 11px; }
+.feed-item.new { border-color: rgba(79,195,247,0.2); background: rgba(79,195,247,0.06); }
+@keyframes feedIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+.feed-item .fi-icon { flex-shrink: 0; font-size: 14px; }
+.feed-item .fi-body { flex: 1; min-width: 0; }
+.feed-item .fi-who { font-size: 10px; color: #8090c0; margin-bottom: 2px; }
+.feed-item .fi-text { color: #b0b8d0; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.feed-item.type-done .fi-text { color: #6ee7a8; }
+.feed-item.type-error .fi-text { color: #f07070; }
+.feed-item.type-system .fi-text { color: #7090b0; font-style: italic; }
 canvas { display: block; }
 
 /* ── Team view ── */
@@ -455,47 +503,155 @@ canvas { display: block; }
 #dv-code { font-size: 28px; font-weight: 700; letter-spacing: 6px; color: var(--accent); font-family: monospace; }
 #dv-copy { background: none; border: none; color: #667; font-size: 18px; cursor: pointer; padding: 4px; }
 #dv-copy:hover { color: var(--accent); }
-#user-chip { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #aab; white-space: nowrap; }
 #user-chip img { width: 20px; height: 20px; border-radius: 50%; }
 #user-chip .uc-logout { cursor: pointer; color: #667; }
 #user-chip .uc-logout:hover { color: #f06292; }
 
+/* ═══════════════ ЖИВОЙ 3D-ЛЕНДИНГ (онбординг) ═══════════════ */
 #intake {
-  position: fixed; inset: 0; z-index: 1000;
-  background: radial-gradient(ellipse at 50% 20%, #141438, #060610);
-  display: flex; align-items: center; justify-content: center; padding: 20px;
+  position: fixed; inset: 0; z-index: 1000; overflow: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 75% 0%, #1a1a4e 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 10% 100%, #16243e 0%, transparent 55%),
+    #060610;
+  isolation: isolate;
 }
 #intake.hidden { display: none; }
-#intake-card {
-  width: 100%; max-width: 580px; background: #0d0d1c;
-  border: 1px solid var(--border2); border-radius: 16px; padding: 36px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+#landing-scroll { position: relative; z-index: 2; height: 100%; overflow-y: auto; scroll-behavior: smooth; padding: 0 clamp(20px, 5vw, 80px); }
+
+/* ── Дрейфующие световые пятна ── */
+.ld-aurora { position: absolute; inset: 0; z-index: 0; pointer-events: none; filter: blur(70px); opacity: 0.55; }
+.ld-blob { position: absolute; border-radius: 50%; mix-blend-mode: screen; }
+.ld-blob.b1 { width: 460px; height: 460px; background: #2d6ee0; top: -120px; right: 6%; animation: blobDrift1 16s ease-in-out infinite; }
+.ld-blob.b2 { width: 380px; height: 380px; background: #7a3ad0; bottom: -100px; left: 0%; animation: blobDrift2 20s ease-in-out infinite; }
+.ld-blob.b3 { width: 300px; height: 300px; background: #1fa8c4; top: 35%; left: 45%; animation: blobDrift3 24s ease-in-out infinite; }
+@keyframes blobDrift1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-40px,50px) scale(1.12); } }
+@keyframes blobDrift2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(60px,-40px) scale(1.1); } }
+@keyframes blobDrift3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-30px,-30px) scale(0.9); } }
+
+/* ── Перспективная сетка-пол ── */
+.ld-grid {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.25;
+  background-image: linear-gradient(rgba(79,195,247,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(79,195,247,0.18) 1px, transparent 1px);
+  background-size: 48px 48px;
+  transform: perspective(500px) rotateX(62deg) scale(2.4) translateY(28%);
+  transform-origin: center bottom;
+  mask-image: linear-gradient(to top, #000 0%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 70%);
+  animation: gridFlow 14s linear infinite;
 }
-#intake-card h1 { font-size: 22px; margin-bottom: 6px; color: var(--accent); }
-#intake-card .sub { color: #7070a0; font-size: 12px; margin-bottom: 20px; line-height: 1.6; }
+@keyframes gridFlow { to { background-position: 0 48px; } }
+
+/* ── HERO ── */
+.ld-hero {
+  display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 40px; align-items: center;
+  min-height: 92vh; max-width: 1180px; margin: 0 auto; padding: 60px 0 30px;
+}
+.ld-badge {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600;
+  color: #9fd0f5; background: rgba(79,195,247,0.08); border: 1px solid rgba(79,195,247,0.25);
+  padding: 7px 14px; border-radius: 30px; margin-bottom: 22px; backdrop-filter: blur(6px);
+  animation: fadeUp 0.6s ease both;
+}
+.ld-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: #4fc3f7; box-shadow: 0 0 8px #4fc3f7; animation: pulse 2s infinite; }
+.ld-title {
+  font-size: clamp(34px, 4.6vw, 60px); font-weight: 700; line-height: 1.06; letter-spacing: -1px;
+  color: #fff; margin-bottom: 22px; animation: fadeUp 0.6s ease 0.08s both;
+}
+.ld-grad {
+  background: linear-gradient(110deg, #4fc3f7 0%, #9d7bff 55%, #4fc3f7 100%);
+  background-size: 220% auto; -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; animation: gradShift 5s linear infinite;
+}
+@keyframes gradShift { to { background-position: 220% center; } }
+.ld-sub {
+  font-size: clamp(14px, 1.4vw, 17px); color: #9494bc; line-height: 1.65; max-width: 480px;
+  margin-bottom: 30px; animation: fadeUp 0.6s ease 0.16s both;
+}
+.ld-stats { display: flex; gap: 30px; animation: fadeUp 0.6s ease 0.24s both; }
+.ld-stat b { display: block; font-size: 26px; font-weight: 700; color: #fff; background: linear-gradient(120deg,#4fc3f7,#9d7bff); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.ld-stat span { font-size: 11px; color: #6a6a90; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+
+/* ── Живая 3D-сцена офиса ── */
+.ld-hero-right { display: flex; align-items: center; justify-content: center; perspective: 1100px; animation: fadeUp 0.7s ease 0.3s both; }
+.scene3d { position: relative; width: 100%; max-width: 420px; aspect-ratio: 1/0.92; transform-style: preserve-3d; transition: transform 0.25s ease-out; }
+.scene3d-inner { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateX(58deg) rotateZ(-42deg); animation: sceneFloat 8s ease-in-out infinite; }
+@keyframes sceneFloat { 0%,100% { transform: rotateX(58deg) rotateZ(-42deg) translateZ(0); } 50% { transform: rotateX(58deg) rotateZ(-42deg) translateZ(14px); } }
+.s3-floor {
+  position: absolute; left: 50%; top: 50%; width: 230px; height: 230px; margin: -115px 0 0 -115px;
+  transform-style: preserve-3d;
+  background: linear-gradient(135deg, rgba(40,40,80,0.5), rgba(20,20,45,0.5));
+  border: 1px solid rgba(79,195,247,0.3); border-radius: 10px;
+  box-shadow: 0 0 60px rgba(79,195,247,0.18);
+}
+.s3-grid {
+  position: absolute; inset: 0; border-radius: 10px;
+  background-image: linear-gradient(rgba(79,195,247,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(79,195,247,0.15) 1px, transparent 1px);
+  background-size: 46px 46px;
+}
+.s3-desk {
+  position: absolute; width: 34px; height: 34px;
+  left: calc(var(--x) * 46px + 6px); top: calc(var(--y) * 46px + 6px);
+  background: linear-gradient(145deg, #6e3e1c, #3a2010); border-radius: 4px;
+  transform: translateZ(7px); box-shadow: 0 6px 10px rgba(0,0,0,0.4);
+}
+.s3-desk::after { content: ''; position: absolute; inset: 6px 6px auto 6px; height: 12px; border-radius: 2px; background: rgba(79,195,247,0.55); box-shadow: 0 0 8px rgba(79,195,247,0.7); }
+.s3-agent {
+  position: absolute; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  left: calc(var(--x) * 46px + 8px); top: calc(var(--y) * 46px + 8px); font-size: 16px;
+  background: radial-gradient(circle at 50% 30%, #2a3a5e, #14203a); border: 1px solid rgba(79,195,247,0.4);
+  border-radius: 50%; transform: translateZ(30px);
+  animation: agentBob 2.6s ease-in-out infinite; animation-delay: calc(var(--d) * 1s);
+  box-shadow: 0 0 14px rgba(79,195,247,0.35);
+}
+@keyframes agentBob { 0%,100% { transform: translateZ(28px); } 50% { transform: translateZ(46px); } }
+.s3-bubble {
+  position: absolute; z-index: 5; font-size: 11px; color: #cfe8ff; white-space: nowrap;
+  background: rgba(14,18,30,0.92); border: 1px solid rgba(79,195,247,0.4); border-radius: 10px;
+  padding: 6px 11px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+}
+.s3-bubble.bub1 { top: 8%; left: -4%; animation: bubFloat 4s ease-in-out infinite; }
+.s3-bubble.bub2 { bottom: 12%; right: -6%; color: #b6f0c8; border-color: rgba(110,231,168,0.4); animation: bubFloat 4.5s ease-in-out 0.6s infinite; }
+@keyframes bubFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+
+/* ── Карточка-форма (стекло) ── */
+.ld-launch { display: flex; justify-content: center; padding: 10px 0 80px; }
+.ld-glass {
+  width: 100%; max-width: 600px;
+  background: rgba(16,16,32,0.72); backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(120,140,220,0.22); border-radius: 18px; padding: 30px 32px;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.ld-card-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; }
+.ld-card-emoji { font-size: 30px; line-height: 1; filter: drop-shadow(0 0 10px rgba(79,195,247,0.5)); }
+.ld-card-head h2 { font-size: 19px; color: #fff; font-weight: 700; margin-bottom: 4px; }
+#intake-card .sub { color: #8484ac; font-size: 12.5px; line-height: 1.55; }
 #intake-input {
-  width: 100%; height: 110px; background: #0f0f20; border: 1px solid var(--border2);
-  border-radius: 8px; padding: 12px; color: #e0e0e0; font-family: inherit;
-  font-size: 13px; resize: vertical; outline: none; line-height: 1.5;
+  width: 100%; height: 110px; background: rgba(10,10,24,0.7); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 13px; color: #e8e8f4; font-family: inherit;
+  font-size: 13px; resize: vertical; outline: none; line-height: 1.55; transition: border-color .15s, box-shadow .15s;
 }
-#intake-input:focus { border-color: var(--accent); }
+#intake-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,195,247,0.12); }
 #intake button {
-  margin-top: 14px; width: 100%; padding: 13px; border: none; border-radius: 8px;
+  margin-top: 16px; width: 100%; padding: 14px; border: none; border-radius: 10px;
   background: linear-gradient(135deg, #2d6ee0, #4fc3f7); color: #fff;
-  font-size: 14px; font-weight: bold; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+  box-shadow: 0 8px 24px rgba(45,110,224,0.35); transition: transform .12s, box-shadow .15s, filter .15s;
 }
-#intake button:hover { filter: brightness(1.1); }
-#intake button:disabled { opacity: 0.5; cursor: default; }
-#intake-model-row { margin-top: 14px; text-align: left; }
+#intake button:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(45,110,224,0.5); filter: brightness(1.08); }
+#intake button:active { transform: translateY(0) scale(0.985); }
+#intake button:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+#intake-model-row { margin-top: 16px; text-align: left; }
 #intake-model-row label { display: block; font-size: 12px; color: #9090c0; margin-bottom: 6px; }
 #intake-model {
-  width: 100%; background: #0f0f20; border: 1px solid var(--border2); border-radius: 6px;
-  padding: 9px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none; cursor: pointer;
+  width: 100%; background: rgba(10,10,24,0.7); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 10px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none; cursor: pointer;
 }
 #intake-model:focus { border-color: var(--accent); }
 #intake-model-custom {
-  width: 100%; margin-top: 8px; background: #0f0f20; border: 1px solid var(--border2);
-  border-radius: 6px; padding: 9px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none;
+  width: 100%; margin-top: 8px; background: rgba(10,10,24,0.7); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 10px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none;
   display: none;
 }
 #intake-model-custom:focus { border-color: var(--accent); }
@@ -503,8 +659,8 @@ canvas { display: block; }
 .intake-q { margin-bottom: 14px; }
 .intake-q label { display: block; font-size: 11px; color: #9090c0; margin-bottom: 5px; }
 .intake-q input {
-  width: 100%; background: #0f0f20; border: 1px solid var(--border2); border-radius: 6px;
-  padding: 9px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none;
+  width: 100%; background: rgba(10,10,24,0.7); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 10px; color: #e0e0e0; font-family: inherit; font-size: 12px; outline: none;
 }
 .intake-q input:focus { border-color: var(--accent); }
 .hidden { display: none !important; }
@@ -514,6 +670,63 @@ canvas { display: block; }
 }
 #intake-loading { text-align: center; }
 #intake-loading-text { color: #7070a0; font-size: 12px; }
+
+/* ── Как это работает ── */
+.ld-how { max-width: 1000px; margin: 0 auto; padding: 30px 0 60px; }
+.ld-h2 { text-align: center; font-size: clamp(22px,2.4vw,30px); font-weight: 700; color: #fff; margin-bottom: 34px; }
+.ld-how-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; }
+.ld-how-card {
+  position: relative; background: rgba(16,16,32,0.6); border: 1px solid rgba(120,140,220,0.16);
+  border-radius: 16px; padding: 26px 22px; backdrop-filter: blur(8px);
+  transition: transform .25s, border-color .25s, box-shadow .25s;
+}
+.ld-how-card:hover { transform: translateY(-5px); border-color: rgba(79,195,247,0.4); box-shadow: 0 16px 40px rgba(0,0,0,0.4); }
+.ld-how-num { position: absolute; top: 16px; right: 18px; font-size: 40px; font-weight: 800; color: rgba(120,140,220,0.12); line-height: 1; }
+.ld-how-ico { font-size: 32px; margin-bottom: 14px; }
+.ld-how-card h3 { font-size: 16px; color: #e8e8f4; margin-bottom: 8px; font-weight: 600; }
+.ld-how-card p { font-size: 12.5px; color: #8888ac; line-height: 1.6; }
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.in { opacity: 1; transform: none; }
+.ld-how-grid .reveal:nth-child(2) { transition-delay: .12s; }
+.ld-how-grid .reveal:nth-child(3) { transition-delay: .24s; }
+
+/* ── Роли ── */
+.ld-roles { max-width: 1100px; margin: 0 auto; padding: 0 0 70px; text-align: center; }
+.ld-roles-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #55557a; margin-bottom: 18px; }
+.ld-roles-track { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.ld-role-chip {
+  font-size: 12.5px; color: #b0b8d8; background: rgba(255,255,255,0.04); border: 1px solid rgba(120,140,220,0.18);
+  padding: 8px 15px; border-radius: 24px; transition: transform .15s, border-color .15s, color .15s;
+}
+.ld-role-chip:hover { transform: translateY(-2px); border-color: rgba(79,195,247,0.5); color: #fff; }
+
+/* ── Адаптив ── */
+@media (max-width: 860px) {
+  .ld-hero { grid-template-columns: 1fr; gap: 10px; min-height: auto; padding: 50px 0 20px; text-align: center; }
+  .ld-stats { justify-content: center; }
+  .ld-hero-right { margin-top: 20px; order: -1; }
+  .scene3d { max-width: 300px; }
+  .ld-how-grid { grid-template-columns: 1fr; }
+  .ld-sub { margin-left: auto; margin-right: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ld-blob, .scene3d-inner, .s3-agent, .s3-bubble, .ld-grid, .ld-grad { animation: none !important; }
+  .reveal { opacity: 1; transform: none; }
+}
+
+/* ── Toast notifications ── */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  background: #0d1624; border: 1px solid #2a4a78; border-radius: 10px;
+  padding: 12px 18px; font-size: 12px; color: #c8e0f8;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(79,195,247,0.1);
+  animation: toastIn 0.25s ease;
+  max-width: 340px;
+}
+.toast.err { border-color: #783a3a; background: #160d0d; color: #f0a8a8; box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(240,98,98,0.1); }
+.toast.ok { border-color: #2a6a3a; background: #0d1810; color: #a8f0b8; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(12px) scale(0.96); } to { opacity: 1; transform: none; } }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: #2a2a4e; border-radius: 3px; }
@@ -582,28 +795,134 @@ canvas { display: block; }
 </div>
 
 <div id="intake">
-  <div id="intake-card">
-    <h1>⚡ Запусти свой AI-офис</h1>
-    <p class="sub">Опиши идею, вставь ссылки на соцсети или инструкции — офис задаст вопросы и запустится под твою задачу.</p>
-    <div id="intake-step1">
-      <textarea id="intake-input" placeholder="Например: «У меня магазин handmade-свечей @mycandles, хочу выйти на 300к/мес. Помогите с контентом и продажами»"></textarea>
-      <div id="intake-model-row">
-        <label for="intake-model">🤖 Модель ИИ для офиса:</label>
-        <select id="intake-model"></select>
-        <input id="intake-model-custom" type="text" placeholder="или впишите свою модель..." autocomplete="off" spellcheck="false">
-        <div class="im-hint">Можно сменить в любой момент, в т.ч. для каждого агента отдельно.</div>
+  <!-- Живой фон: дрейфующие световые пятна + перспективная сетка -->
+  <div class="ld-aurora">
+    <span class="ld-blob b1"></span>
+    <span class="ld-blob b2"></span>
+    <span class="ld-blob b3"></span>
+  </div>
+  <div class="ld-grid"></div>
+
+  <div id="landing-scroll">
+    <!-- ░░ HERO ░░ -->
+    <section class="ld-hero">
+      <div class="ld-hero-left">
+        <div class="ld-badge"><span class="ld-badge-dot"></span> Автономный AI-офис</div>
+        <h1 class="ld-title">
+          Бизнес растят<br>
+          <span class="ld-grad">AI-агенты</span> —<br>
+          пока вы спите
+        </h1>
+        <p class="ld-sub">
+          Опишите идею — и целая команда исследует рынок, строит стратегию,
+          пишет код и приводит клиентов. Сама. В реальном времени.
+        </p>
+        <div class="ld-stats">
+          <div class="ld-stat"><b>10</b><span>AI-ролей в штате</span></div>
+          <div class="ld-stat"><b>24/7</b><span>работает без вас</span></div>
+          <div class="ld-stat"><b>0</b><span>ручной работы</span></div>
+        </div>
       </div>
-      <button id="intake-next">Продолжить →</button>
-    </div>
-    <div id="intake-step2" class="hidden">
-      <p class="sub">Уточним пару деталей:</p>
-      <div id="intake-questions"></div>
-      <button id="intake-start">🚀 Запустить офис</button>
-    </div>
-    <div id="intake-loading" class="hidden">
-      <div class="spinner"></div>
-      <p id="intake-loading-text">Изучаю запрос...</p>
-    </div>
+
+      <!-- ░ Живая 3D-сцена офиса ░ -->
+      <div class="ld-hero-right">
+        <div class="scene3d" id="scene3d">
+          <div class="scene3d-inner">
+            <div class="s3-floor">
+              <div class="s3-grid"></div>
+              <!-- столы -->
+              <div class="s3-desk" style="--x:1;--y:1"></div>
+              <div class="s3-desk" style="--x:3;--y:1"></div>
+              <div class="s3-desk" style="--x:1;--y:3"></div>
+              <div class="s3-desk" style="--x:3;--y:3"></div>
+              <!-- агенты (поднимаются над полом, парят) -->
+              <div class="s3-agent" style="--x:1;--y:1;--d:0">🧭</div>
+              <div class="s3-agent" style="--x:3;--y:1;--d:.6">🔍</div>
+              <div class="s3-agent" style="--x:1;--y:3;--d:1.2">💻</div>
+              <div class="s3-agent" style="--x:3;--y:3;--d:1.8">📢</div>
+              <div class="s3-agent" style="--x:2;--y:2;--d:.9">📊</div>
+            </div>
+          </div>
+          <!-- парящие пузыри над сценой -->
+          <div class="s3-bubble bub1">Анализирую рынок…</div>
+          <div class="s3-bubble bub2">Готовлю лендинг ✓</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░ ФОРМА ЗАПУСКА (стекло) ░░ -->
+    <section class="ld-launch">
+      <div id="intake-card" class="ld-glass">
+        <div class="ld-card-head">
+          <span class="ld-card-emoji">⚡</span>
+          <div>
+            <h2>Запустите свой офис</h2>
+            <p class="sub">Опишите задачу — агенты зададут пару уточнений и начнут работу.</p>
+          </div>
+        </div>
+        <div id="intake-step1">
+          <textarea id="intake-input" placeholder="Например: «У меня магазин handmade-свечей @mycandles, хочу выйти на 300к/мес. Помогите с контентом и продажами»"></textarea>
+          <div id="intake-model-row">
+            <label for="intake-model">🤖 Модель ИИ для офиса:</label>
+            <select id="intake-model"></select>
+            <input id="intake-model-custom" type="text" placeholder="или впишите свою модель..." autocomplete="off" spellcheck="false">
+            <div class="im-hint">Можно сменить в любой момент, в т.ч. для каждого агента отдельно.</div>
+          </div>
+          <button id="intake-next">Продолжить →</button>
+        </div>
+        <div id="intake-step2" class="hidden">
+          <p class="sub">Уточним пару деталей:</p>
+          <div id="intake-questions"></div>
+          <button id="intake-start">🚀 Запустить офис</button>
+        </div>
+        <div id="intake-loading" class="hidden">
+          <div class="spinner"></div>
+          <p id="intake-loading-text">Изучаю запрос...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░ КАК ЭТО РАБОТАЕТ ░░ -->
+    <section class="ld-how">
+      <h2 class="ld-h2">Как это работает</h2>
+      <div class="ld-how-grid">
+        <div class="ld-how-card reveal">
+          <div class="ld-how-num">1</div>
+          <div class="ld-how-ico">📝</div>
+          <h3>Вы ставите цель</h3>
+          <p>Опишите бизнес и чего хотите достичь. Можно вставить ссылки на соцсети.</p>
+        </div>
+        <div class="ld-how-card reveal">
+          <div class="ld-how-num">2</div>
+          <div class="ld-how-ico">🤖</div>
+          <h3>Офис нанимает команду</h3>
+          <p>Директор разбивает путь на этапы и нанимает нужных специалистов под задачу.</p>
+        </div>
+        <div class="ld-how-card reveal">
+          <div class="ld-how-num">3</div>
+          <div class="ld-how-ico">🚀</div>
+          <h3>Получаете результат</h3>
+          <p>Стратегия, код, лендинги и живые лиды — всё появляется на ваших глазах.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░ РОЛИ ░░ -->
+    <section class="ld-roles">
+      <p class="ld-roles-label">В вашем офисе работают</p>
+      <div class="ld-roles-track">
+        <span class="ld-role-chip">🧭 Директор</span>
+        <span class="ld-role-chip">🔍 Ресёрчер</span>
+        <span class="ld-role-chip">📋 Стратег</span>
+        <span class="ld-role-chip">🏗️ Архитектор</span>
+        <span class="ld-role-chip">🔌 Интегратор</span>
+        <span class="ld-role-chip">👔 HR</span>
+        <span class="ld-role-chip">💰 Продажник</span>
+        <span class="ld-role-chip">💻 Разработчик</span>
+        <span class="ld-role-chip">📢 Маркетолог</span>
+        <span class="ld-role-chip">📊 Аналитик</span>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -620,7 +939,10 @@ canvas { display: block; }
       <div id="progress-note"></div>
     </div>
     <div id="tb-right">
-      <span id="user-chip" class="hidden"></span>
+      <div id="user-chip" class="hidden" style="display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;background:#0e0e1c;border:1px solid #2a2a4e;border-radius:20px;cursor:pointer;" onclick="switchView('account')">
+        <div id="tb-avatar" style="width:28px;height:28px;border-radius:50%;background:#1e2a3a;display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden;">👤</div>
+        <span id="tb-username" style="font-size:11px;color:#8090b0;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+      </div>
       <span id="cost-meter" title="Потрачено на токены за всё время">💸 $0.0000</span>
       <span id="status-bar">● ожидание...</span>
       <div id="model-switcher">
@@ -637,16 +959,30 @@ canvas { display: block; }
   <div id="shell">
     <!-- Nav rail -->
     <div id="nav">
+      <!-- Группа: Работа -->
       <div class="nav-item active" data-view="office"><span class="ni-icon">🏢</span><span class="ni-label">Офис</span></div>
-      <div class="nav-item" data-view="team"><span class="ni-icon">👥</span><span class="ni-label">Команда</span><span class="ni-badge" id="badge-team"></span></div>
-      <div class="nav-item" data-view="results"><span class="ni-icon">📦</span><span class="ni-label">Результаты</span><span class="ni-badge" id="badge-results"></span></div>
-      <div class="nav-item" data-view="leads"><span class="ni-icon">🎯</span><span class="ni-label">Лиды</span><span class="ni-badge" id="badge-leads"></span></div>
-      <div class="nav-item" data-view="code"><span class="ni-icon">💻</span><span class="ni-label">Код</span><span class="ni-badge" id="badge-code"></span></div>
-      <div class="nav-item" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
-      <div class="nav-item" data-view="account"><span class="ni-icon">⚙️</span><span class="ni-label">Аккаунт</span></div>
-      <div class="nav-item" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">События</span></div>
-      <div class="nav-item" data-view="progress"><span class="ni-icon">📈</span><span class="ni-label">Этапы</span></div>
       <div class="nav-item" data-view="chat"><span class="ni-icon">💬</span><span class="ni-label">Чаты</span><span class="ni-badge" id="badge-chat"></span></div>
+      <div class="nav-item" data-view="progress"><span class="ni-icon">📈</span><span class="ni-label">Прогресс</span></div>
+
+      <div class="nav-sep"></div>
+
+      <!-- Группа: Результаты -->
+      <div class="nav-item secondary" data-view="results"><span class="ni-icon">📦</span><span class="ni-label">Итоги</span><span class="ni-badge" id="badge-results"></span></div>
+      <div class="nav-item secondary" data-view="leads"><span class="ni-icon">🎯</span><span class="ni-label">Лиды</span><span class="ni-badge" id="badge-leads"></span></div>
+      <div class="nav-item secondary" data-view="team"><span class="ni-icon">👥</span><span class="ni-label">Команда</span><span class="ni-badge" id="badge-team"></span></div>
+
+      <div class="nav-sep"></div>
+
+      <!-- Группа: Инструменты -->
+      <div class="nav-item secondary" data-view="code"><span class="ni-icon">💻</span><span class="ni-label">Код</span><span class="ni-badge" id="badge-code"></span></div>
+      <div class="nav-item secondary" data-view="connections"><span class="ni-icon">🔌</span><span class="ni-label">Доступы</span></div>
+
+      <!-- Spacer: прижимает нижние пункты ко дну -->
+      <div class="nav-spacer"></div>
+
+      <!-- Группа: Системное (внизу) -->
+      <div class="nav-item bottom" data-view="events"><span class="ni-icon">📋</span><span class="ni-label">Журнал</span></div>
+      <div class="nav-item bottom" data-view="account"><span class="ni-icon">⚙️</span><span class="ni-label">Аккаунт</span></div>
     </div>
 
     <!-- Main -->
@@ -657,6 +993,13 @@ canvas { display: block; }
         <div id="game-wrap">
           <canvas id="canvas"></canvas>
           <div id="hint">👆 Кликни на сотрудника, чтобы открыть с ним чат</div>
+        </div>
+        <div id="office-feed-panel" class="collapsed">
+          <div id="office-feed-toggle" title="Лента активности">⚡</div>
+          <div id="office-feed-inner">
+            <div id="office-feed-head">🏃 Активность</div>
+            <div id="office-feed-list"></div>
+          </div>
         </div>
       </div>
 
@@ -770,27 +1113,6 @@ canvas { display: block; }
                   <input id="acc-ws-name" type="text" placeholder="Мой офис" autocomplete="off">
                   <button id="acc-ws-save">Сохранить</button>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="acc-section">
-            <div class="acc-section-head">AI-модели — ваш ключ</div>
-            <div class="acc-section-body">
-              <div class="acc-row">
-                <div class="lk-status" id="acc-lk-status">Загрузка…</div>
-              </div>
-              <div class="acc-row">
-                <label>API base URL</label>
-                <input id="acc-lk-base" type="text" placeholder="https://apinet.cloud/v1" autocomplete="off">
-              </div>
-              <div class="acc-row">
-                <label>API-ключ</label>
-                <input id="acc-lk-key" type="password" placeholder="sk-…" autocomplete="off">
-              </div>
-              <div class="acc-actions">
-                <button class="primary-btn" id="acc-lk-save">Сохранить ключ</button>
-                <button class="dc-btn" id="acc-lk-clear">Использовать общий</button>
               </div>
             </div>
           </div>

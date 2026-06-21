@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "3d-spatial": {
+      "source": "dylantarre/animation-principles",
+      "sourceType": "github",
+      "skillPath": "skills/01-by-domain/3d-spatial/SKILL.md",
+      "computedHash": "17e0f430bf15297a7152d2c1ef3f03aba6f16845a52e0d1f2732e825b3cce330"
+    },
+    "modern-web-design": {
+      "source": "freshtechbro/claudedesignskills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/modern-web-design/SKILL.md",
+      "computedHash": "89af96893e4a67c5aa6d77791d077ce9af577a59ddc280e26e882d7c8b563dc6"
+    }
+  }
+}

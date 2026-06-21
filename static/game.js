@@ -292,12 +292,27 @@ const HAIR_COLORS = {
   architect: "#4a3a6a", integrator: "#0a5a6a",
 };
 
-function drawIsoCharacter(cx, cy, color, role, status) {
+function drawIsoCharacter(cx, cy, color, role, status, agent = null) {
   const now = Date.now();
   const sc = isoScale;
   const tw = ISO_W * sc / 2, th = ISO_H * sc / 2;
   const bodyH = 30 * sc, bodyW = 13 * sc;
   const bx = cx - bodyW / 2, by = cy - bodyH;
+
+  // Thinking desk glow
+  if (status === 'thinking') {
+    const glowAlpha = 0.15 + 0.1 * Math.sin(Date.now() / 400);
+    ctx.save();
+    ctx.globalAlpha = glowAlpha;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 40 * sc);
+    grad.addColorStop(0, '#ffd54f');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 40 * sc, 20 * sc, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Floor shadow (ellipse)
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
@@ -359,6 +374,23 @@ function drawIsoCharacter(cx, cy, color, role, status) {
   ctx.font = `${11 * sc}px Inter, system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.fillText(ROLE_ICONS[role] || '🤖', cx, by - 2 * sc);
+
+  // Name tag
+  const nameStr = ROLE_NAMES[role] || role;
+  ctx.font = `bold ${9 * sc}px Inter, system-ui, sans-serif`;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.fillText(nameStr, cx, by - 16 * sc);
+
+  // Task hint for thinking agents
+  if (status === 'thinking' && agent && agent.task) {
+    const taskShort = (agent.task || '').replace(/^\[Скилл:[^\]]+\]\s*/, '').slice(0, 28);
+    if (taskShort) {
+      ctx.font = `${8 * sc}px Inter, system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(255,213,79,0.7)';
+      ctx.fillText(taskShort + (agent.task.length > 28 ? '…' : ''), cx, by - 26 * sc);
+    }
+  }
 
   // Status pulsing dot
   const dotColor = status === 'thinking' ? '#ffd54f' : status === 'done' ? '#81c784' : '#4a4a68';
@@ -442,6 +474,38 @@ function getMapOffset() {
   return { ox: 0, oy: 0 };
 }
 
+// ---- Office feed panel ----
+const _feedItems = [];
+const _MAX_FEED = 40;
+
+function addFeedItem(icon, who, text, type = '') {
+  _feedItems.unshift({ icon, who, text, type, id: Date.now() + Math.random() });
+  if (_feedItems.length > _MAX_FEED) _feedItems.pop();
+  renderFeedList();
+}
+
+function renderFeedList() {
+  const list = document.getElementById('office-feed-list');
+  if (!list) return;
+  list.innerHTML = _feedItems.slice(0, 25).map((item, i) => `
+    <div class="feed-item type-${item.type}${i === 0 ? ' new' : ''}">
+      <span class="fi-icon">${item.icon}</span>
+      <div class="fi-body">
+        ${item.who ? `<div class="fi-who">${escapeHtml(item.who)}</div>` : ''}
+        <div class="fi-text">${escapeHtml(item.text)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function setupFeedPanel() {
+  const toggle = document.getElementById('office-feed-toggle');
+  const panel = document.getElementById('office-feed-panel');
+  if (toggle && panel) {
+    toggle.addEventListener('click', () => panel.classList.toggle('collapsed'));
+  }
+}
+
 // ---- SSE ----
 function connectSSE() {
   const statusBar = document.getElementById("status-bar");
@@ -469,7 +533,11 @@ function handleEvent(event) {
 
   if (event.type === "hired") {
     spawnAgent(event.agent_id, event.role, event.desk, event.task || "", event.skill || "");
-    if (!hist) addLog(event.agent_id, `принят на работу как ${event.role}`, event.role);
+    if (!hist) {
+      addLog(event.agent_id, `принят на работу как ${event.role}`, event.role);
+      const roleName = ROLE_NAMES[event.role] || event.role;
+      addFeedItem('👋', '', `${roleName} нанят`, 'system');
+    }
     // Восстанавливаем реальный статус агента из снапшота
     if (event.status && event.status !== "idle") {
       updateAgentStatus(event.agent_id, event.status, event.last_message || "");
@@ -479,7 +547,11 @@ function handleEvent(event) {
     if (!hist) addBubble(event.agent_id, event.text);
     addLog(event.agent_id, event.text, getRole(event.agent_id), hist);
     onOfficeMessage({from: event.agent_id, role: getRole(event.agent_id), text: event.text}, hist);
-    if (!hist) updateAgentStatus(event.agent_id, "thinking", event.text);
+    if (!hist) {
+      updateAgentStatus(event.agent_id, "thinking", event.text);
+      const role = getRole(event.agent_id);
+      addFeedItem(ROLE_ICONS[role] || '🤖', agentDisplayName(event.agent_id), event.text, '');
+    }
   }
   else if (event.type === "office_chat") {
     onOfficeMessage({from: event.from, role: event.role, text: event.text}, hist);
@@ -499,6 +571,7 @@ function handleEvent(event) {
       updateAgentStatus(event.agent_id, "done", (event.summary||"").slice(0,80));
       loadDeliverables();
       loadCosts();
+      addFeedItem('✅', agentDisplayName(event.agent_id), event.summary || 'задача выполнена', 'done');
     }
   }
   else if (event.type === "progress") {
@@ -506,9 +579,11 @@ function handleEvent(event) {
   }
   else if (event.type === "system") {
     addLog("офис", event.text, "system", hist);
+    if (!hist) addFeedItem('🏢', '', event.text, 'system');
   }
   else if (event.type === "error") {
     addLog(event.agent_id, "⚠ " + event.text, getRole(event.agent_id), hist);
+    if (!hist) addFeedItem('⚠️', agentDisplayName(event.agent_id) || '', event.text, 'error');
   }
   else if (event.type === "connection_added") {
     if (!hist) {
@@ -522,12 +597,14 @@ function handleEvent(event) {
   else if (event.type === "integration_used") {
     if (!hist) {
       showToast(event.text || "⚙️ Действие во внешнем сервисе", "ok");
+      addFeedItem('🔌', '', event.text || 'Внешний сервис', 'system');
       if (event.integration === "website") loadLeads();  // опубликован/обновлён лендинг
     }
   }
   else if (event.type === "file_written") {
     if (!hist) {
       loadFiles();
+      addFeedItem('💻', '', `Файл записан: ${event.path || ''}`, 'system');
       if (_currentView !== "code") {
         const badge = document.getElementById("badge-code");
         if (badge) { badge.classList.add("badge-pulse"); setTimeout(() => badge.classList.remove("badge-pulse"), 2000); }
@@ -537,6 +614,7 @@ function handleEvent(event) {
   else if (event.type === "lead_captured") {
     if (!hist) {
       showToast(event.text || "🎯 Новая заявка", "ok");
+      addFeedItem('🎯', '', event.text || 'Новая заявка', 'done');
       loadLeads();
       if (_currentView !== "leads") {
         const badge = document.getElementById("badge-leads");
@@ -621,16 +699,9 @@ let _historyDividerAdded = false;
 function showToast(msg, type = "ok") {
   const t = document.createElement("div");
   t.textContent = msg;
-  t.style.cssText = `
-    position:fixed; bottom:24px; right:24px; z-index:9000;
-    padding:10px 18px; border-radius:8px; font-size:12px; font-family:'Inter, system-ui, sans-serif',monospace;
-    color:#fff; max-width:360px; box-shadow:0 4px 20px rgba(0,0,0,.5);
-    background:${type==="ok" ? "#1a3a1a" : "#3a1a1a"};
-    border:1px solid ${type==="ok" ? "#4a8a4a" : "#8a3a3a"};
-    transition: opacity 0.4s;
-  `;
+  t.className = `toast ${type}`;
   document.body.appendChild(t);
-  setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 400); }, 3500);
+  setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity 0.4s"; setTimeout(() => t.remove(), 400); }, 3500);
 }
 
 function addLog(who, text, role, historical = false) {
@@ -802,7 +873,7 @@ function render() {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    drawIsoCharacter(a.x, a.y, a.color, a.role, a.status);
+    drawIsoCharacter(a.x, a.y, a.color, a.role, a.status, a);
   }
 
   // Speech bubbles
@@ -1238,14 +1309,12 @@ async function checkAuth() {
 function renderUserChip(user) {
   const chip = document.getElementById("user-chip");
   if (!chip || !user) return;
-  const name = user.name || user.github_login || user.email || "Профиль";
-  const av = user.avatar ? `<img src="${user.avatar}" alt="">` : "👤";
-  chip.innerHTML = `${av}<span>${escapeHtml(name)}</span><span class="uc-logout" title="Выйти">⎋</span>`;
   chip.classList.remove("hidden");
-  chip.querySelector(".uc-logout").addEventListener("click", async () => {
-    await fetch("/auth/logout", { method: "POST" }).catch(() => {});
-    location.reload();
-  });
+  chip.style.display = "flex";
+  const tbAv = document.getElementById("tb-avatar");
+  const tbName = document.getElementById("tb-username");
+  if (tbAv) tbAv.innerHTML = user.avatar ? `<img src="${user.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : '👤';
+  if (tbName) tbName.textContent = user.name || user.github_login || user.email || '';
 }
 
 // ---- Device Flow ----
@@ -1343,6 +1412,45 @@ function setupLogin() {
       location.reload();
     } catch { showToast("❌ Не удалось войти", "err"); }
   });
+}
+
+// ---- Живой лендинг: parallax-наклон сцены + scroll-reveal ----
+function setupLanding() {
+  const scene = document.getElementById("scene3d");
+  const hero = document.querySelector(".ld-hero-right");
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (scene && hero && !reduce) {
+    hero.addEventListener("mousemove", (e) => {
+      const r = hero.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width - 0.5;   // -0.5..0.5
+      const py = (e.clientY - r.top) / r.height - 0.5;
+      scene.style.transform = `rotateY(${px * 14}deg) rotateX(${-py * 10}deg)`;
+    });
+    hero.addEventListener("mouseleave", () => { scene.style.transform = ""; });
+  }
+
+  // Scroll-reveal карточек «как это работает» (детерминированно, без IO)
+  const reveals = [...document.querySelectorAll("#intake .reveal")];
+  const scroller = document.getElementById("landing-scroll");
+  if (reveals.length) {
+    if (reduce) {
+      reveals.forEach((el) => el.classList.add("in"));
+    } else {
+      const checkReveal = () => {
+        const vh = window.innerHeight;
+        reveals.forEach((el) => {
+          if (el.classList.contains("in")) return;
+          const r = el.getBoundingClientRect();
+          // показываем, когда верх карточки заходит в нижние 85% экрана (или уже выше)
+          if (r.top < vh * 0.85) el.classList.add("in");
+        });
+      };
+      checkReveal();
+      scroller?.addEventListener("scroll", checkReveal, { passive: true });
+      window.addEventListener("resize", checkReveal, { passive: true });
+    }
+  }
 }
 
 async function checkBriefStatus() {
@@ -1948,21 +2056,6 @@ async function loadAccount() {
 
   const wsName = document.getElementById("acc-ws-name");
   if (wsName && ws.name) wsName.value = ws.name;
-
-  // LLM settings
-  const lr = await apiFetch("/api/llm-settings");
-  if (!lr) return;
-  const ld = await lr.json();
-  const st = document.getElementById("acc-lk-status");
-  const base = document.getElementById("acc-lk-base");
-  const key = document.getElementById("acc-lk-key");
-  if (base && !base.value) base.value = ld.base_url || "";
-  if (st) {
-    st.textContent = ld.has_own_key
-      ? `✅ Используется ваш ключ (${ld.key_mask})`
-      : "⚠ Сейчас используется общий ключ оператора.";
-  }
-  if (key) key.placeholder = ld.has_own_key ? "•••• (задан, введите новый для замены)" : "sk-…";
 }
 
 function setupAccount() {
@@ -1978,26 +2071,6 @@ function setupAccount() {
       body: JSON.stringify({ name }),
     });
     if (r) { showToast("✅ Название сохранено", "ok"); }
-  });
-
-  document.getElementById("acc-lk-save")?.addEventListener("click", async () => {
-    const base_url = document.getElementById("acc-lk-base")?.value.trim();
-    const api_key = document.getElementById("acc-lk-key")?.value.trim();
-    const r = await apiFetch("/api/llm-settings", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base_url, api_key }),
-    });
-    if (r) {
-      document.getElementById("acc-lk-key").value = "";
-      showToast("✅ Ключ сохранён", "ok");
-      loadAccount();
-    }
-  });
-
-  document.getElementById("acc-lk-clear")?.addEventListener("click", async () => {
-    if (!confirm("Удалить свой ключ и вернуться на общий ключ оператора?")) return;
-    await apiFetch("/api/llm-settings/clear", { method: "POST" });
-    loadAccount();
   });
 
   document.getElementById("acc-reset-btn")?.addEventListener("click", async () => {
@@ -2153,6 +2226,7 @@ window.addEventListener("load", () => {
   connectSSE();
   setupClickHandler();
   setupLogin();
+  setupLanding();
   // Сначала проверяем вход: онбординг показываем только авторизованным
   checkAuth().then((ok) => { if (ok) checkBriefStatus(); });
   replayHistory();
@@ -2211,6 +2285,9 @@ window.addEventListener("load", () => {
   loadConnections();
   setupLlmSettings();
   loadLlmSettings();
+
+  // Activity feed panel
+  setupFeedPanel();
 
   // Account tab
   setupAccount();
