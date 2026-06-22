@@ -155,6 +155,57 @@ async def plan_milestones(
     return stages[:6]
 
 
+_PLAN_SYSTEM = """Ты — операционный директор автономной AI-компании. На вход — цель клиента,
+стратегия и ТЗ. Разбей путь к цели на КОНКРЕТНЫЕ задачи для исполнителей в виде графа.
+
+Доступные роли (исполнители):
+- developer — кастомный код, скрипты, автоматизации
+- designer — красивые многостраничные сайты/лендинги (HTML/CSS/JS)
+- integrator — подключение внешних сервисов, запуск готового Telegram-бота записи
+- marketer — контент, посты, реклама
+- salesman — поиск клиентов, офферы, карточки на картах, переговоры
+- analyst — аналитика, метрики
+
+Правила:
+- 4–8 задач, каждая — самостоятельный измеримый результат.
+- Указывай зависимости (deps) ТОЛЬКО когда задача реально требует результата другой.
+- Независимые задачи (без общих deps) офис будет делать ПАРАЛЛЕЛЬНО — используй это.
+- done_criterion — как проверить, что задача выполнена (конкретно).
+
+Ответь ТОЛЬКО валидным JSON без markdown:
+{
+  "tasks": [
+    {"id": "t1", "title": "...", "role": "designer", "deps": [], "done_criterion": "..."},
+    {"id": "t2", "title": "...", "role": "salesman", "deps": [], "done_criterion": "..."}
+  ]
+}"""
+
+
+async def plan_tasks(
+    strategy: str,
+    goal: str,
+    tech_design: str = "",
+    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+) -> list[dict]:
+    """Граф конкретных задач (роль + зависимости + критерий готовности) из стратегии/ТЗ."""
+    if publish:
+        await publish({"type": "thinking", "agent_id": "orchestrator_1",
+                       "text": "Раскладываю цель на граф задач..."})
+    user = (f"Цель клиента: {goal}\n\nСтратегия:\n{strategy[:2000]}\n\n"
+            f"ТЗ (кратко):\n{tech_design[:1200]}\n\nСоставь граф задач.")
+    raw = await llm.run_agent(
+        system=_PLAN_SYSTEM,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=900,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    data = _parse_json(raw)
+    tasks = data.get("tasks", [])
+    return tasks if isinstance(tasks, list) else []
+
+
 async def decide_company(
     goal: str,
     strategy: str,

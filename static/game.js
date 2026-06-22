@@ -1777,40 +1777,85 @@ async function loadFolders() {
   if (cnt) cnt.textContent = filesCache.length ? `${filesCache.length} файл${filesCache.length === 1 ? "" : filesCache.length < 5 ? "а" : "ов"}` : "Файлов пока нет";
 }
 
+// Свёрнутые папки дерева (по полному пути)
+const _collapsedDirs = new Set();
+
+function _buildFileTree(files) {
+  // Строим дерево из плоского списка путей: {name, path, dir:bool, size, children:Map}
+  const root = { name: "", path: "", dir: true, children: new Map() };
+  files.forEach(f => {
+    const parts = f.path.split("/");
+    let node = root;
+    parts.forEach((part, i) => {
+      const isLeaf = i === parts.length - 1;
+      const full = parts.slice(0, i + 1).join("/");
+      if (!node.children.has(part)) {
+        node.children.set(part, {
+          name: part, path: full, dir: !isLeaf,
+          size: isLeaf ? f.size : 0, children: new Map(),
+        });
+      }
+      node = node.children.get(part);
+    });
+  });
+  return root;
+}
+
 function renderFolders() {
   const sidebar = document.getElementById("folders-cats");
   if (!sidebar) return;
   sidebar.innerHTML = "";
-
-  const grouped = {};
-  filesCache.forEach(f => {
-    const cat = _catForFile(f);
-    (grouped[cat] = grouped[cat] || []).push(f);
-  });
 
   if (!filesCache.length) {
     sidebar.innerHTML = '<div style="padding:20px 10px;color:#445;font-size:12px;text-align:center">Агенты ещё не создали файлы</div>';
     return;
   }
 
-  FILE_CATS.forEach(cat => {
-    const files = grouped[cat.id];
-    if (!files || !files.length) return;
-    const label = document.createElement("div");
-    label.className = "fcat-label";
-    label.textContent = cat.label;
-    sidebar.appendChild(label);
-    files.forEach(f => {
+  const tree = _buildFileTree(filesCache);
+  _renderTreeNode(tree, sidebar, 0);
+}
+
+function _renderTreeNode(node, container, depth) {
+  // Сортировка: сначала папки, потом файлы, по алфавиту
+  const kids = [...node.children.values()].sort((a, b) =>
+    (a.dir === b.dir) ? a.name.localeCompare(b.name) : (a.dir ? -1 : 1));
+  kids.forEach(child => {
+    const pad = 8 + depth * 14;
+    if (child.dir) {
+      const collapsed = _collapsedDirs.has(child.path);
+      const fileCount = _countFiles(child);
       const row = document.createElement("div");
-      row.className = "file-row" + (f.path === _activeFilePath ? " active" : "");
-      row.dataset.path = f.path;
-      const kb = f.size > 1024 ? (f.size/1024).toFixed(1) + " КБ" : f.size + " б";
-      const fname = f.path.includes("/") ? f.path.slice(f.path.lastIndexOf("/")+1) : f.path;
-      row.innerHTML = `<span class="fr-icon">${_fileIcon(f.path)}</span><div class="fr-body"><div class="fr-path" title="${escapeHtml(f.path)}">${escapeHtml(fname)}</div><div class="fr-size">${escapeHtml(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")} ${kb}</div></div>`;
-      row.addEventListener("click", () => openFolderFile(f.path));
-      sidebar.appendChild(row);
-    });
+      row.className = "file-row dir-row";
+      row.style.paddingLeft = pad + "px";
+      row.innerHTML = `<span class="fr-icon">${collapsed ? "📁" : "📂"}</span>`
+        + `<div class="fr-body"><div class="fr-path">${escapeHtml(child.name)}</div>`
+        + `<div class="fr-size">${fileCount} файл${fileCount === 1 ? "" : fileCount < 5 ? "а" : "ов"}</div></div>`
+        + `<span class="fr-caret">${collapsed ? "▸" : "▾"}</span>`;
+      row.addEventListener("click", () => {
+        if (collapsed) _collapsedDirs.delete(child.path); else _collapsedDirs.add(child.path);
+        renderFolders();
+      });
+      container.appendChild(row);
+      if (!collapsed) _renderTreeNode(child, container, depth + 1);
+    } else {
+      const row = document.createElement("div");
+      row.className = "file-row" + (child.path === _activeFilePath ? " active" : "");
+      row.dataset.path = child.path;
+      row.style.paddingLeft = pad + "px";
+      const kb = child.size > 1024 ? (child.size / 1024).toFixed(1) + " КБ" : child.size + " б";
+      row.innerHTML = `<span class="fr-icon">${_fileIcon(child.path)}</span>`
+        + `<div class="fr-body"><div class="fr-path" title="${escapeHtml(child.path)}">${escapeHtml(child.name)}</div>`
+        + `<div class="fr-size">${kb}</div></div>`;
+      row.addEventListener("click", () => openFolderFile(child.path));
+      container.appendChild(row);
+    }
   });
+}
+
+function _countFiles(node) {
+  let n = 0;
+  node.children.forEach(c => { n += c.dir ? _countFiles(c) : 1; });
+  return n;
 }
 
 async function openFolderFile(path) {
@@ -1837,21 +1882,19 @@ async function openFolderFile(path) {
   if (btnDl) { btnDl.style.display = "block"; btnDl.onclick = () => downloadFolderFile(path); }
 
   if (isHtml) {
-    // Показать HTML в iframe
+    // Показать HTML в iframe через path-роут — относительные css/js/картинки подтянутся
     if (codeView) codeView.style.display = "none";
     if (iframe) {
-      try {
-        const r = await apiFetch(`/api/file?path=${encodeURIComponent(path)}`);
-        const html = await r.text();
-        iframe.style.display = "flex";
-        iframe.srcdoc = html;
-      } catch { showToast("❌ Не удалось загрузить файл", "err"); }
+      iframe.style.display = "flex";
+      iframe.removeAttribute("srcdoc");
+      iframe.src = `/api/raw/${path.split("/").map(encodeURIComponent).join("/")}`;
     }
   } else if (isMedia) {
     if (codeView) codeView.style.display = "none";
     if (iframe) {
       iframe.style.display = "flex";
-      iframe.srcdoc = `<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><img src="/api/file?path=${encodeURIComponent(path)}" style="max-width:100%;max-height:100vh;object-fit:contain"></body>`;
+      iframe.removeAttribute("src");
+      iframe.srcdoc = `<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><img src="/api/raw/${path.split("/").map(encodeURIComponent).join("/")}" style="max-width:100%;max-height:100vh;object-fit:contain"></body>`;
     }
   } else {
     // Показать код
@@ -2471,13 +2514,49 @@ const CUSTOM_OPT = "__custom__";
 let _modelPresets = [];   // [{id,label}]
 let _modelDefault = "";
 
+let _modelRoles = [];
 async function loadModelsConfig() {
   try {
     const r = await fetch("/api/models");
     const d = await r.json();
     _modelPresets = d.presets || [];
     _modelDefault = d.default || "";
+    _modelRoles = d.roles || [];
   } catch (e) { console.error("loadModelsConfig:", e); }
+}
+
+// Рендер списка «модель по ролям» в интейке (по умолчанию — «По умолчанию», не задано).
+function renderRoleModels() {
+  const box = document.getElementById("role-models-list");
+  if (!box) return;
+  box.innerHTML = "";
+  _modelRoles.forEach(rm => {
+    const row = document.createElement("div");
+    row.className = "rm-row";
+    const label = document.createElement("div");
+    label.className = "rm-label";
+    label.textContent = rm.label;
+    const sel = document.createElement("select");
+    const def = document.createElement("option");
+    def.value = ""; def.textContent = "По умолчанию";
+    sel.appendChild(def);
+    _modelPresets.forEach(p => {
+      const o = document.createElement("option");
+      o.value = p.id; o.textContent = p.label;
+      sel.appendChild(o);
+    });
+    sel.value = rm.model || "";
+    sel.addEventListener("change", async () => {
+      try {
+        await fetch(`/api/role/${encodeURIComponent(rm.role)}/model`, {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({model: sel.value}),
+        });
+      } catch (e) { console.error("role model save:", e); }
+    });
+    row.appendChild(label); row.appendChild(sel);
+    box.appendChild(row);
+  });
 }
 
 /**
@@ -2553,6 +2632,7 @@ async function setupIntakeModel() {
     custom.style.display = sel.value === CUSTOM_OPT ? "block" : "none";
     if (sel.value === CUSTOM_OPT) custom.focus();
   });
+  renderRoleModels();
 }
 
 async function saveIntakeModel() {

@@ -124,6 +124,7 @@ async def run_agent(
     system = system + "\n\nПиши только на русском языке. Будь краток и по делу, без воды."
 
     searches_done = 0
+    seen_queries: set[str] = set()  # анти-цикл: не искать одно и то же дважды
     in_tokens = 0
     out_tokens = 0
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
@@ -186,12 +187,18 @@ async def run_agent(
                 continue
 
             if name == "web_search":
-                if searches_done >= max_searches:
+                query = args.get("query", "")
+                qnorm = " ".join(query.lower().split())
+                if qnorm in seen_queries:
+                    # Анти-цикл: тот же запрос уже выполнялся — не жжём поиск/токены.
+                    result = ("Этот запрос уже выполнялся в этой задаче. Не повторяй поиск — "
+                              "используй то, что уже нашёл, и сделай вывод/результат.")
+                elif searches_done >= max_searches:
                     result = ("Достигнут лимит веб-поисков. Хватит искать — "
                               "сделай вывод на основе уже собранных данных.")
                 else:
                     searches_done += 1
-                    query = args.get("query", "")
+                    seen_queries.add(qnorm)
                     if publish:
                         await publish({"type": "speech", "agent_id": agent_id,
                                        "text": f"🔍 Ищу: {query[:60]}"})

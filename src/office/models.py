@@ -49,9 +49,33 @@ def set_default(model: str) -> None:
         ctx.write_json(_FILE, cfg)
 
 
+# Роли, которым осмысленно назначать отдельную модель (для UI-списка).
+# По умолчанию НИ ОДНА не переопределена — все берут глобальную модель тенанта.
+ROLE_LABELS = {
+    "orchestrator": "CEO / оркестрация",
+    "cto": "CTO (лидер)", "cmo": "CMO (лидер)", "sales_lead": "Head of Sales (лидер)",
+    "researcher": "Ресёрчер", "strategist": "Стратег", "architect": "Архитектор",
+    "designer": "Дизайнер", "developer": "Разработчик", "integrator": "Интегратор",
+    "marketer": "Маркетолог", "salesman": "Продажник", "analyst": "Аналитик",
+}
+
+
+def _role_of(agent_id: str) -> str:
+    """developer_1 → developer (отрезаем числовой суффикс)."""
+    return agent_id.rsplit("_", 1)[0] if "_" in agent_id else agent_id
+
+
 def for_agent(agent_id: str) -> str:
+    """Модель агента: точечная на agent_id → на роль → глобальная по умолчанию."""
     cfg = _cfg()
-    return cfg.get("per_agent", {}).get(agent_id, cfg.get("default", ENV_DEFAULT))
+    pa = cfg.get("per_agent", {})
+    if agent_id in pa:
+        return pa[agent_id]
+    role = _role_of(agent_id)
+    pr = cfg.get("per_role", {})
+    if role in pr:
+        return pr[role]
+    return cfg.get("default", ENV_DEFAULT)
 
 
 def set_for_agent(agent_id: str, model: str) -> None:
@@ -62,6 +86,34 @@ def set_for_agent(agent_id: str, model: str) -> None:
     else:
         pa[agent_id] = model.strip()
     ctx.write_json(_FILE, cfg)
+
+
+def for_role(role: str) -> str:
+    """Модель роли (или глобальная, если не переопределена)."""
+    cfg = _cfg()
+    return cfg.get("per_role", {}).get(role, cfg.get("default", ENV_DEFAULT))
+
+
+def set_for_role(role: str, model: str) -> None:
+    """Назначить/сбросить модель для роли. Пустая строка = сброс (вернётся к глобальной)."""
+    cfg = _cfg()
+    pr = cfg.setdefault("per_role", {})
+    if not (model or "").strip():
+        pr.pop(role, None)
+    else:
+        pr[role] = model.strip()
+    ctx.write_json(_FILE, cfg)
+
+
+def role_assignments() -> dict:
+    """Текущие переопределения по ролям (только заданные)."""
+    return dict(_cfg().get("per_role", {}))
+
+
+def role_catalog() -> list[dict]:
+    """Список ролей для UI с текущей моделью (или '' = по умолчанию)."""
+    pr = _cfg().get("per_role", {})
+    return [{"role": r, "label": lbl, "model": pr.get(r, "")} for r, lbl in ROLE_LABELS.items()]
 
 
 def assignments() -> dict:
@@ -76,4 +128,5 @@ def reset() -> None:
     """Сбрасывает индивидуальные модели, глобальную оставляет."""
     cfg = _cfg()
     cfg["per_agent"] = {}
+    cfg["per_role"] = {}
     ctx.write_json(_FILE, cfg)

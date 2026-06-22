@@ -72,6 +72,7 @@ async def decide(
     milestones: list[dict],
     agent_availability: Optional[dict] = None,
     publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+    suggested_task: Optional[dict] = None,
 ) -> dict:
     """Решение лидера отдела: кому из подчинённых что поручить (или кого нанять)."""
     avail = agent_availability or {}
@@ -104,10 +105,20 @@ async def decide(
         await publish({"type": "thinking", "agent_id": lead_id,
                        "text": f"Распределяю работу в отделе «{org_module.catalog()[dept_id]['name']}»..."})
 
+    # Подсказка из плана-графа: следующая готовая задача отдела (приоритет).
+    plan_section = ""
+    if suggested_task:
+        plan_section = (
+            f"\n=== СЛЕДУЮЩАЯ ЗАДАЧА ИЗ ПЛАНА (приоритет) ===\n"
+            f"Роль: {suggested_task.get('role','')} | Задача: {suggested_task.get('title','')}\n"
+            f"Критерий готовности: {suggested_task.get('done_criterion','')}\n"
+            f"Если в отделе есть свободный работник этой роли — поручи ему именно эту задачу.\n"
+        )
+
     user = (
         f"Цель компании: {goal}\n"
         f"Цель твоего отдела от CEO: {objective or 'двигай отдел к цели компании'}\n"
-        f"{directives_section}\n"
+        f"{directives_section}{plan_section}\n"
         f"Этапы пути:\n{ms_text}\n\n"
         f"Твои подчинённые (статус и что сделали):\n{digest}\n\n"
         f"Роли отдела, которых ещё НЕТ (можно нанять): {', '.join(missing_roles) or 'все на месте'}\n\n"

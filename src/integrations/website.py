@@ -145,21 +145,6 @@ INTEGRATION = Integration(
            "Просто поручи агенту создать лендинг под оффер клиента.",
     cred_fields=[],  # без кредов — всегда доступна
     actions={
-        "publish_landing": Action(
-            name="publish_landing",
-            description="Опубликовать/обновить лендинг под оффер. Возвращает ссылку /site/{slug}.",
-            handler=_publish_landing,
-            params={
-                "title": {"type": "string", "description": "Название продукта/компании (определяет адрес)"},
-                "headline": {"type": "string", "description": "Главный заголовок-оффер"},
-                "subheadline": {"type": "string", "description": "Подзаголовок/пояснение"},
-                "bullets": {"type": "array", "items": {"type": "string"},
-                            "description": "Выгоды/преимущества (3-6 пунктов)"},
-                "cta_text": {"type": "string", "description": "Текст кнопки (по умолчанию «Оставить заявку»)"},
-                "accent_color": {"type": "string", "description": "Акцентный цвет hex, опц. (#4f7cff)"},
-            },
-            required=["headline"],
-        ),
         "publish_site": Action(
             name="publish_site",
             description="Опубликовать ПОЛНОЦЕННЫЙ многостраничный сайт из папки рабочей директории "

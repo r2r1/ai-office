@@ -585,6 +585,7 @@ async def serve_site_asset(tenant: str, slug: str, path: str):
 def _serve_site_file(site: dict, subpath: str):
     """Отдаёт файл из папки опубликованного сайта с корректным content-type."""
     import mimetypes
+    import re as _re
     from fastapi.responses import Response
     root = (site.get("root") or "").strip("/")
     rel = (f"{root}/{subpath}").strip("/") if root else subpath
@@ -595,6 +596,18 @@ def _serve_site_file(site: dict, subpath: str):
         if full is None or not full.is_file():
             return HTMLResponse("<h1>Страница не найдена</h1>", status_code=404)
     ctype = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
+    if ctype == "text/html":
+        # Внедряем <base>, чтобы относительные пути (css/js/картинки/ссылки между
+        # страницами) резолвились от /site/{tenant}/{slug}/, а не от /site/{tenant}/.
+        tid = saas_context.get_tenant()
+        base = f'<base href="/site/{tid}/{site["slug"]}/">'
+        html = full.read_text(encoding="utf-8", errors="replace")
+        if "<base" not in html.lower():
+            if _re.search(r"<head[^>]*>", html, _re.IGNORECASE):
+                html = _re.sub(r"(<head[^>]*>)", r"\1" + base, html, count=1, flags=_re.IGNORECASE)
+            else:
+                html = base + html
+        return HTMLResponse(html)
     return Response(content=full.read_bytes(), media_type=ctype)
 
 
@@ -702,6 +715,23 @@ async def get_file(path: str):
     return PlainTextResponse(content)
 
 
+@app.get("/api/raw/{path:path}")
+async def get_raw_file(path: str):
+    """
+    Сырой файл рабочей папки с корректным content-type и по path-адресу
+    (а не query). Нужно для превью многофайлового сайта во вкладке «Папки»:
+    при загрузке index.html через src относительные css/js/картинки резолвятся
+    от /api/raw/<dir>/ и подтягиваются автоматически.
+    """
+    import mimetypes
+    from fastapi.responses import Response
+    data = workspace_module.read_bytes(path)
+    if data is None:
+        return Response(content=b"not found", status_code=404)
+    ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    return Response(content=data, media_type=ctype)
+
+
 @app.post("/api/run")
 async def run_file(request: Request):
     """Запустить файл из рабочей папки (.py / .js / .sh) и вернуть вывод."""
@@ -758,6 +788,8 @@ async def get_models():
     return {
         "default": models_module.get_default(),
         "per_agent": models_module.assignments(),
+        "per_role": models_module.role_assignments(),
+        "roles": models_module.role_catalog(),
         "presets": models_module.PRESETS,
     }
 
@@ -809,6 +841,15 @@ async def set_agent_model(agent_id: str, request: Request):
     model = (data.get("model") or "").strip()
     models_module.set_for_agent(agent_id, model)
     return {"ok": True, "agent_id": agent_id, "model": models_module.for_agent(agent_id)}
+
+
+@app.post("/api/role/{role}/model")
+async def set_role_model(role: str, request: Request):
+    """Назначить модель для роли (пустая — вернуть к глобальной). По умолчанию не задано."""
+    data = await request.json()
+    model = (data.get("model") or "").strip()
+    models_module.set_for_role(role, model)
+    return {"ok": True, "role": role, "model": models_module.for_role(role)}
 
 
 @app.get("/api/questions")

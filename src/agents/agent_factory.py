@@ -21,6 +21,7 @@ from src.office import models as models_module
 from src.office import office_channel
 from src.office import threads as threads_module
 from src.office import workspace as workspace_module
+from src.office import registry as registry_module
 from src.integrations import registry as integrations_registry
 
 _AUTONOMY_RULES = """
@@ -30,9 +31,24 @@ _AUTONOMY_RULES = """
 Выдавай РЕАЛЬНЫЙ результат: лендинг — publish через website, пост — через интеграцию.
 Сначала вызови list_integrations, чтобы узнать что доступно."""
 
+# Командная установка: агент — самостоятельный профессионал, а не исполнитель скрипта.
+# Подаётся ВСЕМ агентам. Цель — снять «зашитость в промпт»: агент сам выбирает КАК,
+# советуется с коллегами и проверяет результат (роль-специфичные правила остаются как
+# рамки-ограничения, но не как пошаговый сценарий).
+_TEAM_PREAMBLE = (
+    "\n\n=== ТЫ В КОМАНДЕ (важнее пошаговых инструкций) ===\n"
+    "Ты — самостоятельный член команды AI-офиса, а не исполнитель скрипта. Сам решай КАК "
+    "достичь цели; если видишь способ лучше — делай лучше, сохраняя цель клиента и явные "
+    "ограничения (что НЕ делать). Доводи результат до рабочего состояния и убеждайся, что он "
+    "реально решает задачу, а не просто формально выполнен.\n"
+    "Нужен вход от другого специалиста (текст от маркетолога, данные от аналитика, оценка "
+    "у дизайнера, проверка у разработчика) — спроси через ask_colleague(role, вопрос) и получи "
+    "ответ сразу. Советуйся по делу, но коротко и конкретно — без бесконечных переписок.\n"
+)
+
 _INTER_AGENT_SUFFIX = (
-    "\nМожешь писать агентам через send_message / read_messages."
-    "\nЕсли подключение не работает — опиши ошибку конкретно."
+    "\nКоллеги: спрашивай конкретику через ask_colleague(role, вопрос). Можешь также писать "
+    "через send_message / read_messages. Если подключение не работает — опиши ошибку конкретно."
 )
 
 _LEADER_RULES = (
@@ -85,15 +101,19 @@ ROLE_PROMPTS = {
         "hover-эффекты, адаптивность (mobile-first), тёмная/светлая тема.\n"
         "• Картинки: ВСТРОЕННЫЕ SVG или CSS-градиентные блоки (НЕ внешние Unsplash-ссылки — они не грузятся).\n"
         "• Форма заявки: отправляет POST на /api/site-lead с JSON {name, contact, message} — "
-        "заявки попадают в раздел «Лиды». Это реальный сбор лидов, не фейк.\n\n"
+        "заявки попадают в раздел «Лиды». Это реальный сбор лидов, не фейк.\n"
+        "🚫 НЕ строй свой бэкенд: эндпоинт /api/site-lead УЖЕ хостится платформой и собирает лиды. "
+        "НЕ создавай main.py / FastAPI / SQLite / service_account.json / Google Sheets / email / "
+        "аналитику — даже если так написано в ТЗ. Твой результат = только статические файлы сайта "
+        "(HTML/CSS/JS) в папке site/, опубликованные через publish_site. Заявки уже идут в «Лиды».\n\n"
         "Рабочий цикл:\n"
         "1. list_files — посмотри что уже написано.\n"
         "2. write_file — пиши каждый файл сайта (index.html, css/style.css, js/script.js, доп. страницы). "
         "Полный рабочий код, не скелеты.\n"
         "3. verify_code — для .py файлов. Ошибки → исправь и проверь снова.\n"
         "4. execute_code — ЗАПУСТИ скрипт (для .py/.js), убедись что работает. Если упал — исправь.\n"
-        "5. Опубликуй сайт ЦЕЛИКОМ: use_integration('website','publish_site',{directory:'site', title:'...'}) "
-        "— хостится вся папка, все страницы и ресурсы доступны, форма собирает лиды.\n"
+        "5. Готово — офис ОПУБЛИКУЕТ сайт сам, как только файлы в site/ записаны (отдельно "
+        "publish_site вызывать не обязательно). Главное — напиши все файлы целиком.\n"
         "6. Спроси пользователя (ask_user) перед пушем в GitHub. После одобрения: "
         "use_integration('github','create_repo',{name}) → use_integration('github','push',{repo}).\n"
         "Используй web_search для актуального синтаксиса."
@@ -112,12 +132,15 @@ ROLE_PROMPTS = {
         "• Типографика: Google Fonts (Inter, Montserrat, Playfair Display).\n"
         "• Картинки: ВСТРОЕННЫЕ SVG-иконки и CSS-градиентные блоки (НЕ внешние Unsplash-ссылки — "
         "они не грузятся и ломают вид).\n"
-        "• Форма заявки: POST на /api/site-lead с JSON {name, contact, message} → заявки в «Лиды».\n\n"
+        "• Форма заявки: POST на /api/site-lead с JSON {name, contact, message} → заявки в «Лиды».\n"
+        "🚫 НЕ строй бэкенд: /api/site-lead УЖЕ хостится платформой. НЕ создавай main.py / FastAPI / "
+        "SQLite / service_account.json / Google Sheets — даже если так в ТЗ. Только статические файлы сайта.\n\n"
         "Рабочий цикл:\n"
         "1. list_files — посмотри что уже есть.\n"
         "2. write_file — создай каждый файл сайта (index.html, css/style.css, js/script.js, доп. страницы) "
         "с ПОЛНЫМ кодом. Путь НИКОГДА не оставляй пустым.\n"
-        "3. Опубликуй сайт целиком: use_integration('website','publish_site',{directory:'site', title:'...'}).\n"
+        "3. Готово — офис опубликует сайт сам, как только файлы в site/ записаны "
+        "(publish_site вызывать не обязательно).\n"
         "КРИТИЧНО: делай настоящий сайт из нескольких файлов и папок, а не одну страницу-заглушку."
     ),
     "marketer": (
@@ -150,7 +173,10 @@ ROLE_PROMPTS = {
         "они уже есть, смотри list_integrations и вызывай напрямую.\n"
         "ВАЖНО: Если launch_bot вернул 'ЗАПУЩЕН' или 'enabled' или 'polling' — бот реально работает. "
         "ЗАДАЧА ВЫПОЛНЕНА. Напиши краткий итог и ОСТАНАВЛИВАЙСЯ — НЕ пиши код, НЕ создавай файлы, "
-        "НЕ ищи альтернативы. Код в workspace НЕ нужен если бот запущен через launch_bot.\n"
+        "НЕ ищи альтернативы, НЕ перезапускай бот повторно. Код в workspace НЕ нужен если бот запущен.\n"
+        "🚫 НЕ публикуй сайты сам (это делает дизайнер) и НЕ настраивай Google Sheets для лидов: "
+        "заявки и с бота, и с сайта УЖЕ собираются в раздел «Лиды» автоматически. Google Sheets — "
+        "только если пользователь явно попросил выгрузку туда.\n"
         "Никогда не проси пользователя делать ручную работу в сервисе — делай через API сам."
     ),
 }
@@ -167,6 +193,28 @@ _ASK_USER_TOOL = {
                 "question": {"type": "string", "description": "Вопрос пользователю"},
             },
             "required": ["question"],
+        },
+    },
+}
+
+# Инструмент: СПРОСИТЬ коллегу и сразу получить ответ (синхронная консультация)
+_ASK_COLLEAGUE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "ask_colleague",
+        "description": "Задать КОНКРЕТНЫЙ вопрос коллеге нужной роли и СРАЗУ получить ответ "
+                       "(он отвечает на основе своей работы и контекста). Используй, когда тебе "
+                       "нужен вход другого специалиста: текст/оффер у marketer, данные у analyst, "
+                       "оценка дизайна у designer, тех-проверка у developer, проектное решение у architect. "
+                       "Это не передача задачи — это короткая консультация по делу.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "Роль коллеги: marketer, designer, developer, "
+                         "analyst, architect, integrator, salesman, researcher"},
+                "question": {"type": "string", "description": "Конкретный вопрос (одно-два предложения)"},
+            },
+            "required": ["role", "question"],
         },
     },
 }
@@ -471,7 +519,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
     base = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.")
     skill_line = f"\n\nТвоя специализация в этом проекте: {skill}" if skill else ""
     # Собираем системный промпт: роль + специализация + бриф + память + правила автономности + межагентный суффикс
-    system = base + skill_line + _brief_context() + memory_module.context_block() + _AUTONOMY_RULES + _INTER_AGENT_SUFFIX
+    system = (base + skill_line + _brief_context() + memory_module.context_block()
+              + _AUTONOMY_RULES + _TEAM_PREAMBLE + _INTER_AGENT_SUFFIX)
 
     async def _handle_request_research(args: dict) -> str:
         question = args.get("question", "")
@@ -522,6 +571,40 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                     f"не спрашивайте пользователя повторно."
                 )
         return answer
+
+    async def _handle_ask_colleague(args: dict) -> str:
+        """Синхронная консультация: коллега нужной роли отвечает на вопрос ОДНИМ
+        бесшумным LLM-вызовом (без инструментов → без рекурсии и циклов)."""
+        col_role = (args.get("role") or "").strip()
+        question = (args.get("question") or "").strip()
+        if not col_role or not question:
+            return "Укажи роль коллеги и конкретный вопрос."
+        if col_role == role:
+            return "Это твоя же роль — реши сам, без консультации."
+        # Находим коллегу этой роли (или отвечаем «от лица роли», если он ещё не нанят)
+        colleague = next((a for a in registry_module.all_agents() if a.role == col_role), None)
+        col_id = colleague.agent_id if colleague else f"{col_role}_1"
+        col_work = state.result_for(col_id) if colleague else ""
+        col_base = ROLE_PROMPTS.get(col_role, f"Ты — {col_role} в AI-офисе.")
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"💬 спрашиваю {col_role}: {question[:60]}"})
+        sys = (col_base + _brief_context()
+               + ("\n\n=== ТВОЯ ПОСЛЕДНЯЯ РАБОТА (опирайся на неё) ===\n" + col_work[:1500]
+                  if col_work else "")
+               + "\n\nКоллега по команде задаёт тебе вопрос. Ответь КОРОТКО, конкретно и по делу "
+                 "(без воды), чтобы он сразу мог использовать ответ в работе.")
+        try:
+            answer = await llm.run_agent(
+                system=sys, user=question,
+                model=models_module.for_agent(col_id),
+                max_tokens=600, use_search=False, agent_id=col_id,
+            )
+        except Exception as e:
+            return f"Коллега {col_role} не смог ответить: {str(e)[:80]}. Реши сам."
+        answer = (answer or "").strip() or "Коллега не дал содержательного ответа — реши сам."
+        await publish({"type": "speech", "agent_id": col_id,
+                       "text": f"💬 → {agent_id}: {answer[:80]}"})
+        return f"Ответ {col_role}: {answer}"
 
     async def _handle_send_message(args: dict) -> str:
         to_agent_id = args.get("to_agent_id", "")
@@ -701,7 +784,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             use_search=True,
             publish=_publish_and_log,
             agent_id=agent_id,
-            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _SEND_MESSAGE_TOOL,
+            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _ASK_COLLEAGUE_TOOL, _SEND_MESSAGE_TOOL,
                          _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
                          _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL,
                          _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
@@ -709,6 +792,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
+                "ask_colleague": _handle_ask_colleague,
                 "send_message": _handle_send_message,
                 "read_messages": _handle_read_messages,
                 "read_office_chat": _handle_read_office_chat,

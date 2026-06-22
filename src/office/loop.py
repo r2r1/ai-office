@@ -14,21 +14,27 @@ import asyncio
 import os
 import time
 
-from src.office import bus, registry, brief, state, milestones, org
+from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
 from src.saas import store as saas_store
 
+# Анти-цикл: подпись последнего решения лидера и счётчик повторов (per tenant+dept).
+_last_leader_sig: dict[str, tuple[str, int]] = {}
+_LEADER_REPEAT_LIMIT = 3  # столько одинаковых решений подряд → пауза/эскалация
+
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "10"))
 MANAGER_POLL = 5          # как часто менеджер ищет новых тенантов для запуска
-AGENT_COOLDOWN_SECS = 60
+AGENT_COOLDOWN_SECS = int(os.getenv("AGENT_COOLDOWN_SECS", "25"))  # антидребезг (живость)
 CEO_REASSESS_EVERY = 3    # CEO пересматривает структуру компании раз в N циклов (экономия токенов)
+MAX_THINK_SECS = int(os.getenv("AGENT_MAX_THINK_SECS", "240"))  # дольше → считаем зависшим
 
 # Состояние по тенантам
 _current_ms: dict[str, str] = {}        # tid -> id текущего этапа
 _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый цикл
 _office_tasks: dict[str, asyncio.Task] = {}
+_thinking_since: dict[str, float] = {}  # agent_id -> когда начал «думать» (watchdog)
 
 
 def _cur_ms() -> str:
@@ -98,6 +104,18 @@ async def _run_office(tid: str) -> None:
         milestones.set_business_stages(stages)
         await publish({"type": "system", "text": f"Директор разбил путь к цели на {len(stages)} этапов"})
 
+    # Граф конкретных задач (роль + зависимости + критерий) — для маршрутизации и параллелизма.
+    if not plan.is_generated():
+        goal = brief.get().get("goal", "") or brief.summary()
+        try:
+            tasks = await orchestrator.plan_tasks(strategy, goal, tech_design, publish)
+            if tasks:
+                plan.set_tasks(tasks)
+                await publish({"type": "system",
+                               "text": f"📋 Составлен план: {len(plan.all_tasks())} задач"})
+        except Exception as e:
+            await publish({"type": "error", "agent_id": "orchestrator_1", "text": str(e)[:100]})
+
     # ---- ЦИКЛЫ ----
     cycle = 0
     while True:
@@ -118,13 +136,55 @@ async def _run_office(tid: str) -> None:
                            "text": "Офис восстановлен. Директор продолжит управление в следующем цикле."})
             await asyncio.sleep(LOOP_INTERVAL)
             continue
+        await _heal_stuck_agents(publish)  # самолечение: сбросить зависших
         if not _has_actionable_move():
             await asyncio.sleep(LOOP_INTERVAL)
             continue
         await publish({"type": "system", "text": f"=== Рабочий цикл #{cycle} ==="})
         tech_design = architect.load()
-        await _orchestrate(strategy, publish, tech_design=tech_design, cycle=cycle)
+        try:
+            await _orchestrate(strategy, publish, tech_design=tech_design, cycle=cycle)
+        except Exception as e:
+            # Сбой одного цикла НЕ должен убивать офис (иначе менеджер рестартит его и
+            # плодит «Офис восстановлен»). Логируем и продолжаем следующим циклом.
+            import traceback
+            await publish({"type": "error", "agent_id": "orchestrator_1",
+                           "text": f"Сбой цикла: {str(e)[:150]}"})
+            traceback.print_exc()
         await asyncio.sleep(LOOP_INTERVAL)
+
+
+async def _heal_stuck_agents(publish) -> None:
+    """
+    Самолечение: агент «думает» дольше MAX_THINK_SECS — его задача зависла
+    (модель не ответила/застряла). Сбрасываем в idle, чтобы лидер переназначил.
+    """
+    now = time.time()
+    for aid, since in list(_thinking_since.items()):
+        if now - since > MAX_THINK_SECS:
+            _thinking_since.pop(aid, None)
+            registry.update_status(aid, "idle")
+            state.save_last_run(aid)  # короткий cooldown перед повтором
+            await publish({"type": "system",
+                           "text": f"🔧 {aid} завис (> {MAX_THINK_SECS}s) — сброшен, задача переназначится"})
+
+
+async def _publish_site_auto(publish) -> bool:
+    """
+    Авто-публикация сайта офисом: как только в site/ есть index.html — публикуем сами,
+    не дожидаясь, пока агент вызовет publish_site (он часто забывает/обрывается на
+    длинном выводе). «Написал HTML → сайт сразу живой».
+    """
+    sdir = critic.site_dir()
+    if sdir is None:
+        return False
+    tid = ctx.get_tenant()
+    title = (brief.get().get("goal", "") or "Сайт")[:60]
+    slug = sites.make_slug(title)
+    sites.save_dir(title, sdir, slug)
+    await publish({"type": "system",
+                   "text": f"🌐 Сайт опубликован: /site/{tid}/{slug} — форма собирает заявки в «Лиды»"})
+    return True
 
 
 def _dept_actionable(dept_id: str, now: float) -> bool:
@@ -182,6 +242,16 @@ async def _orchestrate(strategy: str, publish, tech_design: str = "", cycle: int
         await _hire_leader("tech", obj, publish)
         await publish({"type": "system", "text": "📂 Открыт «Технический отдел» (автостарт)"})
 
+    # ---- Параллелизм: открываем ВСЕ отделы, которых требует план задач ----
+    # (независимые ветки плана исполняются параллельно — как в реальной компании).
+    for dept_id in plan.departments_needed():
+        if dept_id not in org.open_departments():
+            obj = (goal or "")[:140]
+            org.open_department(dept_id, reason="нужен по плану задач", objective=obj)
+            await _hire_leader(dept_id, obj, publish)
+            await publish({"type": "system",
+                           "text": f"📂 Открыт «{org.catalog()[dept_id]['name']}» (по плану задач)"})
+
     # ---- Лидер-тир — по каждому открытому отделу с возможным ходом ----
     await _run_leaders(goal, ms, publish)
 
@@ -234,6 +304,17 @@ async def _hire_leader(dept_id: str, objective: str, publish) -> None:
                        "desk": rec.desk, "task": objective[:100]})
 
 
+def _free_worker_of_role(dept_id: str, role: str, now: float):
+    """Свободный (idle, не в cooldown) работник нужной роли в отделе — или None."""
+    for a in registry.members_of(dept_id):
+        if a.role != role or a.status == "thinking":
+            continue
+        if (now - state.last_run_for(a.agent_id)) < AGENT_COOLDOWN_SECS:
+            continue
+        return a
+    return None
+
+
 async def _run_leaders(goal: str, ms: list, publish) -> None:
     now = time.time()
     for dept_id in org.open_departments():
@@ -241,6 +322,41 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
         if not lead or not _dept_actionable(dept_id, now):
             continue
 
+        objective = org.state_of(dept_id).get("objective", "")
+        ready = plan.ready_for_department(dept_id) if plan.is_generated() else []
+
+        # ---- ДЕТЕРМИНИРОВАННЫЙ ПУТЬ (без LLM) — главный ускоритель ----
+        # План даёт конкретные задачи отдела — маршрутизируем сами, не дёргая модель
+        # лидера каждый цикл (в логе CTO сделал 119 пустых вызовов «жду»).
+        if ready:
+            member_roles = org.member_roles(dept_id)
+            handled = False
+            # 1) Назначаем первую готовую задачу, под которую есть свободный работник.
+            for t in ready:
+                free = _free_worker_of_role(dept_id, t.get("role", ""), now)
+                if free:
+                    task_txt = t.get("title", "")
+                    if t.get("done_criterion"):
+                        task_txt += f"\nКритерий готовности: {t['done_criterion']}"
+                    await _assign(free.agent_id, free.role, task_txt, publish,
+                                  department=dept_id, objective=objective)
+                    handled = True
+                    break
+            if handled:
+                continue
+            # 2) Никто не свободен — нанимаем недостающую роль под готовую задачу.
+            present = {a.role for a in registry.members_of(dept_id)}
+            for t in ready:
+                role = t.get("role", "")
+                if role in member_roles and role not in present:
+                    await _hire_and_run(role, t.get("title", f"Задачи {role}"),
+                                        publish, department=dept_id, manager=lead)
+                    handled = True
+                    break
+            # 3) Все нужные роли есть, но заняты — детерминированный wait без LLM.
+            continue
+
+        # ---- LLM-ПУТЬ — только когда план не даёт готовых задач (редко/неоднозначно) ----
         members = registry.members_of(dept_id)
         availability = {}
         for a in members:
@@ -248,8 +364,20 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
             availability[a.agent_id] = {"status": a.status, "on_cooldown": left > 0,
                                         "cooldown_secs": int(left)}
 
-        objective = org.state_of(dept_id).get("objective", "")
-        decision = await leaders.decide(dept_id, goal, objective, ms, availability, publish)
+        decision = await leaders.decide(dept_id, goal, objective, ms, availability, publish,
+                                        suggested_task=None)
+
+        # Анти-цикл: если лидер N раз подряд принимает то же решение — пауза + эскалация к CEO.
+        sig = f"{decision.get('action')}|{decision.get('agent_id','')}|{decision.get('role','')}"
+        key = f"{ctx.get_tenant()}:{dept_id}"
+        prev_sig, cnt = _last_leader_sig.get(key, ("", 0))
+        cnt = cnt + 1 if sig == prev_sig else 1
+        _last_leader_sig[key] = (sig, cnt)
+        if cnt >= _LEADER_REPEAT_LIMIT and decision.get("action") != "assign":
+            await publish({"type": "system",
+                           "text": f"⚠ {lead}: решение повторяется {cnt}× — эскалация к CEO"})
+            _last_leader_sig[key] = (sig, 0)
+            continue  # пропускаем ход; CEO пересмотрит на следующем гейте
 
         report = decision.get("report", "")
         if report:
@@ -283,6 +411,7 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
 
     async def _job():
         registry.update_status(agent_id, "thinking")
+        _thinking_since[agent_id] = time.time()
         try:
             if role == "researcher":
                 result = await researcher.run_async(task, depth="quick", publish=publish, agent_id=agent_id)
@@ -293,14 +422,75 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 ctx_task = _task_with_context(role, task, skill, department=department, objective=objective)
                 fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
                 result = await fn()
+                # ---- Приёмка качества (критик) для сайтов: дизайнер/разработчик ----
+                if role in ("designer", "developer"):
+                    await _review_and_maybe_fix(role, agent_id, task, skill, department,
+                                                objective, publish)
             registry.update_status(agent_id, "done")
             state.save_last_run(agent_id)
             _attribute_result(agent_id, role, result)
+            # Живость: «сделал → отчитался» — короткий итог в ленту.
+            summary = (result or "").strip().replace("\n", " ")[:120]
+            if summary:
+                await publish({"type": "speech", "agent_id": agent_id, "text": f"✅ Готово: {summary}"})
         except Exception as e:
             await publish({"type": "error", "agent_id": agent_id, "text": str(e)[:100]})
             registry.update_status(agent_id, "idle")
+        finally:
+            _thinking_since.pop(agent_id, None)
 
     asyncio.create_task(_job())
+
+
+async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
+                                department: str, objective: str, publish) -> None:
+    """
+    Приёмка результата сайта: программные проверки → при проблемах ОДНА доработка.
+    Уроки сохраняются в память, выполненная задача плана отмечается готовой.
+    """
+    task_l = (task or "").lower()
+    site_related = any(w in task_l for w in ("сайт", "лендинг", "landing", "site", "страниц"))
+    files = [f["path"] for f in workspace.list_files()]
+    has_index = any(p == "index.html" or p.endswith("/index.html") for p in files)
+    if not (site_related or has_index):
+        # Не сайтовая задача — критик не применим; просто отмечаем задачу плана.
+        if plan.is_generated():
+            plan.mark_done_by_role(role)
+        return
+
+    # Сайт всегда публикуем САМИ — не ждём, пока агент вызовет publish_site
+    # (он часто забывает или обрывается на длинном выводе). Сайт сразу живой.
+    await _publish_site_auto(publish)
+
+    # Приёмка = программные проверки + «зрячая» оценка результата LLM-ревьюером.
+    goal = brief.get().get("goal", "") or brief.summary()
+    problems = critic.check_site()
+    try:
+        problems = problems + await critic.review_site_llm(goal)
+    except Exception:
+        pass
+    if not problems:
+        if plan.is_generated():
+            done_id = plan.mark_done_by_role(role)
+            if done_id:
+                await publish({"type": "system", "text": f"✅ Задача плана {done_id} принята"})
+        return
+
+    # Есть проблемы — сохраняем урок и даём РОВНО ОДНУ доработку, потом ДВИГАЕМСЯ дальше
+    # (никаких бесконечных переприёмок — это и есть «затуп»).
+    for p in problems:
+        lessons.add(role, f"Сайт: {p}")
+    feedback = critic.critique_text(problems)
+    await publish({"type": "speech", "agent_id": agent_id, "text": f"🔁 {feedback[:120]}"})
+    fix_task = (f"{task}\n\n{feedback}\n\nИсправь перечисленное прямо в файлах site/. "
+                f"Публиковать НЕ нужно — офис опубликует сам. Не начинай с нуля.")
+    ctx_task = _task_with_context(role, fix_task, skill, department=department, objective=objective)
+    fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+    await fn()
+    await _publish_site_auto(publish)  # перепубликуем исправленную версию
+    # ВСЕГДА закрываем задачу плана — лимит одна доработка, дальше следующая задача.
+    if plan.is_generated():
+        plan.mark_done_by_role(role)
 
 
 def _task_with_context(role: str, task: str, skill: str = "",
@@ -318,10 +508,11 @@ def _task_with_context(role: str, task: str, skill: str = "",
             dept_line += f"Цель отдела от CEO: {objective}\n"
     tdd = architect.load()
     tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:1200]}\n" if tdd else ""
+    lessons_section = lessons.context_block(role)  # память: уроки прошлых задач этой роли
     return (
         f"Цель компании: {goal}\n{stage}{dept_line}{skill_line}"
         f"Твоя задача от руководителя: {task}\n"
-        f"{tdd_section}\n"
+        f"{tdd_section}{lessons_section}\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
         f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
     )
