@@ -1,15 +1,16 @@
 import type { Section } from "../types"
+import { Icon } from "./icons"
 
 const MERCURY_AMBER = "#ffac2e"
 
-const NAV: Array<{ id: Section; icon: string; label: string; group: "top" | "bottom" }> = [
-  { id: "office",      icon: "⊞",  label: "Офис",    group: "top" },
-  { id: "project",     icon: "◉",  label: "Проект",  group: "top" },
-  { id: "team",        icon: "◈",  label: "Команда", group: "top" },
-  { id: "chats",       icon: "◻",  label: "Чаты",    group: "top" },
-  { id: "results",     icon: "⊟",  label: "Итоги",   group: "top" },
-  { id: "connections", icon: "🔌", label: "Доступы", group: "bottom" },
-  { id: "account",     icon: "⊙",  label: "Аккаунт", group: "bottom" },
+const NAV: Array<{ id: Section; label: string; group: "top" | "bottom" }> = [
+  { id: "office",      label: "Офис",    group: "top" },
+  { id: "project",     label: "Проект",  group: "top" },
+  { id: "team",        label: "Команда", group: "top" },
+  { id: "chats",       label: "Чаты",    group: "top" },
+  { id: "results",     label: "Итоги",   group: "top" },
+  { id: "connections", label: "Доступы", group: "bottom" },
+  { id: "account",     label: "Аккаунт", group: "bottom" },
 ]
 
 interface NavRailProps {
@@ -21,24 +22,23 @@ interface NavRailProps {
 export function NavRail({ active, onChange, orientation = "vertical" }: NavRailProps) {
   if (orientation === "horizontal") {
     return (
-      <div style={{
-        display: "flex", gap: 2, background: "var(--surface)", border: "1px solid var(--hairline)",
-        borderRadius: "var(--radius-pill)", padding: "4px 6px",
-        backdropFilter: "blur(28px) saturate(160%)", overflowX: "auto",
+      <div className="glass" style={{
+        display: "flex", gap: 2, borderRadius: "var(--radius-pill)", padding: "5px 7px", overflowX: "auto",
       }}>
         {NAV.map(item => {
           const isActive = item.id === active
           return (
             <button key={item.id} onClick={() => onChange(item.id)}
               style={{
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-                padding: "5px 10px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                padding: "6px 11px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
                 background: isActive ? "var(--hairline-strong)" : "transparent",
-                color: isActive ? "var(--text)" : "var(--muted)",
-                transition: "all 0.15s", fontFamily: "var(--font-sans)", minWidth: 48,
+                color: isActive ? MERCURY_AMBER : "var(--muted)",
+                transition: "all 0.15s", fontFamily: "var(--font-sans)", minWidth: 50,
               }}>
-              <span style={{ fontSize: 13, lineHeight: 1, color: isActive ? MERCURY_AMBER : "inherit" }}>{item.icon}</span>
-              <span style={{ fontSize: 8.5, letterSpacing: "0.5px", textTransform: "uppercase", fontWeight: isActive ? 500 : 400 }}>
+              <Icon name={item.id} size={17} />
+              <span style={{ fontSize: 8.5, letterSpacing: "0.4px", textTransform: "uppercase",
+                fontWeight: isActive ? 500 : 400, color: isActive ? "var(--text)" : "inherit" }}>
                 {item.label}
               </span>
             </button>
@@ -52,14 +52,15 @@ export function NavRail({ active, onChange, orientation = "vertical" }: NavRailP
   const bottom = NAV.filter(n => n.group === "bottom")
 
   return (
-    <nav style={{
-      width: 72, flexShrink: 0, display: "flex", flexDirection: "column",
-      justifyContent: "space-between", paddingTop: 6, paddingBottom: 8,
+    <nav className="glass" style={{
+      width: 76, flexShrink: 0, display: "flex", flexDirection: "column",
+      justifyContent: "space-between", padding: "12px 8px",
+      borderRadius: "var(--radius-xl)",
     }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {top.map(item => <NavItem key={item.id} item={item} active={active} onChange={onChange} />)}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {bottom.map(item => <NavItem key={item.id} item={item} active={active} onChange={onChange} />)}
       </div>
     </nav>
@@ -71,25 +72,25 @@ function NavItem({ item, active, onChange }: { item: typeof NAV[0]; active: Sect
   return (
     <button onClick={() => onChange(item.id)}
       style={{
-        display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-        padding: "9px 6px", borderRadius: "var(--radius-md)", border: "none", cursor: "pointer",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+        padding: "10px 4px", borderRadius: "var(--radius-md)", border: "none", cursor: "pointer",
         background: isActive ? "var(--hairline-soft)" : "transparent",
-        color: isActive ? "var(--text)" : "var(--muted)",
+        color: isActive ? MERCURY_AMBER : "var(--muted)",
         position: "relative", transition: "all 0.15s", fontFamily: "var(--font-sans)", width: "100%",
       }}
       onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "var(--surface-soft)" }}
       onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent" }}>
       {isActive && (
         <span style={{
-          position: "absolute", left: 0, top: "22%", bottom: "22%", width: 3,
+          position: "absolute", left: -8, top: "24%", bottom: "24%", width: 3,
           borderRadius: "0 3px 3px 0",
           background: "linear-gradient(180deg, #a0e0ab, #ffac2e 50%, #a52d25)",
         }} />
       )}
-      <span style={{ fontSize: 15, lineHeight: 1, color: isActive ? MERCURY_AMBER : "inherit" }}>{item.icon}</span>
+      <Icon name={item.id} size={19} strokeWidth={isActive ? 1.9 : 1.7} />
       <span style={{
-        fontSize: 8.5, letterSpacing: "0.5px", textTransform: "uppercase",
-        fontWeight: isActive ? 500 : 400, lineHeight: 1,
+        fontSize: 8.5, letterSpacing: "0.4px", textTransform: "uppercase",
+        fontWeight: isActive ? 500 : 400, lineHeight: 1, color: isActive ? "var(--text)" : "inherit",
       }}>{item.label}</span>
     </button>
   )

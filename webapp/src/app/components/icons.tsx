@@ -1,0 +1,81 @@
+import type { ReactNode } from "react"
+
+/* Линейные иконки навигации — монохром, stroke=currentColor.
+   Один источник истины; никаких эмодзи/символов-заглушек. */
+const PATHS: Record<string, ReactNode> = {
+  // Офис — дашборд 2×2
+  office: (
+    <>
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+    </>
+  ),
+  // Проект — канбан-колонки
+  project: (
+    <>
+      <rect x="3" y="4" width="5" height="16" rx="1.2" />
+      <rect x="9.5" y="4" width="5" height="11" rx="1.2" />
+      <rect x="16" y="4" width="5" height="7" rx="1.2" />
+    </>
+  ),
+  // Команда — двое людей
+  team: (
+    <>
+      <circle cx="9" cy="7.5" r="3.2" />
+      <path d="M3.5 20a5.5 5.5 0 0 1 11 0" />
+      <path d="M16 4.8a3 3 0 0 1 0 5.4" />
+      <path d="M17.5 14.3A5.5 5.5 0 0 1 20.5 20" />
+    </>
+  ),
+  // Чаты — пузырь сообщения
+  chats: (
+    <path d="M20 11.5a7.5 7.5 0 0 1-10.6 6.84L4 20l1.66-5.4A7.5 7.5 0 1 1 20 11.5z" />
+  ),
+  // Итоги — столбчатая диаграмма
+  results: (
+    <>
+      <path d="M3.5 20.5h17" />
+      <rect x="6" y="13" width="3" height="7" rx="0.7" />
+      <rect x="10.5" y="8" width="3" height="12" rx="0.7" />
+      <rect x="15" y="15" width="3" height="5" rx="0.7" />
+    </>
+  ),
+  // Доступы — вилка/разъём
+  connections: (
+    <>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2.5" />
+      <path d="M15 8V2.5" />
+      <path d="M6 8h12v4.5a6 6 0 0 1-12 0z" />
+    </>
+  ),
+  // Аккаунт — пользователь в круге
+  account: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="10" r="3.2" />
+      <path d="M6.2 18.8a6 6 0 0 1 11.6 0" />
+    </>
+  ),
+}
+
+export interface IconProps {
+  name: keyof typeof PATHS | string
+  size?: number
+  strokeWidth?: number
+  color?: string
+}
+
+export function Icon({ name, size = 19, strokeWidth = 1.7, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: "block", flexShrink: 0 }}>
+      {PATHS[name] ?? null}
+    </svg>
+  )
+}
+
+export type IconName = keyof typeof PATHS

@@ -57,7 +57,7 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
         backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
       }}>
         <motion.div style={{ fontSize, lineHeight: 1, marginBottom: titleMargin, fontFamily: "var(--font-display)" }}>
-          The <em style={{ color: "var(--muted)", fontStyle: "italic" }}>team</em>
+          Команда 
         </motion.div>
         <motion.div style={{ height: subHeight, opacity: subOpacity, overflow: "hidden" }}>
           <div style={{ fontSize: 13, color: "var(--muted)", whiteSpace: "nowrap" }}>
