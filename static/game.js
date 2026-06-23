@@ -1566,10 +1566,43 @@ function escapeHtml(s) {
 
 // ---- Views ----
 let _currentView = "office";
+// Разделы карты сайта: один пункт навигации = несколько вкладок (под-навигация).
+const SECTIONS = {
+  office:    ["office"],
+  dashboard: ["tasks", "progress", "leads", "results"],
+  team:      ["team", "chat"],
+  assets:    ["folders", "connections"],
+  events:    ["events"],
+  account:   ["account"],
+};
+const SUBLABELS = { tasks: "Задачи", progress: "Этапы", leads: "Лиды", results: "Итоги",
+  team: "Люди", chat: "Чаты", folders: "Файлы", connections: "Доступы" };
+const SUBBADGE = { tasks: "badge-tasks", leads: "badge-leads", results: "badge-results", chat: "badge-chat", folders: "badge-folders" };
+const VIEW_SECTION = {};
+Object.entries(SECTIONS).forEach(([s, vs]) => vs.forEach(v => { VIEW_SECTION[v] = s; }));
+
+function renderSubnav(section, current) {
+  const bar = document.getElementById("subnav");
+  if (!bar) return;
+  const views = SECTIONS[section] || [];
+  if (views.length < 2) { bar.classList.remove("show"); bar.innerHTML = ""; return; }
+  bar.innerHTML = views.map(v => {
+    const bid = SUBBADGE[v];
+    const badgeEl = document.getElementById(bid);
+    const bval = badgeEl && badgeEl.textContent ? badgeEl.textContent : "";
+    const badge = bval ? `<span class="sn-badge" style="display:inline-block">${bval}</span>` : "";
+    return `<div class="subnav-item${v === current ? " active" : ""}" data-view="${v}">${SUBLABELS[v] || v}${badge}</div>`;
+  }).join("");
+  bar.classList.add("show");
+  bar.querySelectorAll(".subnav-item").forEach(el => el.addEventListener("click", () => switchView(el.dataset.view)));
+}
+
 function switchView(name) {
   _currentView = name;
-  document.querySelectorAll(".nav-item").forEach(t => t.classList.toggle("active", t.dataset.view === name));
+  const section = VIEW_SECTION[name] || name;
+  document.querySelectorAll(".nav-item").forEach(t => t.classList.toggle("active", t.dataset.section === section));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+  renderSubnav(section, name);
   if (name === "office") {
     resize();
     syncAgentTargets();
