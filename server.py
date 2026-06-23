@@ -117,17 +117,9 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    # Новый React-фронт (Ф4): перенаправляем на /webapp/
-    _webapp_idx = Path("static/webapp/index.html")
-    if _webapp_idx.is_file():
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse("/webapp/", status_code=302)
-    return Path("static/index.html").read_text(encoding="utf-8")
-
-
-@app.get("/classic", response_class=HTMLResponse)
-async def classic():
-    return Path("static/index.html").read_text(encoding="utf-8")
+    # React SPA на /webapp/
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/webapp/", status_code=302)
 
 
 # ============================================================
