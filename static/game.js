@@ -542,6 +542,19 @@ function connectSSE() {
 function handleEvent(event) {
   const hist = !!event.historical;  // исторические события — тихо, без переключений
 
+  // Доска задач: обновляем при изменениях плана/задач (assign/готово/делегирование)
+  if (!hist && (event.type === "system" || event.type === "task_done")) {
+    const txt = event.text || "";
+    if (/Задач|Доск|план|📋|📌|Лиды|опубликован|🌐|🎯/i.test(txt) || event.type === "task_done") {
+      if (_currentView === "tasks") loadTasks();
+      else { const b = document.getElementById("badge-tasks"); if (b) b.style.display = "block"; }
+      if (_currentView === "office") loadOfficePulse();
+    }
+  }
+  else if (!hist && event.type === "lead_captured" && _currentView === "office") {
+    loadOfficePulse();
+  }
+
   if (event.type === "hired") {
     spawnAgent(event.agent_id, event.role, event.desk, event.task || "", event.skill || "");
     if (!hist) {
@@ -1570,6 +1583,12 @@ function switchView(name) {
   if (name === "code" || name === "folders") {
     loadFolders();
   }
+  if (name === "tasks") {
+    loadTasks();
+  }
+  if (name === "office") {
+    loadOfficePulse();
+  }
   if (name === "chat") {
     loadThreadList();
     if (!activeThread) selectThread("office");
@@ -1956,6 +1975,81 @@ function _refreshFoldersOnWrite(path) {
 }
 
 async function loadFiles() { return loadFolders(); } // обратная совместимость
+
+// ============================================================
+// ДОСКА ЗАДАЧ (to-do команды)
+// ============================================================
+async function loadOfficePulse() {
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  try {
+    const [pl, ld, st, co] = await Promise.all([
+      fetch("/api/plan").then(r => r.json()).catch(() => ({})),
+      fetch("/api/leads").then(r => r.json()).catch(() => ({})),
+      fetch("/api/sites").then(r => r.json()).catch(() => ({})),
+      fetch("/api/costs").then(r => r.json()).catch(() => ({})),
+    ]);
+    const p = (pl && pl.progress) || { done: 0, total: 0 };
+    set("op-tasks", `${p.done}/${p.total || 0}`);
+    set("op-leads", String(((ld && ld.leads) || []).length));
+    set("op-sites", String(((st && st.sites) || []).length));
+    set("op-cost", fmtCost((co && co.total && co.total.cost) || 0));
+  } catch {}
+}
+
+async function loadTasks() {
+  let data = { tasks: [], progress: { done: 0, total: 0 } };
+  try {
+    const r = await apiFetch("/api/plan");
+    data = await r.json();
+  } catch {}
+  renderTasks(data);
+  const badge = document.getElementById("badge-tasks");
+  const todo = (data.tasks || []).filter(t => t.status !== "done").length;
+  if (badge) { badge.textContent = todo || ""; badge.style.display = todo ? "block" : "none"; }
+}
+
+function _taskRoleName(role) { return ROLE_NAMES[role] || role || "—"; }
+function _agentNum(aid) { const m = (aid || "").match(/_(\d+)$/); return m ? m[1] : ""; }
+
+function renderTasks(data) {
+  const board = document.getElementById("tasks-board");
+  const noTasks = document.getElementById("no-tasks");
+  const prog = document.getElementById("tasks-progress");
+  if (!board) return;
+  const tasks = data.tasks || [];
+  if (prog) {
+    const p = data.progress || { done: 0, total: 0 };
+    prog.textContent = tasks.length ? `Выполнено ${p.done} из ${p.total} (${p.percent || 0}%)` : "Доска задач команды";
+  }
+  if (!tasks.length) {
+    board.innerHTML = "";
+    if (noTasks) { board.appendChild(noTasks); noTasks.style.display = "block"; }
+    return;
+  }
+  const cols = [
+    { key: "pending", label: "☐ В очереди", cls: "" },
+    { key: "in_progress", label: "⟳ В работе", cls: "doing" },
+    { key: "done", label: "✓ Готово", cls: "done" },
+  ];
+  board.innerHTML = "";
+  cols.forEach(col => {
+    const items = tasks.filter(t => t.status === col.key);
+    const div = document.createElement("div");
+    div.className = "tb-col";
+    div.innerHTML = `<h3>${col.label}<span class="tb-count">${items.length}</span></h3>`;
+    items.forEach(t => {
+      const card = document.createElement("div");
+      card.className = "tb-card " + col.cls;
+      const assignee = t.assignee ? `👤 ${_taskRoleName(t.role)} ${_agentNum(t.assignee)}` : `${_taskRoleName(t.role)}`;
+      const req = t.requested_by ? `<span class="tc-req">← от ${escapeHtml(t.requested_by)}</span>` : "";
+      card.innerHTML = `<div class="tc-title">${escapeHtml(t.title)}</div>`
+        + `<div class="tc-meta"><span class="tc-role">${escapeHtml(assignee)}</span>${req}</div>`
+        + (t.done_criterion && col.key !== "done" ? `<div class="tc-crit">✅ ${escapeHtml(t.done_criterion)}</div>` : "");
+      div.appendChild(card);
+    });
+    board.appendChild(div);
+  });
+}
 
 // ============================================================
 // УЧЁТ ТОКЕНОВ И СТОИМОСТИ (ROI)
@@ -2498,6 +2592,10 @@ window.addEventListener("load", () => {
   // Расход токенов/стоимость
   loadCosts();
   setInterval(loadCosts, 20000);
+
+  // Пульс компании в офисе (дом)
+  loadOfficePulse();
+  setInterval(() => { if (_currentView === "office") loadOfficePulse(); }, 20000);
 
   // Код проекта
   loadFiles();

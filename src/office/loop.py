@@ -35,6 +35,43 @@ _current_ms: dict[str, str] = {}        # tid -> id текущего этапа
 _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый цикл
 _office_tasks: dict[str, asyncio.Task] = {}
 _thinking_since: dict[str, float] = {}  # agent_id -> когда начал «думать» (watchdog)
+_agent_task: dict[str, str] = {}        # agent_id -> id задачи плана, которую он сейчас делает
+_completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
+
+
+def _fallback_plan(goal: str) -> list[dict]:
+    """Детерминированный план под типовой результат, когда LLM-генерация плана недоступна.
+    Гарантирует, что офис всегда plan-driven (а не уходит в LLM-хаос)."""
+    g = (goal or "").lower()
+    if any(w in g for w in ("бот", "telegram", "телеграм", "бота")):
+        return [
+            {"id": "t1", "title": "Подготовить тексты, услуги и приветствие для бота",
+             "role": "marketer", "deps": [], "done_criterion": "готовы тексты и список услуг"},
+            {"id": "t2", "title": "Настроить и запустить Telegram-бота сбора заявок",
+             "role": "integrator", "deps": ["t1"], "done_criterion": "бот запущен через launch_bot"},
+        ]
+    # сайт/лендинг — основной кейс
+    return [
+        {"id": "t1", "title": "Подготовить оффер и продающие тексты для всех блоков лендинга",
+         "role": "marketer", "deps": [], "done_criterion": "готов копирайт: оффер, выгоды, FAQ, CTA"},
+        {"id": "t2", "title": "Собрать конверсионный многостраничный лендинг в site/ с формой заявки",
+         "role": "designer", "deps": ["t1"],
+         "done_criterion": "site/index.html + страницы опубликованы, форма шлёт на /api/site-lead"},
+        {"id": "t3", "title": "Проверить формы/CTA и довести лендинг до рабочего состояния",
+         "role": "developer", "deps": ["t2"], "done_criterion": "формы работают, сайт опубликован и собирает лиды"},
+    ]
+
+
+def _engagement_complete() -> bool:
+    """Все задачи доски выполнены → цель клиента достигнута (надёжнее бизнес-этапов).
+    Если появилась новая задача (делегирование/указание) — сбрасываем флаг анонса."""
+    if not plan.is_generated():
+        return False
+    p = plan.progress()
+    complete = p["total"] > 0 and p["done"] >= p["total"]
+    if not complete:
+        _completion_announced.pop(ctx.get_tenant(), None)  # появилась работа — снова активны
+    return complete
 
 
 def _cur_ms() -> str:
@@ -105,21 +142,46 @@ async def _run_office(tid: str) -> None:
         await publish({"type": "system", "text": f"Директор разбил путь к цели на {len(stages)} этапов"})
 
     # Граф конкретных задач (роль + зависимости + критерий) — для маршрутизации и параллелизма.
+    # КРИТИЧНО: офис должен быть plan-driven ВСЕГДА. Если LLM-генерация плана недоступна
+    # (слабая модель, 429-rate-limit, битый JSON) — берём детерминированный фолбэк-план,
+    # иначе автономный слой (доска/завершение/маршрутизация) обходится и офис ходит кругами.
     if not plan.is_generated():
         goal = brief.get().get("goal", "") or brief.summary()
+        tasks = []
         try:
             tasks = await orchestrator.plan_tasks(strategy, goal, tech_design, publish)
-            if tasks:
-                plan.set_tasks(tasks)
-                await publish({"type": "system",
-                               "text": f"📋 Составлен план: {len(plan.all_tasks())} задач"})
         except Exception as e:
             await publish({"type": "error", "agent_id": "orchestrator_1", "text": str(e)[:100]})
+        if not tasks:
+            tasks = _fallback_plan(goal)
+            await publish({"type": "system",
+                           "text": "📋 План собран по умолчанию (LLM-генерация недоступна)"})
+        plan.set_tasks(tasks)
+        await publish({"type": "system",
+                       "text": f"📋 Составлен план: {len(plan.all_tasks())} задач"})
 
     # ---- ЦИКЛЫ ----
     cycle = 0
     while True:
         cycle += 1
+        # Завершение по ДОСКЕ: все задачи плана сделаны → цель клиента достигнута.
+        # Это надёжнее «бизнес-этапов» (которые могут содержать недостижимую фантазию
+        # вроде «масштабирование до 1М») и не даёт офису ходить кругами после результата.
+        if _engagement_complete():
+            if not _completion_announced.get(tid):
+                _completion_announced[tid] = True
+                await _publish_site_auto(publish)  # убеждаемся, что результат опубликован
+                # Прогресс-бар на 100%: все бизнес-этапы помечаем выполненными.
+                for s in milestones.all_stages():
+                    if s.get("status") != "done":
+                        milestones.set_status(s["id"], "done")
+                await _set_progress_note("🎉 Цель достигнута — результат готов и собирает заявки. "
+                                         "Офис в режиме мониторинга.", publish)
+                await publish({"type": "system",
+                               "text": "🎉 Все задачи выполнены. Офис перешёл в режим ожидания: "
+                                       "результат готов, ждём заявки/новые указания."})
+            await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
+            continue
         if milestones.all_business_done():
             await _set_progress_note("🎉 Все этапы пройдены — офис в режиме ожидания", publish)
             await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
@@ -165,6 +227,9 @@ async def _heal_stuck_agents(publish) -> None:
             _thinking_since.pop(aid, None)
             registry.update_status(aid, "idle")
             state.save_last_run(aid)  # короткий cooldown перед повтором
+            tid = _agent_task.pop(aid, None)
+            if tid and plan.is_generated():
+                plan.revert(tid)  # доска: вернуть зависшую задачу в очередь
             await publish({"type": "system",
                            "text": f"🔧 {aid} завис (> {MAX_THINK_SECS}s) — сброшен, задача переназначится"})
 
@@ -188,7 +253,10 @@ async def _publish_site_auto(publish) -> bool:
 
 
 def _dept_actionable(dept_id: str, now: float) -> bool:
-    """Есть ли в отделе ход: свободный работник или не хватает роли отдела."""
+    """Есть ли в отделе ход. Когда план сгенерирован — отдел активен ТОЛЬКО если у него
+    есть готовая задача (иначе простаивает, цикл не крутится вхолостую)."""
+    if plan.is_generated() and not plan.ready_for_department(dept_id):
+        return False
     worker_roles = set(org.member_roles(dept_id))  # роли работников (без лидера)
     members = registry.members_of(dept_id)
     for a in members:
@@ -206,8 +274,29 @@ def _has_actionable_move() -> bool:
     open_depts = org.open_departments()
     if not open_depts:
         return True
+    # Есть задача плана в ещё НЕ открытом отделе → нужен ход CEO, чтобы открыть его
+    # (иначе дедлок: открытые отделы доделали своё и спят, а новый отдел не открывается).
+    if plan.is_generated():
+        if any(d not in open_depts for d in plan.departments_needed()):
+            return True
+        # Есть неустранимые «висячие» задачи (роль без отдела) → нужен ход, чтобы их закрыть.
+        if _has_orphan_tasks():
+            return True
     now = time.time()
     return any(_dept_actionable(did, now) for did in open_depts)
+
+
+def _has_orphan_tasks() -> bool:
+    """Есть ли pending-задачи, которые НЕ обслуживает ни один отдел (роль без отдела —
+    например analyst/researcher). Такие нельзя выполнить через отделы → офис завис бы."""
+    servable = set()
+    for did in org.catalog():
+        servable |= set(org.member_roles(did))
+    for t in plan.all_tasks():
+        if t.get("status") in ("pending", "in_progress") and t.get("role") not in servable \
+                and not t.get("department"):
+            return True
+    return False
 
 
 async def _set_progress_note(note: str, publish) -> None:
@@ -224,6 +313,20 @@ async def _orchestrate(strategy: str, publish, tech_design: str = "", cycle: int
     """
     goal = brief.get().get("goal", "") or brief.summary()
     ms = milestones.all_stages()
+
+    # ---- Висячие задачи: роль без отдела (analyst/researcher/неизвестная) не обслуживается
+    # отделами → авто-закрываем, чтобы офис не завис на недостижимой задаче и мог завершиться.
+    if plan.is_generated() and _has_orphan_tasks():
+        servable = set()
+        for did in org.catalog():
+            servable |= set(org.member_roles(did))
+        for t in plan.all_tasks():
+            if t.get("status") in ("pending", "in_progress") and not t.get("department") \
+                    and t.get("role") not in servable:
+                plan.complete(t["id"])
+                await publish({"type": "system",
+                               "text": f"⏭ Задача {t['id']} ({t.get('role','?')}) пропущена — "
+                                       f"роль не входит в отделы, не блокирует сдачу"})
 
     # ---- CEO-тир (гейт по необходимости — экономия токенов) ----
     need_ceo = (not org.open_departments()) or (cycle % CEO_REASSESS_EVERY == 0)
@@ -325,6 +428,15 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
         objective = org.state_of(dept_id).get("objective", "")
         ready = plan.ready_for_department(dept_id) if plan.is_generated() else []
 
+        # Лидер ОТСЛЕЖИВАЕТ доску своего отдела (видимо в ленте и в задаче лидера).
+        if plan.is_generated():
+            summary = plan.board_summary(dept_id)
+            sig_key = f"board:{ctx.get_tenant()}:{dept_id}"
+            if _last_leader_sig.get(sig_key, ("", 0))[0] != summary:
+                _last_leader_sig[sig_key] = (summary, 0)
+                await publish({"type": "speech", "agent_id": lead,
+                               "text": f"📋 Доска отдела: {summary}"})
+
         # ---- ДЕТЕРМИНИРОВАННЫЙ ПУТЬ (без LLM) — главный ускоритель ----
         # План даёт конкретные задачи отдела — маршрутизируем сами, не дёргая модель
         # лидера каждый цикл (в логе CTO сделал 119 пустых вызовов «жду»).
@@ -337,9 +449,11 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                 if free:
                     task_txt = t.get("title", "")
                     if t.get("done_criterion"):
-                        task_txt += f"\nКритерий готовности: {t['done_criterion']}"
+                        task_txt += f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}"
+                    plan.assign(t["id"], free.agent_id)  # доска: взято в работу
+                    _agent_task[free.agent_id] = t["id"]
                     await _assign(free.agent_id, free.role, task_txt, publish,
-                                  department=dept_id, objective=objective)
+                                  department=dept_id, objective=objective, task_id=t["id"])
                     handled = True
                     break
             if handled:
@@ -349,14 +463,22 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
             for t in ready:
                 role = t.get("role", "")
                 if role in member_roles and role not in present:
-                    await _hire_and_run(role, t.get("title", f"Задачи {role}"),
-                                        publish, department=dept_id, manager=lead)
+                    crit = f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}" if t.get("done_criterion") else ""
+                    await _hire_and_run(role, t.get("title", f"Задачи {role}") + crit,
+                                        publish, department=dept_id, manager=lead, task_id=t["id"])
                     handled = True
                     break
             # 3) Все нужные роли есть, но заняты — детерминированный wait без LLM.
             continue
 
-        # ---- LLM-ПУТЬ — только когда план не даёт готовых задач (редко/неоднозначно) ----
+        # План — ЕДИНСТВЕННЫЙ источник работы. Если он сгенерирован, но готовых задач для
+        # отдела нет (всё сделано или ждут зависимостей) — отдел ПРОСТАИВАЕТ. Лидер НЕ
+        # выдумывает работу через LLM (раньше отсюда шли 128 пустых вызовов CTO и хаос:
+        # «придумай outreach», «собери 50 лидов» — недостижимые задачи по кругу).
+        if plan.is_generated():
+            continue
+
+        # ---- LLM-ПУТЬ — ТОЛЬКО пока план ещё не сгенерирован (ранний bootstrap) ----
         members = registry.members_of(dept_id)
         availability = {}
         for a in members:
@@ -405,7 +527,7 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
 
 
 async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
-                  department: str = "", objective: str = "") -> None:
+                  department: str = "", objective: str = "", task_id: str = "") -> None:
     await publish({"type": "speech", "agent_id": "orchestrator_1",
                    "text": f"→ Поручаю {agent_id}: {task[:70]}"})
 
@@ -429,6 +551,10 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             registry.update_status(agent_id, "done")
             state.save_last_run(agent_id)
             _attribute_result(agent_id, role, result)
+            # Доска: закрываем ИМЕННО эту задачу (а не «первую по роли»).
+            if task_id and plan.is_generated():
+                plan.complete(task_id)
+                await publish({"type": "system", "text": f"✅ Задача {task_id} выполнена"})
             # Живость: «сделал → отчитался» — короткий итог в ленту.
             summary = (result or "").strip().replace("\n", " ")[:120]
             if summary:
@@ -436,8 +562,11 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
         except Exception as e:
             await publish({"type": "error", "agent_id": agent_id, "text": str(e)[:100]})
             registry.update_status(agent_id, "idle")
+            if task_id and plan.is_generated():
+                plan.revert(task_id)  # упала — вернуть в очередь
         finally:
             _thinking_since.pop(agent_id, None)
+            _agent_task.pop(agent_id, None)
 
     asyncio.create_task(_job())
 
@@ -453,10 +582,7 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     files = [f["path"] for f in workspace.list_files()]
     has_index = any(p == "index.html" or p.endswith("/index.html") for p in files)
     if not (site_related or has_index):
-        # Не сайтовая задача — критик не применим; просто отмечаем задачу плана.
-        if plan.is_generated():
-            plan.mark_done_by_role(role)
-        return
+        return  # не сайтовая задача — критик не применим (задачу закроет _job)
 
     # Сайт всегда публикуем САМИ — не ждём, пока агент вызовет publish_site
     # (он часто забывает или обрывается на длинном выводе). Сайт сразу живой.
@@ -470,14 +596,10 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     except Exception:
         pass
     if not problems:
-        if plan.is_generated():
-            done_id = plan.mark_done_by_role(role)
-            if done_id:
-                await publish({"type": "system", "text": f"✅ Задача плана {done_id} принята"})
-        return
+        return  # сайт принят (задачу плана закроет _job по task_id)
 
     # Есть проблемы — сохраняем урок и даём РОВНО ОДНУ доработку, потом ДВИГАЕМСЯ дальше
-    # (никаких бесконечных переприёмок — это и есть «затуп»).
+    # (никаких бесконечных переприёмок — это и есть «затуп»). Задачу закроет _job.
     for p in problems:
         lessons.add(role, f"Сайт: {p}")
     feedback = critic.critique_text(problems)
@@ -488,9 +610,6 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
     await fn()
     await _publish_site_auto(publish)  # перепубликуем исправленную версию
-    # ВСЕГДА закрываем задачу плана — лимит одна доработка, дальше следующая задача.
-    if plan.is_generated():
-        plan.mark_done_by_role(role)
 
 
 def _task_with_context(role: str, task: str, skill: str = "",
@@ -557,7 +676,7 @@ async def _bootstrap(publish) -> str:
 
 
 async def _hire_and_run(role: str, task: str, publish, skill: str = "",
-                        department: str = "", manager: str = "") -> None:
+                        department: str = "", manager: str = "", task_id: str = "") -> None:
     existing_count = sum(1 for a in registry.all_agents() if a.role == role)
     agent_id = f"{role}_{existing_count + 1}"
     full_task = f"[Скилл: {skill}] {task}" if skill else task
@@ -566,8 +685,11 @@ async def _hire_and_run(role: str, task: str, publish, skill: str = "",
         await publish({"type": "hired", "agent_id": agent_id, "role": role,
                        "desk": rec.desk, "task": full_task[:100], "skill": skill})
         objective = org.state_of(department).get("objective", "") if department else ""
+        if task_id and plan.is_generated():
+            plan.assign(task_id, agent_id)
+            _agent_task[agent_id] = task_id
         await _assign(agent_id, role, task, publish, skill=skill,
-                      department=department, objective=objective)
+                      department=department, objective=objective, task_id=task_id)
     else:
         await publish({"type": "system", "text": f"Не удалось зарегистрировать агента {agent_id}"})
 

@@ -24,6 +24,21 @@ from src.core.search import web_search
 load_dotenv()
 
 
+def _mask_old_observations(messages: list, keep_last: int = 3) -> None:
+    """
+    Observation masking: содержимое СТАРЫХ tool-результатов заменяем компактной ссылкой,
+    оставляя полными только последние `keep_last`. tool_call_id сохраняем (нужен API).
+    Экономит 60-80% токенов истории при <2% потери качества (длинные web_search/файлы
+    уже учтены моделью, повторно их слать целиком не нужно).
+    """
+    tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    for i in tool_idxs[:-keep_last] if keep_last else tool_idxs:
+        c = messages[i].get("content", "")
+        if c and not c.startswith("[свёрнуто"):
+            messages[i] = {**messages[i],
+                           "content": f"[свёрнуто: результат инструмента учтён выше, {len(c)} симв.]"}
+
+
 def _parse_tool_args(raw: str) -> dict:
     """
     Надёжный парсинг аргументов tool-call.
@@ -134,7 +149,13 @@ async def run_agent(
 
     final_text = ""
 
-    for _ in range(max_iterations):
+    for _it in range(max_iterations):
+        # Observation masking (context-engineering): результаты инструментов с прошлых
+        # итераций сворачиваем в короткую ссылку — модель уже на них отреагировала, но
+        # они продолжали пересылаться целиком на каждом вызове (квадратичный раздув,
+        # в логах — 197k входных токенов на агента). Последние KEEP держим полными.
+        if _it > 0:
+            _mask_old_observations(messages, keep_last=3)
         resp = await client.chat.completions.create(
             model=model,
             messages=messages,

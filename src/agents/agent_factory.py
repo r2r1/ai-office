@@ -47,8 +47,8 @@ _TEAM_PREAMBLE = (
 )
 
 _INTER_AGENT_SUFFIX = (
-    "\nКоллеги: спрашивай конкретику через ask_colleague(role, вопрос). Можешь также писать "
-    "через send_message / read_messages. Если подключение не работает — опиши ошибку конкретно."
+    "\nКоллеги: быстрый вопрос → ask_colleague(role, вопрос) (ответ сразу); поставить коллеге "
+    "ЗАДАЧУ → delegate_task(role, что сделать). Если подключение не работает — опиши ошибку конкретно."
 )
 
 _LEADER_RULES = (
@@ -166,7 +166,7 @@ ROLE_PROMPTS = {
         "готового бота записи (меню услуг → имя/телефон → заявка попадает в «Лиды»). Если согласен — "
         "при необходимости задай услуги через configure_bot и запусти use_integration('telegram','launch_bot') "
         "— бот реально заработает. Если клиенту простого мало (нужен нестандартный функционал) — "
-        "передай разработчику через send_message, он напишет кастомный код, а ты потом его запустишь.\n"
+        "поставь задачу разработчику через delegate_task, он напишет кастомный код, а ты потом его запустишь.\n"
         "   • Бот ДРУГОГО НАЗНАЧЕНИЯ (постинг в группу, рассылки, уведомления): готового бота записи НЕ предлагай. "
         "Используй send_message/send_photo или передай кастомную логику разработчику.\n"
         "   НЕ ищи в интернете внутренние функции платформы (launch_bot, bot_engine, configure_bot) — "
@@ -215,6 +215,28 @@ _ASK_COLLEAGUE_TOOL = {
                 "question": {"type": "string", "description": "Конкретный вопрос (одно-два предложения)"},
             },
             "required": ["role", "question"],
+        },
+    },
+}
+
+# Инструмент: поставить задачу коллеге на общую доску (видна в его to-do и у его лидера)
+_DELEGATE_TASK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "delegate_task",
+        "description": "Поставить ЗАДАЧУ коллеге другой роли на общую доску задач. В отличие от "
+                       "ask_colleague (быстрый вопрос-ответ) это полноценная задача: попадёт в "
+                       "to-do исполнителя нужной роли и будет отслеживаться его лидером. Используй, "
+                       "когда тебе нужно, чтобы коллега ЧТО-ТО СДЕЛАЛ (а не просто ответил).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "Роль исполнителя (developer, designer, "
+                         "marketer, analyst, integrator, salesman)"},
+                "title": {"type": "string", "description": "Что нужно сделать (конкретно)"},
+                "done_criterion": {"type": "string", "description": "Когда задача считается выполненной"},
+            },
+            "required": ["role", "title"],
         },
     },
 }
@@ -606,6 +628,21 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                        "text": f"💬 → {agent_id}: {answer[:80]}"})
         return f"Ответ {col_role}: {answer}"
 
+    async def _handle_delegate_task(args: dict) -> str:
+        from src.office import plan as plan_module
+        col_role = (args.get("role") or "").strip()
+        title = (args.get("title") or "").strip()
+        if not col_role or not title:
+            return "Укажи роль исполнителя и что нужно сделать."
+        if col_role == role:
+            return "Это твоя зона — сделай сам, не делегируй себе."
+        t = plan_module.add_task(title, col_role, args.get("done_criterion", ""),
+                                 requested_by=agent_id)
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"📌 Поставил задачу {col_role}: {title[:50]}"})
+        return (f"Задача поставлена {col_role} (id={t['id']}) и добавлена на доску — "
+                f"его лидер назначит исполнителя. Можешь продолжать своё.")
+
     async def _handle_send_message(args: dict) -> str:
         to_agent_id = args.get("to_agent_id", "")
         message = args.get("message", "")
@@ -784,8 +821,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             use_search=True,
             publish=_publish_and_log,
             agent_id=agent_id,
-            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _ASK_COLLEAGUE_TOOL, _SEND_MESSAGE_TOOL,
-                         _READ_MESSAGES_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
+            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _ASK_COLLEAGUE_TOOL,
+                         _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
                          _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL,
                          _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
                          _EXECUTE_CODE_TOOL, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
@@ -793,8 +830,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
                 "ask_colleague": _handle_ask_colleague,
-                "send_message": _handle_send_message,
-                "read_messages": _handle_read_messages,
+                "delegate_task": _handle_delegate_task,
                 "read_office_chat": _handle_read_office_chat,
                 "get_connection": _handle_get_connection,
                 "list_integrations": _handle_list_integrations,

@@ -29,6 +29,7 @@ from src.office import bot_config as bot_config_module
 from src.office import bot_engine as bot_engine_module
 from src.office import models as models_module
 from src.office import llm_settings as llm_settings_module
+from src.office import plan as plan_module
 from src.agents import onboarding
 from src.core import llm as llm_core
 from src.integrations import registry as integrations_registry
@@ -705,6 +706,18 @@ async def set_bot_config(request: Request):
 async def get_files():
     """Список файлов кода, написанных агентами в рабочей папке проекта."""
     return {"files": workspace_module.list_files()}
+
+
+@app.get("/api/plan")
+async def get_plan():
+    """Доска задач офиса: todo/doing/done + прогресс. Для вкладки «Задачи»."""
+    tasks = plan_module.all_tasks()
+    # имя исполнителя через роль (developer_1 → Разработчик) делаем на фронте
+    return {
+        "generated": plan_module.is_generated(),
+        "tasks": tasks,
+        "progress": plan_module.progress(),
+    }
 
 
 @app.get("/api/file")
