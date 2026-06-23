@@ -61,6 +61,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Новый React-фронт (миграция, Ф0): собирается Vite в static/webapp, отдаётся на /webapp.
+# Старый фронт на / остаётся рабочим до завершения переезда. html=True → отдаёт index.html.
+_WEBAPP_DIR = Path("static/webapp")
+if _WEBAPP_DIR.is_dir():
+    app.mount("/webapp", StaticFiles(directory=str(_WEBAPP_DIR), html=True), name="webapp")
+
 # ---- Rate limiting для /auth/* (без внешних зависимостей) ----
 _auth_attempts: dict[str, list[float]] = {}
 _MAX_AUTH_PER_MIN = 10
@@ -111,6 +117,16 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    # Новый React-фронт (Ф4): перенаправляем на /webapp/
+    _webapp_idx = Path("static/webapp/index.html")
+    if _webapp_idx.is_file():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/webapp/", status_code=302)
+    return Path("static/index.html").read_text(encoding="utf-8")
+
+
+@app.get("/classic", response_class=HTMLResponse)
+async def classic():
     return Path("static/index.html").read_text(encoding="utf-8")
 
 
