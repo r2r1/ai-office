@@ -1,43 +1,109 @@
-import { useState } from "react"
+import { useState, useEffect, useRef, createContext, useContext } from "react"
 import type { ReactNode, CSSProperties } from "react"
+import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Collapsing-header механика.
+   ViewShell держит общий MotionValue прокрутки; ViewBody пишет в него свой
+   scrollTop (без ре-рендера React); ViewHead читает его через useTransform и
+   плавно ужимается. Всё считается на компоновочном слое → 0 ре-рендеров на скролл.
+   ───────────────────────────────────────────────────────────────────────────── */
+const ScrollCtx = createContext<MotionValue<number> | null>(null)
+
 export function ViewShell({ children }: { children: ReactNode }) {
-  return <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>{children}</div>
+  const scrollY = useMotionValue(0)
+  return (
+    <ScrollCtx.Provider value={scrollY}>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {children}
+      </div>
+    </ScrollCtx.Provider>
+  )
 }
 
 export function ViewHead({ title, sub, right }: { title: string; sub?: ReactNode; right?: ReactNode }) {
+  const scrollY = useContext(ScrollCtx)
+  // Фоллбэк, если ViewHead используется вне ViewShell
+  const fallback = useMotionValue(0)
+  const sy = scrollY ?? fallback
+
+  const fontSize   = useTransform(sy, [0, 64], [30, 19])
+  const padTop     = useTransform(sy, [0, 64], [24, 13])
+  const padBottom  = useTransform(sy, [0, 64], [16, 13])
+  const subHeight  = useTransform(sy, [0, 34], [20, 0])
+  const subOpacity = useTransform(sy, [0, 28], [1, 0])
+  const subMargin  = useTransform(sy, [0, 34], [7, 0])
+  const lineOpacity = useTransform(sy, [40, 64], [0, 1])
+
   return (
-    <div style={{ padding: "24px 28px 16px", flexShrink: 0, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16 }}>
-      <div>
-        <div className="display" style={{ fontSize: 30, color: "var(--text)", lineHeight: 1.05 }}>{title}</div>
-        {sub != null && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 7, lineHeight: 1.4 }}>{sub}</div>}
+    <motion.div style={{
+      paddingTop: padTop, paddingBottom: padBottom, paddingLeft: 28, paddingRight: 28,
+      flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+      position: "relative", zIndex: 3, background: "var(--surface)",
+      backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
+    }}>
+      <div style={{ minWidth: 0 }}>
+        <motion.div className="display" style={{ fontSize, color: "var(--text)", lineHeight: 1.05 }}>{title}</motion.div>
+        {sub != null && (
+          <motion.div style={{ height: subHeight, opacity: subOpacity, marginTop: subMargin, overflow: "hidden" }}>
+            <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.4, whiteSpace: "nowrap" }}>{sub}</div>
+          </motion.div>
+        )}
       </div>
       {right}
+      {/* хайрлайн снизу — появляется при компактном состоянии */}
+      <motion.div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--hairline)", opacity: lineOpacity }} />
+    </motion.div>
+  )
+}
+
+export function ViewBody({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  const scrollY = useContext(ScrollCtx)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // нативный scroll-листенер (надёжнее React onScroll) + сброс при монтировании/смене таба
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !scrollY) return
+    scrollY.set(0); el.scrollTop = 0
+    const onScroll = () => scrollY.set(el.scrollTop)
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [scrollY])
+
+  return (
+    <div ref={ref} style={{ flex: 1, overflowY: "auto", padding: "18px 28px 28px", ...style }}>
+      {children}
     </div>
   )
 }
 
-// ── Sub-tab bar (горизонтальные вкладки внутри раздела) ───────────────────────
+/* ── Sub-tab bar ─────────────────────────────────────────────────────────────── */
 export interface TabDef { id: string; label: string; badge?: number }
 
 export function SubTabs({ tabs, active, onChange }: { tabs: TabDef[]; active: string; onChange: (id: string) => void }) {
   return (
-    <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--hairline)", flexShrink: 0, paddingLeft: 28, paddingRight: 28, overflowX: "auto" }}>
+    <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--hairline)", flexShrink: 0,
+      paddingLeft: 28, paddingRight: 28, overflowX: "auto", position: "relative", zIndex: 3 }}>
       {tabs.map(t => {
         const isActive = t.id === active
         return (
           <button key={t.id} onClick={() => onChange(t.id)}
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "11px 16px", fontSize: 12.5, fontWeight: isActive ? 500 : 400,
-              color: isActive ? "var(--text)" : "var(--muted)", background: "none", border: "none",
-              borderBottom: isActive ? "2px solid var(--mercury-a)" : "2px solid transparent",
+            style={{ display: "flex", alignItems: "center", gap: 7, padding: "11px 16px", fontSize: 12.5,
+              fontWeight: isActive ? 500 : 400, color: isActive ? "var(--text)" : "var(--muted)",
+              background: "none", border: "none", borderBottom: isActive ? "2px solid var(--mercury-a)" : "2px solid transparent",
               marginBottom: -1, cursor: "pointer", whiteSpace: "nowrap", transition: "color 0.15s, border-color 0.15s",
-              fontFamily: "var(--font-sans)" }}>
+              fontFamily: "var(--font-sans)" }}
+            onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = "var(--text-dim)" }}
+            onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = "var(--muted)" }}>
             {t.label}
             {t.badge != null && t.badge > 0 && (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99, background: isActive ? "rgba(255,172,46,0.15)" : "var(--hairline-soft)",
-                color: isActive ? "var(--mercury-a)" : "var(--muted)", border: `1px solid ${isActive ? "rgba(255,172,46,0.3)" : "var(--hairline)"}` }}>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99,
+                background: isActive ? "rgba(255,172,46,0.15)" : "var(--hairline-soft)",
+                color: isActive ? "var(--mercury-a)" : "var(--muted)",
+                border: `1px solid ${isActive ? "rgba(255,172,46,0.3)" : "var(--hairline)"}` }}>
                 {t.badge}
               </span>
             )}
@@ -48,18 +114,14 @@ export function SubTabs({ tabs, active, onChange }: { tabs: TabDef[]; active: st
   )
 }
 
-// хук для управления sub-tabs с запоминанием состояния
 export function useSubTab(tabs: TabDef[], initial?: string) {
   const [active, setActive] = useState(initial || tabs[0]?.id || "")
   return { active, setActive, tabs }
 }
 
-export function ViewBody({ children, style }: { children: ReactNode; style?: CSSProperties }) {
-  return <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px 28px", ...style }}>{children}</div>
-}
-
 export function SectionLabel({ children, style }: { children: ReactNode; style?: CSSProperties }) {
-  return <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1.5px", margin: "0 0 12px", ...style }}>{children}</div>
+  return <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase",
+    letterSpacing: "1.5px", margin: "0 0 12px", ...style }}>{children}</div>
 }
 
 export function Card({ children, style, onClick }: { children: ReactNode; style?: CSSProperties; onClick?: () => void }) {
@@ -68,8 +130,8 @@ export function Card({ children, style, onClick }: { children: ReactNode; style?
     <div className="glass" onClick={onClick}
       style={{ borderRadius: "var(--radius-md)", padding: 16, cursor: hover ? "pointer" : "default",
         transition: "border-color 0.18s, transform 0.18s, box-shadow 0.18s", ...style }}
-      onMouseEnter={hover ? e => { (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--hairline-strong)" } : undefined}
-      onMouseLeave={hover ? e => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.borderColor = "" } : undefined}>
+      onMouseEnter={hover ? e => { const el = e.currentTarget as HTMLElement; el.style.transform = "translateY(-1px)"; el.style.borderColor = "var(--hairline-strong)" } : undefined}
+      onMouseLeave={hover ? e => { const el = e.currentTarget as HTMLElement; el.style.transform = ""; el.style.borderColor = "" } : undefined}>
       {children}
     </div>
   )
@@ -77,10 +139,11 @@ export function Card({ children, style, onClick }: { children: ReactNode; style?
 
 export function Empty({ icon, text, hint }: { icon?: string; text: string; hint?: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "52px 24px", gap: 10, textAlign: "center" }}>
-      {icon && <div style={{ fontSize: 32, opacity: 0.3 }}>{icon}</div>}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "56px 24px", gap: 11, textAlign: "center" }}>
+      {icon && <div style={{ fontSize: 34, opacity: 0.25, lineHeight: 1 }}>{icon}</div>}
       <div style={{ fontSize: 13, color: "var(--muted)" }}>{text}</div>
-      {hint && <div style={{ fontSize: 11, color: "var(--faint)", maxWidth: 280, lineHeight: 1.5 }}>{hint}</div>}
+      {hint && <div style={{ fontSize: 11.5, color: "var(--faint)", maxWidth: 300, lineHeight: 1.55 }}>{hint}</div>}
     </div>
   )
 }

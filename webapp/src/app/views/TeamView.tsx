@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { motion, AnimatePresence } from "motion/react"
+import { useEffect, useRef, useState } from "react"
+import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
@@ -29,24 +29,47 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
   const agents = Object.values(state.agents)
   const active = agents.filter(a => a.status === "active" || a.status === "thinking").length
 
+  // collapsing header (через MotionValue — без ре-рендеров на скролл)
+  const scrollY     = useMotionValue(0)
+  const fontSize    = useTransform(scrollY, [0, 70], [52, 26])
+  const padTop      = useTransform(scrollY, [0, 70], [32, 16])
+  const padBottom   = useTransform(scrollY, [0, 70], [22, 14])
+  const subHeight   = useTransform(scrollY, [0, 40], [22, 0])
+  const subOpacity  = useTransform(scrollY, [0, 30], [1, 0])
+  const titleMargin = useTransform(scrollY, [0, 70], [10, 0])
+  const lineOpacity = useTransform(scrollY, [44, 70], [0, 1])
+
+  const gridRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el) return
+    const onScroll = () => scrollY.set(el.scrollTop)
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [scrollY])
+
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* Шапка в стиле скриншота */}
-      <div style={{ padding: "32px 36px 24px", flexShrink: 0 }}>
-        <div style={{ fontSize: 52, lineHeight: 1, marginBottom: 10, fontFamily: "var(--font-display)" }}>
+      {/* Collapsing-шапка */}
+      <motion.div style={{
+        paddingTop: padTop, paddingBottom: padBottom, paddingLeft: 36, paddingRight: 36, flexShrink: 0,
+        position: "relative", zIndex: 3, background: "var(--surface)",
+        backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
+      }}>
+        <motion.div style={{ fontSize, lineHeight: 1, marginBottom: titleMargin, fontFamily: "var(--font-display)" }}>
           The <em style={{ color: "var(--muted)", fontStyle: "italic" }}>team</em>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>
-            <span style={{ color: "var(--mercury-a)" }}>{active} active</span>
-            {" · "}
-            {agents.length} total
+        </motion.div>
+        <motion.div style={{ height: subHeight, opacity: subOpacity, overflow: "hidden" }}>
+          <div style={{ fontSize: 13, color: "var(--muted)", whiteSpace: "nowrap" }}>
+            <span style={{ color: "var(--mercury-a)" }}>{active} active</span>{" · "}{agents.length} total
           </div>
-        </div>
-      </div>
+        </motion.div>
+        <motion.div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--hairline)", opacity: lineOpacity }} />
+      </motion.div>
 
       {/* Сетка карточек */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "4px 28px 32px" }}>
+      <div ref={gridRef}
+        style={{ flex: 1, overflowY: "auto", padding: "16px 28px 32px" }}>
         {agents.length === 0 ? (
           <EmptyTeam />
         ) : (

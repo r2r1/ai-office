@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, Card, Empty, SectionLabel } from "./ui"
+import { ViewShell, ViewHead, ViewBody, Card, Empty, SectionLabel } from "./ui"
 
 export function ConnectionsView() {
   const { state } = useOffice()
@@ -17,7 +17,7 @@ export function ConnectionsView() {
     <ViewShell>
       <ViewHead title="Доступы" sub="Подключения к внешним сервисам и API-ключи" />
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px 28px" }}>
+      <ViewBody>
         {/* Каталог интеграций */}
         <SectionLabel style={{ marginBottom: 14 }}>
           Каталог интеграций · {integrations.length}
@@ -77,7 +77,7 @@ export function ConnectionsView() {
             ))}
           </div>
         )}
-      </div>
+      </ViewBody>
     </ViewShell>
   )
 }
