@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/re
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
+import { ModelPicker, type Preset } from "../components/ModelPicker"
 import type { Agent } from "../types"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
@@ -48,13 +49,19 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
     return () => el.removeEventListener("scroll", onScroll)
   }, [scrollY])
 
+  // Один запрос на все модели агентов вместо N запросов agentDetail.
+  const [models, setModels] = useState<Record<string, string>>({})
+  const [presets, setPresets] = useState<Preset[]>([])
+  useEffect(() => {
+    api.models().then(m => { setModels(m?.per_agent || {}); setPresets(m?.presets || []) })
+  }, [agents.length])
+
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Collapsing-шапка */}
       <motion.div style={{
         paddingTop: padTop, paddingBottom: padBottom, paddingLeft: 36, paddingRight: 36, flexShrink: 0,
-        position: "relative", zIndex: 3, background: "var(--surface)",
-        backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
+        position: "relative", zIndex: 3, background: "var(--surface-head)",
       }}>
         <motion.div style={{ fontSize, lineHeight: 1, marginBottom: titleMargin, fontFamily: "var(--font-display)" }}>
           Команда 
@@ -76,7 +83,8 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
             <AnimatePresence>
               {agents.map((agent, i) => (
-                <AgentCard key={agent.id} agent={agent} index={i} onOpenChat={onOpenChat} />
+                <AgentCard key={agent.id} agent={agent} index={i} onOpenChat={onOpenChat}
+                  initialModel={models[agent.id] || ""} presets={presets} />
               ))}
             </AnimatePresence>
           </div>
@@ -87,28 +95,20 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
 }
 
 // ── Карточка агента ──────────────────────────────────────────────────────────
-function AgentCard({ agent, index, onOpenChat }: { agent: Agent; index: number; onOpenChat?: (id: string) => void }) {
-  const [model, setModel]       = useState("")
+function AgentCard({ agent, index, onOpenChat, initialModel, presets }: { agent: Agent; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[] }) {
+  const [model, setModel]       = useState(initialModel)
   const [editModel, setEditModel] = useState(false)
-  const [modelInput, setModelInput] = useState("")
   const [saving, setSaving]     = useState(false)
-  const [detail, setDetail]     = useState<any>(null)
 
-  useEffect(() => {
-    api.agentDetail(agent.id).then(d => {
-      setDetail(d)
-      setModel(d.model || "")
-      setModelInput(d.model || "")
-    })
-  }, [agent.id, agent.status])
+  // подхватываем модель из общего запроса (без отдельного fetch на карточку)
+  useEffect(() => { setModel(initialModel) }, [initialModel])
 
-  async function saveModel() {
-    if (!modelInput.trim()) return
+  async function saveModel(next: string) {
     setSaving(true)
-    await api.setAgentModel(agent.id, modelInput.trim())
-    setModel(modelInput.trim())
-    setEditModel(false)
+    await api.setAgentModel(agent.id, next.trim())  // "" = вернуть к модели офиса
+    setModel(next.trim())
     setSaving(false)
+    setEditModel(false)
   }
 
   const isActive   = agent.status === "active"
@@ -203,63 +203,48 @@ function AgentCard({ agent, index, onOpenChat }: { agent: Agent; index: number; 
         )}
       </AnimatePresence>
 
-      {/* Модель + кнопки */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto", paddingTop: 4 }}>
-        {/* Выбор модели */}
-        {editModel ? (
-          <div style={{ flex: 1, display: "flex", gap: 6 }}>
-            <input value={modelInput} onChange={e => setModelInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") saveModel(); if (e.key === "Escape") setEditModel(false) }}
-              autoFocus placeholder="glm-4.5-flash"
-              style={{
-                flex: 1, background: "var(--surface-soft)", border: "1px solid rgba(255,172,46,0.4)",
-                borderRadius: "var(--radius-pill)", padding: "7px 14px", color: "var(--text)",
-                fontSize: 12, outline: "none", fontFamily: "var(--font-mono)",
-              }} />
-            <button onClick={saveModel} disabled={saving}
-              style={{ border: "none", borderRadius: "var(--radius-pill)", padding: "0 14px",
-                background: MERCURY, color: "#0a0a0a", cursor: "pointer", fontSize: 12, fontWeight: 500,
-                fontFamily: "var(--font-sans)" }}>
-              {saving ? "…" : "✓"}
-            </button>
+      {/* Выбор модели (список пресетов + своя) */}
+      {editModel ? (
+        <div style={{ marginTop: "auto", paddingTop: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Модель агента</span>
             <button onClick={() => setEditModel(false)}
-              style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-pill)", padding: "0 12px",
-                background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12,
-                fontFamily: "var(--font-sans)" }}>✕</button>
+              style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 11 }}>свернуть ✕</button>
           </div>
-        ) : (
-          <button onClick={() => setEditModel(true)}
-            title="Сменить модель"
+          <ModelPicker value={model} presets={presets} onSave={saveModel} allowDefault saving={saving} compact />
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto", paddingTop: 4 }}>
+          <button onClick={() => setEditModel(true)} title="Сменить модель агента"
             style={{
               flex: 1, display: "flex", alignItems: "center", gap: 7,
               background: "var(--surface-soft)", border: "1px solid var(--hairline)",
               borderRadius: "var(--radius-pill)", padding: "7px 14px", cursor: "pointer",
-              color: "var(--text-dim)", transition: "border-color 0.15s",
+              color: "var(--text-dim)", transition: "border-color 0.15s", minWidth: 0,
             }}
             onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--hairline-strong)")}
             onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--hairline)")}>
-            <span style={{ fontSize: 10, color: "var(--faint)" }}>◈</span>
+            <span style={{ fontSize: 11 }}>🧠</span>
             <span className="mono" style={{ fontSize: 11, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {model || "по умолчанию"}
+              {model || "модель офиса"}
             </span>
             <span style={{ fontSize: 10, color: "var(--faint)" }}>✎</span>
           </button>
-        )}
 
-        {/* Chat → */}
-        <button onClick={() => onOpenChat?.(agent.id)}
-          style={{
-            border: "none", borderRadius: "var(--radius-pill)", padding: "8px 18px",
-            background: "var(--text)", color: "var(--bg)", cursor: "pointer",
-            fontSize: 13, fontWeight: 500, whiteSpace: "nowrap",
-            fontFamily: "var(--font-sans)", transition: "opacity 0.15s",
-            flexShrink: 0,
-          }}
-          onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
-          onMouseLeave={e => (e.currentTarget.style.opacity = "1")}>
-          Chat →
-        </button>
-      </div>
+          {/* Chat → */}
+          <button onClick={() => onOpenChat?.(agent.id)}
+            style={{
+              border: "none", borderRadius: "var(--radius-pill)", padding: "8px 18px",
+              background: "var(--text)", color: "var(--bg)", cursor: "pointer",
+              fontSize: 13, fontWeight: 500, whiteSpace: "nowrap",
+              fontFamily: "var(--font-sans)", transition: "opacity 0.15s", flexShrink: 0,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
+            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}>
+            Chat →
+          </button>
+        </div>
+      )}
     </motion.div>
   )
 }

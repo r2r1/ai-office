@@ -113,6 +113,84 @@ _DECIDE_SYSTEM = """Ты — директор автономного AI-офис
 }"""
 
 
+_DIRECTIVE_SYSTEM = """Ты — CEO автономного AI-офиса. Владелец бизнеса (предприниматель) написал
+тебе в общий чат. Твоя работа — ПОНЯТЬ запрос и ОРГАНИЧНО вписать его в текущую работу офиса:
+сориентировать команду, при необходимости подправить этапы и поставить новые задачи.
+
+Сначала определи характер сообщения (scope):
+- "steer"     — указание/просьба/новая цель, влияющая на работу (делаем X, добавь Y, поменяй приоритет).
+- "question"  — предприниматель что-то спрашивает (статус, «что сделано?»). Работу НЕ меняем.
+- "smalltalk" — благодарность/реплика без задачи. Работу НЕ меняем.
+
+Ответь предпринимателю КОРОТКО и по-деловому от первого лица (1–3 предложения, по-русски):
+что понял и что именно изменишь в работе. Не выдумывай уже выполненную работу.
+
+Если scope="steer" — сформулируй directive (суть указания одной фразой для команды) и при
+РЕАЛЬНОЙ необходимости:
+• milestone_ops — правки этапов (вех):
+    {"op":"add","title":"...","after":"<id этапа|null>"}   — добавить бизнес-этап
+    {"op":"retitle","id":"<id>","title":"..."}             — переименовать
+    {"op":"focus","id":"<id>"}                             — сделать этап текущим
+    {"op":"note","id":"<id>","text":"..."}                 — заметка-обоснование
+• new_tasks — НОВЫЕ задачи на доску, если запрос требует новой работы. Роль строго одна из:
+  developer, designer, integrator, marketer, salesman.
+    {"title":"...","role":"developer","done_criterion":"как проверить готовность"}
+
+Не дублируй уже идущую работу. Не плоди задачи, которых предприниматель не просил.
+Если ничего менять не нужно (question/smalltalk или указание уже учтено) — массивы пустые.
+
+Ответь ТОЛЬКО валидным JSON без markdown:
+{
+  "reply": "ответ предпринимателю от лица CEO (1–3 предложения)",
+  "scope": "steer" | "question" | "smalltalk",
+  "directive": "нормализованная суть указания одной фразой (пусто если не steer)",
+  "milestone_ops": [],
+  "new_tasks": [],
+  "priority": "now" | "normal"
+}"""
+
+
+async def interpret_directive(
+    goal: str,
+    strategy: str,
+    milestone_list: list[dict],
+    departments_text: str,
+    board_summary: str,
+    message: str,
+    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+) -> dict:
+    """CEO-триаж сообщения предпринимателя: понять и вписать в текущую работу.
+
+    Возвращает {reply, scope, directive, milestone_ops, new_tasks, priority}.
+    Безопасно: при сбое LLM вернёт {} — вызывающая сторона делает фолбэк.
+    """
+    if publish:
+        await publish({"type": "thinking", "agent_id": "orchestrator_1",
+                       "text": "Обдумываю ваш запрос и как вписать его в работу..."})
+
+    ms_text = "\n".join(
+        f"- {m.get('id')}: {m.get('title')} [{m.get('status')}]" for m in milestone_list
+    ) or "(этапов ещё нет)"
+    user = (
+        f"Цель компании: {goal}\n\n"
+        f"Стратегия (кратко):\n{strategy[:500]}\n\n"
+        f"Этапы сейчас:\n{ms_text}\n\n"
+        f"Отделы:\n{departments_text or '(отделов пока нет)'}\n\n"
+        f"Доска задач: {board_summary or '(пусто)'}\n\n"
+        f"=== СООБЩЕНИЕ ПРЕДПРИНИМАТЕЛЯ ===\n{message}\n\n"
+        f"Пойми запрос и впиши его в текущую работу."
+    )
+    raw = await llm.run_agent(
+        system=_DIRECTIVE_SYSTEM,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=600,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    return _parse_json(raw)
+
+
 def _parse_json(raw: str) -> dict:
     raw = raw.strip()
     if raw.startswith("```"):

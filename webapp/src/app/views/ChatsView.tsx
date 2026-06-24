@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, STATUS_COLOR } from "./ui"
+import { useThrottled } from "../hooks"
+import { roleName } from "../../data/roles"
+
+// дружелюбное имя отправителя (CEO вместо orchestrator_1, имя агента в личном чате)
+function senderName(m: any, fallback?: string): string {
+  if (m.role && m.role !== "user") return roleName(m.role)
+  if (typeof m.from === "string" && !["user", "agent"].includes(m.from)) {
+    return roleName(m.from.replace(/_\d+$/, ""))
+  }
+  return fallback || m.from || ""
+}
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
@@ -17,26 +28,40 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const feedRef = useRef<HTMLDivElement>(null)
 
+  // pending — оптимистично отправленные сообщения, ещё не подтверждённые сервером.
+  // Держим их отдельно, чтобы фоновый reload (по событиям офиса) не стирал их.
+  const [pending, setPending] = useState<any[]>([])
+
   useEffect(() => { if (initialAgent) setActive(initialAgent) }, [initialAgent])
 
   async function load() {
-    if (active === "office") setMessages((await api.chatGet()).messages || [])
-    else setMessages((await api.thread(active)).messages || [])
+    const data = active === "office" ? await api.chatGet() : await api.thread(active)
+    const server = data.messages || []
+    setMessages(server)
+    // убираем из pending те, что сервер уже сохранил
+    setPending(p => p.filter(pm => !server.some((sm: any) => sm.from === "user" && sm.text === pm.text)))
   }
-  useEffect(() => { load() }, [active, state.feed.length]) // eslint-disable-line
-  useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) }, [messages])
+  const tick = useThrottled(state.feed.length, 2000)
+  useEffect(() => { setPending([]); load() }, [active]) // eslint-disable-line — смена собеседника
+  useEffect(() => { load() }, [tick])                   // eslint-disable-line — живой апдейт
+  useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) }, [messages, pending])
 
   async function send() {
     const text = input.trim()
     if (!text || sending) return
     setSending(true)
-    setMessages(m => [...m, { from: "user", text, ts: Date.now() / 1000 }])
+    setPending(p => [...p, { from: "user", text, ts: Date.now() / 1000 }])
     setInput("")
-    if (active === "office") await api.chatPost(text)
-    else await api.ask(active, text)
-    setSending(false)
-    setTimeout(load, 500)
+    try {
+      if (active === "office") await api.chatPost(text)
+      else await api.ask(active, text)
+    } finally {
+      setSending(false)
+      setTimeout(load, 500)
+    }
   }
+
+  const allMessages = [...messages, ...pending]
 
   const activeAgent = active !== "office" ? state.agents[active] : null
   const headerName = active === "office" ? "Общий чат" : (activeAgent?.name ?? "Агент")
@@ -97,19 +122,19 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
 
           {/* сообщения */}
           <div ref={feedRef} style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-            {messages.length === 0 && (
+            {allMessages.length === 0 && (
               <div style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", paddingTop: 60 }}>
                 {active === "office" ? "Напишите что-нибудь — вся команда услышит" : "Начните разговор с агентом"}
               </div>
             )}
-            {messages.map((m, i) => {
+            {allMessages.map((m, i) => {
               const mine = m.from === "user"
               const isQuestion = m.kind === "question"
               return (
                 <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
                   {!mine && (
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>
-                      {m.from}{isQuestion && " · вопрос"}
+                      {senderName(m, activeAgent?.name)}{isQuestion && " · вопрос"}
                     </div>
                   )}
                   <div style={{

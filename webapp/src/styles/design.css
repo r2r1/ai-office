@@ -34,6 +34,8 @@
   --surface: rgba(18,18,18,0.45);
   --surface-strong: rgba(20,20,20,0.7);
   --surface-soft: rgba(10,10,10,0.4);
+  --surface-card: #121214;
+  --surface-head: #0d0d0e;
   --hairline: rgba(255,255,255,0.06);
   --hairline-strong: rgba(255,255,255,0.12);
   --hairline-soft: rgba(255,255,255,0.04);
@@ -60,6 +62,8 @@
   --surface: rgba(255,255,255,0.55);
   --surface-strong: rgba(255,255,255,0.78);
   --surface-soft: rgba(255,255,255,0.4);
+  --surface-card: #fbfbf9;
+  --surface-head: #f7f6f2;
   --hairline: rgba(0,0,0,0.08);
   --hairline-strong: rgba(0,0,0,0.14);
   --hairline-soft: rgba(0,0,0,0.04);
@@ -99,6 +103,9 @@
 ::-webkit-scrollbar-track { background: transparent; }
 
 button, textarea, input, select { font-family: inherit; }
+/* нативные выпадающие списки читаемы в обеих темах */
+:root[data-theme="dark"] select { color-scheme: dark; }
+:root[data-theme="light"] select { color-scheme: light; }
 ::selection { background: var(--selection); color: var(--text); }
 
 body {
@@ -112,8 +119,12 @@ body {
 }
 
 /* утилиты */
-.glass { background: var(--surface); -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%);
+/* Стеклянные островки (меню, основная карта, панели). Лёгкий blur ради FPS. */
+.glass { background: var(--surface); -webkit-backdrop-filter: blur(13px) saturate(120%); backdrop-filter: blur(13px) saturate(120%);
   border: 1px solid var(--hairline); box-shadow: var(--shadow-lg), 0 1px 0 var(--inset-hi) inset; }
+/* Карточки без backdrop-filter — непрозрачная подложка (дёшево для GPU). */
+.card { background: var(--surface-card); border: 1px solid var(--hairline);
+  box-shadow: var(--shadow), 0 1px 0 var(--inset-hi) inset; }
 .display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; }
 .mono { font-family: var(--font-mono); }
 

@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
+import { useThrottled } from "../hooks"
+import { roleName } from "../../data/roles"
+
+// дружелюбное имя отправителя в общем чате (CEO вместо orchestrator_1 и т.п.)
+function senderName(m: any): string {
+  if (m.role && m.role !== "user") return roleName(m.role)
+  if (typeof m.from === "string" && m.from !== "user") {
+    const base = m.from.replace(/_\d+$/, "")
+    return roleName(base)
+  }
+  return m.from || ""
+}
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
@@ -32,7 +44,7 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
         flexShrink: 0, height: "100%", display: "flex", flexDirection: "column",
         borderRadius: "var(--radius-xl)",
         background: "var(--surface)",
-        backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
+        backdropFilter: "blur(13px) saturate(120%)", WebkitBackdropFilter: "blur(13px) saturate(120%)",
         border: "1px solid var(--hairline)",
         boxShadow: "var(--shadow-lg), 0 1px 0 var(--inset-hi) inset",
         overflow: "hidden", position: "relative",
@@ -105,40 +117,51 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
 function ChatTab() {
   const { state } = useOffice()
   const [messages, setMessages] = useState<any[]>([])
+  const [pending, setPending] = useState<any[]>([])
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  async function load() { setMessages((await api.chatGet()).messages || []) }
-  useEffect(() => { load() }, [state.feed.length])   // eslint-disable-line
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }) }, [messages])
+  const tick = useThrottled(state.feed.length, 2000)
+  async function load() {
+    const server = (await api.chatGet()).messages || []
+    setMessages(server)
+    setPending(p => p.filter(pm => !server.some((sm: any) => sm.from === "user" && sm.text === pm.text)))
+  }
+  useEffect(() => { load() }, [tick])   // eslint-disable-line
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }) }, [messages, pending])
 
   async function send() {
     const text = input.trim()
     if (!text || sending) return
     setSending(true)
-    setMessages(m => [...m, { from: "user", text, ts: Date.now() / 1000 }])
+    setPending(p => [...p, { from: "user", text, ts: Date.now() / 1000 }])
     setInput("")
-    await api.chatPost(text)
-    setSending(false)
-    setTimeout(load, 600)
+    try {
+      await api.chatPost(text)
+    } finally {
+      setSending(false)
+      setTimeout(load, 600)
+    }
   }
+
+  const allMessages = [...messages, ...pending]
 
   return (
     <>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {messages.length === 0 && (
+        {allMessages.length === 0 && (
           <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", paddingTop: 40, lineHeight: 1.6 }}>
             Напишите что-нибудь —<br />вся команда услышит
           </div>
         )}
-        {messages.map((m, i) => {
+        {allMessages.map((m, i) => {
           const mine = m.from === "user"
           const isQ  = m.kind === "question"
           return (
             <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "88%" }}>
               {!mine && (
-                <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3, paddingLeft: 2 }}>{m.from}</div>
+                <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3, paddingLeft: 2 }}>{senderName(m)}</div>
               )}
               <div style={{
                 fontSize: 12, lineHeight: 1.5, padding: "8px 11px", wordBreak: "break-word",

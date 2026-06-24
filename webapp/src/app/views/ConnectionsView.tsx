@@ -2,16 +2,18 @@ import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, ViewBody, Card, Empty, SectionLabel } from "./ui"
+import { useThrottled } from "../hooks"
 
 export function ConnectionsView() {
   const { state } = useOffice()
   const [connections, setConnections]   = useState<any[]>([])
   const [integrations, setIntegrations] = useState<any[]>([])
 
+  const tick = useThrottled(state.feed.length, 2500)
   useEffect(() => {
     api.connections().then(d => setConnections(d.connections || []))
     api.integrations().then(d => setIntegrations(d.integrations || []))
-  }, [state.feed.length])
+  }, [tick])
 
   return (
     <ViewShell>
@@ -64,7 +66,7 @@ export function ConnectionsView() {
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {connections.map((c: any, i: number) => (
-              <div key={i} className="glass"
+              <div key={i} className="card"
                 style={{ borderRadius: "var(--radius-md)", padding: "13px 18px",
                   display: "flex", alignItems: "center", gap: 14 }}>
                 <span style={{ fontSize: 20 }}>🔌</span>

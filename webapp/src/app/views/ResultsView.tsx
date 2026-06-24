@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, SectionLabel } from "./ui"
+import { useThrottled } from "../hooks"
 
 const TABS = [
   { id: "leads", label: "Лиды" },
@@ -16,9 +17,10 @@ export function ResultsView() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>("")
 
+  const tick = useThrottled(state.feed.length, 2500)
   useEffect(() => {
     api.files().then(d => setFiles(d.files || []))
-  }, [state.feed.length])
+  }, [tick])
 
   async function openFile(path: string) {
     setSelectedFile(path)

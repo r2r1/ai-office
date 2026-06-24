@@ -3,6 +3,7 @@ import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel } from "./ui"
+import { useThrottled } from "../hooks"
 
 const TABS = [
   { id: "milestones", label: "Этапы" },
@@ -16,11 +17,12 @@ export function ProjectView() {
   const [milestones, setMilestones] = useState<any[]>([])
   const [deliverables, setDeliverables] = useState<any[]>([])
   const tasks = state.plan.tasks || []
+  const tick = useThrottled(state.feed.length, 2500)
 
   useEffect(() => {
     api.milestones().then(d => setMilestones(d.stages || []))
     api.deliverables().then(d => setDeliverables(d.deliverables || []))
-  }, [state.feed.length])
+  }, [tick])
 
   const tabsWithBadges = TABS.map(t => ({
     ...t,
@@ -110,7 +112,7 @@ function TasksTab({ tasks, metrics }: { tasks: any[]; metrics: { label: string; 
       {/* метрики */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 28 }}>
         {metrics.map(m => (
-          <div key={m.label} className="glass" style={{ borderRadius: "var(--radius-md)", padding: "14px 16px" }}>
+          <div key={m.label} className="card" style={{ borderRadius: "var(--radius-md)", padding: "14px 16px" }}>
             <div className="display" style={{ fontSize: 26, color: "var(--text)", lineHeight: 1 }}>{m.value}</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>{m.label}</div>
           </div>

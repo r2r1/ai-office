@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { TopBar } from "./components/TopBar"
 import { NavRail } from "./components/NavRail"
@@ -21,7 +21,6 @@ export default function App() {
   const [isMobile, setIsMobile]     = useState(
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   )
-  const spotlightRef = useRef<HTMLDivElement>(null)
   const { state } = useOffice()
 
   const openAgent = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
@@ -41,15 +40,6 @@ export default function App() {
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme) }, [theme])
 
-  useEffect(() => {
-    function onMove(e: PointerEvent) {
-      const el = spotlightRef.current
-      if (el) { el.style.setProperty("--mx", `${e.clientX}px`); el.style.setProperty("--my", `${e.clientY}px`) }
-    }
-    window.addEventListener("pointermove", onMove)
-    return () => window.removeEventListener("pointermove", onMove)
-  }, [])
-
   const isOffice = view === "office"
   const gap = isMobile ? 8 : 12
 
@@ -59,51 +49,14 @@ export default function App() {
       background: "var(--bg)", color: "var(--text)", position: "relative",
       transition: "background 0.4s ease, color 0.4s ease", overflow: "hidden",
     }}>
-      {/* ── Амбиент Mercury ── */}
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden",
-        opacity: "var(--blob-opacity)" as unknown as number, transition: "opacity 0.4s ease" }}>
-        <div style={{ position: "absolute", top: "-15%", left: "-10%", width: "55vw", height: "55vw",
-          background: "radial-gradient(circle at 50% 50%, rgba(160,224,171,0.10), transparent 60%)",
-          filter: "blur(60px)", animation: "blob-drift-a 28s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", top: "40%", right: "-20%", width: "60vw", height: "60vw",
-          background: "radial-gradient(circle at 50% 50%, rgba(255,172,46,0.09), transparent 60%)",
-          filter: "blur(80px)", animation: "blob-drift-b 34s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", bottom: "-25%", left: "20%", width: "50vw", height: "50vw",
-          background: "radial-gradient(circle at 50% 50%, rgba(165,45,37,0.07), transparent 60%)",
-          filter: "blur(70px)", animation: "blob-drift-c 40s ease-in-out infinite" }} />
-        <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.5 }}>
-          <defs>
-            <linearGradient id="merc" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"   stopColor="#a0e0ab" stopOpacity="0" />
-              <stop offset="20%"  stopColor="#a0e0ab" />
-              <stop offset="50%"  stopColor="#ffac2e" />
-              <stop offset="80%"  stopColor="#a52d25" />
-              <stop offset="100%" stopColor="#a52d25" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          <path d="M -100,500 C 300,300 500,700 800,450 S 1300,200 1700,500" fill="none"
-            stroke="url(#merc)" strokeWidth="1.5" strokeDasharray="1200"
-            style={{ animation: "ribbon-flow 14s ease-in-out infinite" }} />
-          <path d="M -100,650 C 350,500 650,800 950,550 S 1400,350 1700,600" fill="none"
-            stroke="url(#merc)" strokeWidth="1" strokeDasharray="1200"
-            style={{ animation: "ribbon-flow 18s ease-in-out infinite 4s" }} />
-        </svg>
-      </div>
-
-      {/* Спотлайт */}
-      <div ref={spotlightRef} className="mouse-spot" style={{
-        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 1,
-        background: "radial-gradient(600px circle at var(--mx,50%) var(--my,50%), rgba(255,172,46,0.08), transparent 50%)",
-        mixBlendMode: "screen",
-      }} />
-
-      {/* Grain */}
+      {/* ── Статичный Mercury-амбиент (рисуется один раз, без анимаций/фильтров → 0 нагрузки на GPU) ── */}
       <div style={{
-        position: "fixed", inset: "-50%", pointerEvents: "none", zIndex: 1,
-        opacity: "var(--grain-opacity)" as unknown as number,
-        backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
-        animation: "grain 8s steps(6) infinite", mixBlendMode: "overlay",
+        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
+        opacity: "var(--blob-opacity)" as unknown as number, transition: "opacity 0.4s ease",
+        background:
+          "radial-gradient(40vw 40vw at 12% 8%, rgba(160,224,171,0.07), transparent 60%)," +
+          "radial-gradient(48vw 48vw at 88% 42%, rgba(255,172,46,0.06), transparent 60%)," +
+          "radial-gradient(42vw 42vw at 30% 96%, rgba(165,45,37,0.05), transparent 60%)",
       }} />
 
       {/* ── Контент ── */}
@@ -113,17 +66,15 @@ export default function App() {
       }}>
         <TopBar progress={state.progress.percent} progressNote={state.progress.note}
           cost={state.cost} model={state.model} connected={state.connected}
-          theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")} isMobile={isMobile} />
+          theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
+          onOpenAccount={() => changeView("account")} isMobile={isMobile} />
 
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, gap }}>
           {!isMobile && <NavRail active={view} onChange={changeView} />}
 
-          {/* Основная область: glass-карточка */}
-          <div style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden",
+          {/* Основная область: glass-островок */}
+          <div className="glass" style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden",
             borderRadius: isMobile ? "var(--radius-lg)" : "var(--radius-xl)",
-            background: "var(--surface)",
-            backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
-            border: "1px solid var(--hairline)", boxShadow: "var(--shadow-lg), 0 1px 0 var(--inset-hi) inset",
             transition: "background 0.4s ease, border-color 0.4s ease" }}>
             <AnimatePresence mode="wait" initial={false}>
               <motion.div key={view}

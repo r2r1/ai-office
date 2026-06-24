@@ -100,6 +100,39 @@ def set_business_stages(stages: list[dict]) -> None:
     _save(base + biz)
 
 
+def insert_business_stage(title: str, after_id: str | None = None, status: str = "pending") -> str:
+    """Добавляет новый бизнес-этап (по запросу предпринимателя). Системные этапы не трогаем.
+    Возвращает id созданного этапа."""
+    import re
+    st = _load()
+    base = re.sub(r"[^a-z0-9]+", "_", (title or "").lower()).strip("_")[:20] or f"stage_{len(st)+1}"
+    sid, i = base, 2
+    while any(s["id"] == sid for s in st):
+        sid, i = f"{base}_{i}", i + 1
+    new = {"id": sid, "title": (title or "").strip()[:80], "status": status, "summary": "", "items": []}
+    # позиция вставки: после after_id, но не раньше системных этапов
+    idx = len(st)
+    if after_id:
+        for j, s in enumerate(st):
+            if s["id"] == after_id:
+                idx = j + 1
+                break
+    min_idx = max((j for j, s in enumerate(st) if s["id"] in _SYS), default=-1) + 1
+    st.insert(max(idx, min_idx), new)
+    _save(st)
+    return sid
+
+
+def retitle(stage_id: str, title: str) -> bool:
+    st = _load()
+    for s in st:
+        if s["id"] == stage_id:
+            s["title"] = (title or "").strip()[:80]
+            _save(st)
+            return True
+    return False
+
+
 def has_business_stages() -> bool:
     return any(s["id"] not in _SYS for s in _load())
 

@@ -41,8 +41,7 @@ export function ViewHead({ title, sub, right }: { title: string; sub?: ReactNode
     <motion.div style={{
       paddingTop: padTop, paddingBottom: padBottom, paddingLeft: 28, paddingRight: 28,
       flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
-      position: "relative", zIndex: 3, background: "var(--surface)",
-      backdropFilter: "blur(28px) saturate(160%)", WebkitBackdropFilter: "blur(28px) saturate(160%)",
+      position: "relative", zIndex: 3, background: "var(--surface-head)",
     }}>
       <div style={{ minWidth: 0 }}>
         <motion.div className="display" style={{ fontSize, color: "var(--text)", lineHeight: 1.05 }}>{title}</motion.div>
@@ -127,7 +126,7 @@ export function SectionLabel({ children, style }: { children: ReactNode; style?:
 export function Card({ children, style, onClick }: { children: ReactNode; style?: CSSProperties; onClick?: () => void }) {
   const hover = !!onClick
   return (
-    <div className="glass" onClick={onClick}
+    <div className="card" onClick={onClick}
       style={{ borderRadius: "var(--radius-md)", padding: 16, cursor: hover ? "pointer" : "default",
         transition: "border-color 0.18s, transform 0.18s, box-shadow 0.18s", ...style }}
       onMouseEnter={hover ? e => { const el = e.currentTarget as HTMLElement; el.style.transform = "translateY(-1px)"; el.style.borderColor = "var(--hairline-strong)" } : undefined}

@@ -76,7 +76,7 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
         <div key={r.id} style={{
           position: "absolute", left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%`,
           border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)",
-          background: "var(--surface-soft)", backdropFilter: "blur(4px)",
+          background: "var(--surface-soft)",
         }}>
           <div className="mono" style={{ position: "absolute", top: 8, left: 11, fontSize: 9, letterSpacing: "1.5px",
             color: "var(--faint)", userSelect: "none" }}>{r.label}</div>
@@ -133,7 +133,7 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
                   initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.35 }}
                   style={{ position: "absolute", bottom: "calc(100% + 9px)", left: "50%", transform: "translateX(-50%)",
-                    background: "var(--surface-strong)", backdropFilter: "blur(16px) saturate(140%)",
+                    background: "var(--surface-card)",
                     border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-sm)",
                     boxShadow: "var(--shadow)", padding: "6px 11px", fontSize: 10, color: "var(--text-dim)",
                     whiteSpace: "nowrap", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis",

@@ -31,6 +31,8 @@ from src.office import models as models_module
 from src.office import llm_settings as llm_settings_module
 from src.office import plan as plan_module
 from src.agents import onboarding
+from src.agents import orchestrator
+from src.office import org
 from src.core import llm as llm_core
 from src.integrations import registry as integrations_registry
 from src.saas import db as saas_db, store as saas_store, auth as saas_auth
@@ -956,17 +958,97 @@ async def get_chat():
     return {"messages": office_channel.recent(100)}
 
 
+_STEER_ROLES = {"developer", "designer", "integrator", "marketer", "salesman"}
+
+
+async def _steer_from_chat(text: str) -> None:
+    """CEO-триаж сообщения предпринимателя из общего чата: понять запрос и ОРГАНИЧНО
+    вписать в текущую работу — ответить, подправить этапы, поставить задачи, сохранить
+    директиву. Запускается в фоне, чтобы POST отвечал мгновенно; результат прилетает по SSE.
+    """
+    brief_ready = brief.is_ready()
+    try:
+        goal = brief.get().get("goal", "") or brief.summary()
+        strategy = office_loop._strategy_text()
+        ms = milestones.all_stages()
+        try:
+            open_d = org.open_departments()
+            depts_text = ", ".join(open_d) if open_d else "(нет открытых отделов)"
+        except Exception:
+            depts_text = ""
+        board = plan_module.board_summary() if plan_module.is_generated() else ""
+        res = await orchestrator.interpret_directive(
+            goal, strategy, ms, depts_text, board, text, publish=bus.publish)
+    except Exception:
+        memory.remember("Указание пользователя офису", text)  # фолбэк — прежнее поведение
+        if not brief_ready:
+            brief.set_brief({"summary": text[:600], "goal": text[:300], "niche": ""})
+        return
+
+    scope = (res.get("scope") or "steer").strip()
+    reply = (res.get("reply") or "").strip()
+    directive = (res.get("directive") or "").strip()
+    ops = res.get("milestone_ops") or []
+    new_tasks = res.get("new_tasks") or []
+    changes: list[str] = []
+
+    # Брифа ещё нет, а это осмысленный запрос → делаем его ЦЕЛЬЮ проекта. Тогда менеджер
+    # запустит офис и он сам спланирует работу (bootstrap). Без этого «написал в чат —
+    # ничего не происходит»: офис не стартует, задачи некому исполнять.
+    if scope == "steer" and not brief_ready:
+        brief.set_brief({"summary": text[:600], "goal": text[:300], "niche": ""})
+        memory.remember("Указание предпринимателя (приоритет)", directive or text)
+        await bus.publish({"type": "system",
+                           "text": "📝 Принял запрос как цель проекта — команда приступает к работе."})
+    elif scope == "steer":
+        # приоритетная директива — её чтят CEO и лидеры в своих решениях
+        memory.remember("Указание предпринимателя (приоритет)", directive or text)
+
+        for op in ops if isinstance(ops, list) else []:
+            try:
+                kind = (op.get("op") or "").strip()
+                if kind == "add" and op.get("title"):
+                    milestones.insert_business_stage(op["title"], op.get("after"))
+                    changes.append(f"новый этап «{op['title'][:40]}»")
+                elif kind == "retitle" and op.get("id") and op.get("title") and milestones.retitle(op["id"], op["title"]):
+                    changes.append(f"этап → «{op['title'][:40]}»")
+                elif kind == "focus" and op.get("id"):
+                    milestones.mark_active(op["id"]); changes.append("сдвинут фокус этапов")
+                elif kind == "note" and op.get("id") and op.get("text"):
+                    milestones.add_item(op["id"], op["text"], agent_id="orchestrator_1", role="orchestrator")
+            except Exception:
+                pass
+
+        for t in new_tasks if isinstance(new_tasks, list) else []:
+            role = (t.get("role") or "").strip()
+            title = (t.get("title") or "").strip()
+            if role in _STEER_ROLES and title:
+                plan_module.add_task(title, role, t.get("done_criterion", ""), requested_by="orchestrator_1")
+                changes.append(f"задача «{title[:36]}» → {role}")
+
+        if ops or new_tasks:
+            office_loop.wake_tenant()  # офис мог быть в мониторинге — пусть переоценит
+
+    # ответ CEO в общий чат (предприниматель видит, что его услышали)
+    if reply:
+        cmsg = office_channel.post("orchestrator_1", "orchestrator", reply)
+        await bus.publish({"type": "office_chat", "from": "orchestrator_1", "role": "orchestrator",
+                           "text": reply, "id": cmsg["id"]})
+    if changes:
+        await bus.publish({"type": "system", "text": "📌 План обновлён: " + "; ".join(changes[:6])})
+
+
 @app.post("/api/chat")
 async def post_chat(request: Request):
-    """Пользователь пишет сообщение всем агентам в общий канал офиса."""
+    """Предприниматель пишет в общий канал офиса. Сообщение сохраняется и сразу
+    отдаётся, а CEO в фоне осмысливает его и вписывает в работу (ответ + правки этапов/доски)."""
     data = await request.json()
     text = (data.get("text") or "").strip()
     if not text:
         return JSONResponse({"error": "text обязателен"}, status_code=400)
     msg = office_channel.post("user", "user", text)
-    # Команда пользователя в общий чат — это директива: подмешиваем её в решения
-    # CEO/лидеров (блок «УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ)»), иначе цикл её не увидит.
-    memory.remember("Указание пользователя офису", text)
     await bus.publish({"type": "office_chat", "from": "user", "role": "user",
                        "text": text, "id": msg["id"]})
+    # CEO-триаж в фоне (контекст тенанта копируется в задачу автоматически)
+    asyncio.create_task(_steer_from_chat(text))
     return {"ok": True, "message": msg}

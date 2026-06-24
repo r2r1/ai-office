@@ -39,6 +39,13 @@ _agent_task: dict[str, str] = {}        # agent_id -> id задачи плана
 _completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
 
 
+def wake_tenant() -> None:
+    """Внешний сигнал (новая директива предпринимателя из чата): снимаем флаг
+    «цель достигнута», чтобы офис, ушедший в режим мониторинга, переоценил работу
+    и подхватил новые задачи/этапы в ближайшем цикле."""
+    _completion_announced.pop(ctx.get_tenant(), None)
+
+
 def _fallback_plan(goal: str) -> list[dict]:
     """Детерминированный план под типовой результат, когда LLM-генерация плана недоступна.
     Гарантирует, что офис всегда plan-driven (а не уходит в LLM-хаос)."""
@@ -97,8 +104,12 @@ def _save_strategy(strategy: str) -> None:
 async def run() -> None:
     while True:
         try:
-            for ws in saas_store.all_workspaces():
-                tid = ws["id"]
+            # Тенанты-воркспейсы + «default» (анонимный/демо) — иначе у демо-юзера
+            # офис НИКОГДА не запускается и любые задачи/указания из чата не исполняются.
+            tids = [ws["id"] for ws in saas_store.all_workspaces()]
+            if "default" not in tids:
+                tids.append("default")
+            for tid in tids:
                 task = _office_tasks.get(tid)
                 if task and not task.done():
                     continue
