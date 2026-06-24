@@ -24,25 +24,31 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #050505;
+  --bg: #060606;
+  /* НЕЙТРАЛЬНО-серый градиент фона (без синевы) */
+  --bg-grad: radial-gradient(140% 110% at 50% -10%, #1a1a1a 0%, #101010 38%, #060606 75%);
   --text: #ffffff;
   --text-dim: #9a9a9a;
   --muted: #6d6d6d;
   --faint: #4a4a4a;
   --whisper: #3a3a3a;
   --ghost: #2a2a2a;
-  --surface: rgba(18,18,18,0.45);
-  --surface-strong: rgba(20,20,20,0.7);
-  --surface-soft: rgba(10,10,10,0.4);
-  --surface-card: #121214;
-  --surface-head: #0d0d0e;
-  --hairline: rgba(255,255,255,0.06);
-  --hairline-strong: rgba(255,255,255,0.12);
-  --hairline-soft: rgba(255,255,255,0.04);
-  --inset-hi: rgba(255,255,255,0.05);
-  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35), 0 24px 60px rgba(0,0,0,0.35);
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.25), 0 4px 12px rgba(0,0,0,0.25);
-  --shadow-lg: 0 2px 4px rgba(0,0,0,0.25), 0 16px 48px rgba(0,0,0,0.45), 0 48px 120px rgba(0,0,0,0.4);
+  /* НЕЙТРАЛЬНО-серое глянцевое стекло (R=G=B, никакого синего), чуть высветлено */
+  --surface: rgba(44,44,44,0.55);
+  --surface-strong: rgba(54,54,54,0.8);
+  --surface-soft: rgba(32,32,32,0.5);
+  --surface-card: #242424;
+  --surface-head: #1f1f1f;
+  --hairline: rgba(255,255,255,0.10);
+  --hairline-strong: rgba(255,255,255,0.22);
+  --hairline-soft: rgba(255,255,255,0.05);
+  --inset-hi: rgba(255,255,255,0.12);
+  /* глянцевый блик сверху стекла */
+  --glass-sheen: rgba(255,255,255,0.09);
+  /* тени почти убраны — стекло держится на blur + hairline, а не на тенях */
+  --shadow: 0 1px 3px rgba(0,0,0,0.16);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.12);
+  --shadow-lg: 0 2px 10px rgba(0,0,0,0.20);
   --blob-opacity: 1;
   --grain-opacity: 0.04;
   --avatar-active: #ffffff;
@@ -52,25 +58,30 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f4f3ef;
+  /* фон чуть теплее/темнее, чтобы белые карточки выделялись */
+  --bg: #eceae3;
+  --bg-grad: radial-gradient(140% 110% at 50% -10%, #f6f5f1 0%, #efede7 40%, #e7e5dd 80%);
   --text: #181818;
   --text-dim: #4a4a4a;
   --muted: #6d6d6d;
   --faint: #9a9a9a;
   --whisper: #b0b0b0;
   --ghost: #cccccc;
-  --surface: rgba(255,255,255,0.55);
-  --surface-strong: rgba(255,255,255,0.78);
-  --surface-soft: rgba(255,255,255,0.4);
-  --surface-card: #fbfbf9;
-  --surface-head: #f7f6f2;
-  --hairline: rgba(0,0,0,0.08);
-  --hairline-strong: rgba(0,0,0,0.14);
-  --hairline-soft: rgba(0,0,0,0.04);
-  --inset-hi: rgba(255,255,255,0.6);
-  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.08), 0 24px 60px rgba(0,0,0,0.1);
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  --shadow-lg: 0 2px 4px rgba(0,0,0,0.06), 0 16px 48px rgba(0,0,0,0.12), 0 48px 120px rgba(0,0,0,0.14);
+  /* передний слой — чистый белый, ярче тёплого фона */
+  --surface: rgba(255,255,255,0.72);
+  --surface-strong: rgba(255,255,255,0.9);
+  --surface-soft: rgba(255,255,255,0.55);
+  --surface-card: #ffffff;
+  --surface-head: #ffffff;
+  --hairline: rgba(0,0,0,0.10);
+  --hairline-strong: rgba(0,0,0,0.16);
+  --hairline-soft: rgba(0,0,0,0.05);
+  --inset-hi: rgba(255,255,255,0.85);
+  --glass-sheen: rgba(255,255,255,0.5);
+  /* тени почти убраны — чистое светлое стекло */
+  --shadow: 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.03);
+  --shadow-lg: 0 1px 8px rgba(0,0,0,0.05);
   --blob-opacity: 0.5;
   --grain-opacity: 0.025;
   --avatar-active: #181818;
@@ -119,12 +130,20 @@ body {
 }
 
 /* утилиты */
-/* Стеклянные островки (меню, основная карта, панели). Лёгкий blur ради FPS. */
-.glass { background: var(--surface); -webkit-backdrop-filter: blur(13px) saturate(120%); backdrop-filter: blur(13px) saturate(120%);
-  border: 1px solid var(--hairline); box-shadow: var(--shadow-lg), 0 1px 0 var(--inset-hi) inset; }
-/* Карточки без backdrop-filter — непрозрачная подложка (дёшево для GPU). */
-.card { background: var(--surface-card); border: 1px solid var(--hairline);
-  box-shadow: var(--shadow), 0 1px 0 var(--inset-hi) inset; }
+/* СИЛЬНОЕ liquid glass: глубокий blur + сатурация, яркий кант. БЕЗ градиента-заливки. */
+.glass {
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-lg), 0 1px 0 var(--inset-hi) inset;
+}
+/* Карточки — тоже стеклянные (liquid glass), полегче по blur ради FPS. Без градиента. */
+.card {
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow), 0 1px 0 var(--inset-hi) inset;
+}
 .display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; }
 .mono { font-family: var(--font-mono); }
 

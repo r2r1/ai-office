@@ -2,8 +2,12 @@ import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
+import type { ReactNode } from "react"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel } from "./ui"
+import { Modal, ModalSection, ModalPre } from "../components/Modal"
 import { useThrottled } from "../hooks"
+
+type ModalContent = { title: ReactNode; subtitle?: ReactNode; body: ReactNode } | null
 
 const TABS = [
   { id: "milestones", label: "Этапы" },
@@ -18,6 +22,7 @@ export function ProjectView() {
   const [deliverables, setDeliverables] = useState<any[]>([])
   const tasks = state.plan.tasks || []
   const tick = useThrottled(state.feed.length, 2500)
+  const [modal, setModal] = useState<ModalContent>(null)
 
   useEffect(() => {
     api.milestones().then(d => setMilestones(d.stages || []))
@@ -45,15 +50,57 @@ export function ProjectView() {
       <ViewHead title="Проект" sub={state.ready ? state.progress.note || "Офис работает" : "Ожидание брифа"} />
       <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
 
-      {tab === "milestones" && <MilestonesTab milestones={milestones} progress={state.progress} />}
+      {tab === "milestones" && <MilestonesTab milestones={milestones} progress={state.progress} onOpen={setModal} />}
       {tab === "tasks"      && <TasksTab tasks={tasks} metrics={metrics} />}
-      {tab === "results"    && <ResultsTab deliverables={deliverables} />}
+      {tab === "results"    && <ResultsTab deliverables={deliverables} onOpen={setModal} />}
+
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.title} subtitle={modal?.subtitle}>
+        {modal?.body}
+      </Modal>
     </ViewShell>
   )
 }
 
 // ── Этапы ────────────────────────────────────────────────────────────────────
-function MilestonesTab({ milestones, progress }: { milestones: any[]; progress: any }) {
+function stageModal(m: any, idx: number): ModalContent {
+  const items = m.items || []
+  return {
+    title: m.title || m.name || m.id,
+    subtitle: `Этап ${idx + 1} · ${m.status === "done" ? "готов" : m.status === "active" ? "в работе" : "ожидает"}`,
+    body: (
+      <>
+        {m.description && (
+          <ModalSection label="Описание">
+            <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{m.description}</div>
+          </ModalSection>
+        )}
+        {m.summary && (
+          <ModalSection label="Что достигнуто">
+            <ModalPre>{m.summary}</ModalPre>
+          </ModalSection>
+        )}
+        {items.length > 0 && (
+          <ModalSection label={`Записи о работе · ${items.length}`}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.map((it: any, i: number) => (
+                <div key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.55, paddingLeft: 12,
+                  borderLeft: "2px solid var(--hairline-strong)" }}>
+                  {it.role && <span style={{ color: "var(--mercury-a)", marginRight: 6 }}>{roleName(it.role)}</span>}
+                  {it.text}
+                </div>
+              ))}
+            </div>
+          </ModalSection>
+        )}
+        {!m.description && !m.summary && items.length === 0 && (
+          <div style={{ color: "var(--muted)", fontSize: 13 }}>По этому этапу пока нет записей.</div>
+        )}
+      </>
+    ),
+  }
+}
+
+function MilestonesTab({ milestones, progress, onOpen }: { milestones: any[]; progress: any; onOpen: (c: ModalContent) => void }) {
   if (milestones.length === 0) return (
     <ViewBody>
       <Empty icon="◎" text="Этапы проекта ещё не сформированы"
@@ -73,7 +120,8 @@ function MilestonesTab({ milestones, progress }: { milestones: any[]; progress: 
           const isCurrent = m.id === currentId
           const isDone = stageInfo?.status === "done"
           return (
-            <Card key={m.id || i} style={{ position: "relative", overflow: "hidden",
+            <Card key={m.id || i} onClick={() => onOpen(stageModal({ ...m, status: stageInfo?.status }, i))}
+              style={{ position: "relative", overflow: "hidden",
               borderColor: isCurrent ? "rgba(255,172,46,0.3)" : isDone ? "rgba(160,224,171,0.2)" : undefined }}>
               {isCurrent && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "var(--mercury-a)" }} />}
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingLeft: isCurrent ? 8 : 0 }}>
@@ -84,8 +132,11 @@ function MilestonesTab({ milestones, progress }: { milestones: any[]; progress: 
                     {isDone && <Pill color="#a0e0ab">Готово</Pill>}
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{m.title || m.name || m.id}</div>
-                  {m.description && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{m.description}</div>}
-                  {m.summary && <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 8, lineHeight: 1.5, borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10 }}>{m.summary}</div>}
+                  {m.description && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5,
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.description}</div>}
+                  {m.summary && <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 8, lineHeight: 1.5, borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10,
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.summary}</div>}
+                  <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 8 }}>Нажмите, чтобы открыть полностью →</div>
                 </div>
                 <div className="mono" style={{ fontSize: 22, color: isDone ? "#a0e0ab" : isCurrent ? "var(--mercury-a)" : "var(--faint)", flexShrink: 0 }}>
                   {isDone ? "✓" : isCurrent ? "▶" : String(i + 1).padStart(2, "0")}
@@ -162,7 +213,7 @@ function TasksTab({ tasks, metrics }: { tasks: any[]; metrics: { label: string; 
 }
 
 // ── Итоги / Результаты ────────────────────────────────────────────────────────
-function ResultsTab({ deliverables }: { deliverables: any[] }) {
+function ResultsTab({ deliverables, onOpen }: { deliverables: any[]; onOpen: (c: ModalContent) => void }) {
   if (deliverables.length === 0) return (
     <ViewBody>
       <Empty icon="◎" text="Готовые материалы появятся здесь"
@@ -174,21 +225,28 @@ function ResultsTab({ deliverables }: { deliverables: any[] }) {
     <ViewBody>
       <SectionLabel style={{ marginBottom: 16 }}>Готовые материалы · {deliverables.length}</SectionLabel>
       <div style={{ display: "grid", gap: 12 }}>
-        {deliverables.map((d: any, i: number) => (
-          <Card key={i}>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
-              <Pill accent>{roleName(d.role)}</Pill>
-              <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 500 }}>{d.title}</span>
-            </div>
-            {(d.content || d.result) && (
-              <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.6,
-                display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden",
-                whiteSpace: "pre-wrap", borderTop: "1px solid var(--hairline-soft)", paddingTop: 10, marginTop: 4 }}>
-                {d.content || d.result}
+        {deliverables.map((d: any, i: number) => {
+          const full = d.content || d.result || ""
+          return (
+            <Card key={i} onClick={() => onOpen({
+              title: roleName(d.role), subtitle: d.title || d.task,
+              body: <ModalPre>{full}</ModalPre>,
+            })}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+                <Pill accent>{roleName(d.role)}</Pill>
+                <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 500 }}>{d.title}</span>
               </div>
-            )}
-          </Card>
-        ))}
+              {full && (
+                <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.6,
+                  display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden",
+                  whiteSpace: "pre-wrap", borderTop: "1px solid var(--hairline-soft)", paddingTop: 10, marginTop: 4 }}>
+                  {full}
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 8 }}>Нажмите, чтобы открыть полностью →</div>
+            </Card>
+          )
+        })}
       </div>
     </ViewBody>
   )

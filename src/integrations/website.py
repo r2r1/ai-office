@@ -110,10 +110,26 @@ async def _publish_site(creds: dict, params: dict) -> str:
     title = (params.get("title") or "").strip()
     idx_rel = f"{directory}/index.html" if directory else "index.html"
     idx = workspace.resolve(idx_rel)
+    # Авто-детект: агент часто зовёт publish_site без directory (или с неверной) —
+    # вместо бессмысленной ошибки находим index.html там, где он реально лежит.
     if idx is None or not idx.is_file():
-        return (f"Не найден {idx_rel}. Сначала напиши через write_file полноценный сайт: "
-                "index.html (главная) + при необходимости другие страницы (about.html, services.html), "
-                "css/style.css, js/script.js, картинки. Затем опубликуй папку через publish_site.")
+        for cand in ("site", "", "public", "dist", "www", "build"):
+            cand_rel = f"{cand}/index.html" if cand else "index.html"
+            ci = workspace.resolve(cand_rel)
+            if ci is not None and ci.is_file():
+                directory, idx, idx_rel = cand, ci, cand_rel
+                break
+    if idx is None or not idx.is_file():
+        for f in workspace.list_files():  # последний шанс — любой */index.html
+            if f["path"].endswith("index.html"):
+                idx_rel = f["path"]
+                directory = idx_rel.rsplit("/", 1)[0] if "/" in idx_rel else ""
+                idx = workspace.resolve(idx_rel)
+                break
+    if idx is None or not idx.is_file():
+        return ("Не найден index.html. Сначала напиши через write_file сайт в папке site/: "
+                "index.html (главная) + css/style.css, js/script.js, при необходимости другие "
+                "страницы. Публиковать не обязательно — офис опубликует папку site/ сам.")
     files = workspace.list_dir(directory)
     tid = ctx.get_tenant()
     slug = sites.make_slug(title or directory or "site")

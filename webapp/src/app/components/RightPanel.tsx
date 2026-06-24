@@ -44,8 +44,8 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
         flexShrink: 0, height: "100%", display: "flex", flexDirection: "column",
         borderRadius: "var(--radius-xl)",
         background: "var(--surface)",
-        backdropFilter: "blur(13px) saturate(120%)", WebkitBackdropFilter: "blur(13px) saturate(120%)",
-        border: "1px solid var(--hairline)",
+        backdropFilter: "blur(30px) saturate(180%)", WebkitBackdropFilter: "blur(30px) saturate(180%)",
+        border: "1px solid var(--hairline-strong)",
         boxShadow: "var(--shadow-lg), 0 1px 0 var(--inset-hi) inset",
         overflow: "hidden", position: "relative",
       }}>

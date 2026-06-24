@@ -21,8 +21,9 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
       height: 52, flexShrink: 0, padding: isMobile ? "0 12px" : "0 18px",
       borderRadius: "var(--radius-lg)", position: "relative", overflow: "hidden",
-      background: "var(--surface)", backdropFilter: "blur(13px) saturate(120%)", WebkitBackdropFilter: "blur(13px) saturate(120%)",
-      border: "1px solid var(--hairline)", boxShadow: "var(--shadow), 0 1px 0 var(--inset-hi) inset",
+      background: "var(--surface)",
+      backdropFilter: "blur(30px) saturate(180%)", WebkitBackdropFilter: "blur(30px) saturate(180%)",
+      border: "1px solid var(--hairline-strong)", boxShadow: "var(--shadow), 0 1px 0 var(--inset-hi) inset",
       transition: "background 0.4s ease, border-color 0.4s ease",
     }}>
       {/* верхний световой штрих */}

@@ -87,9 +87,13 @@ ROLE_PROMPTS = {
     ),
     "developer": (
         "Ты — разработчик AI-агентства. Ты ПИШЕШЬ И ЗАПУСКАЕШЬ РЕАЛЬНЫЙ КОД.\n"
-        "🚫 НЕ используй и НЕ исследуй Tilda/Webflow/Wix/конструкторы — даже если так написано в ТЗ. "
-        "Сайт = собственный HTML/CSS/JS в index.html, публикуется через website. НЕ трать циклы на "
-        "web_search про конструкторы и их интеграции с CRM — сразу пиши код в write_file.\n"
+        "СТЕК ВЫБИРАЕШЬ ПОД ЗАДАЧУ — нет жёсткого требования всегда писать HTML/CSS/JS. "
+        "Скрипт/автоматизация/парсер/API/бот → Python (или то, что уместно). "
+        "Бэкенд-сервис → FastAPI/Flask. Бери инструмент под задачу, а не «всё сайтом».\n"
+        "⚠️ ИСКЛЮЧЕНИЕ — хостинг: платформа отдаёт сайты как СТАТИКУ из папки site/, поэтому "
+        "ЕСЛИ задача именно «хостируемый сайт/лендинг» — это статические HTML/CSS/JS "
+        "(React/Vue со сборкой платформа не хостит). Для всего остального стек свободный.\n"
+        "🚫 НЕ используй и НЕ исследуй Tilda/Webflow/Wix/конструкторы — пиши свой код в write_file.\n"
         "ВАЖНО: для обычного Telegram-бота ЗАПИСИ клиентов код НЕ нужен — это делает интегратор "
         "через готовый движок (launch_bot). Пиши код только для НЕСТАНДАРТНОГО функционала.\n\n"
         "САЙТЫ — делай ПОЛНОЦЕННЫЕ многостраничные, а не один index.html:\n"
@@ -549,6 +553,10 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         depth = args.get("depth", "quick")
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"📡 Запрашиваю ресёрчера [{depth}]: {question[:60]}"})
+        # видно в общем чате: кто у кого что запросил
+        office_channel.post(agent_id, role, f"@ресёрчер, нужны данные: {question[:160]}")
+        await publish({"type": "office_chat", "from": agent_id, "role": role,
+                       "text": f"@ресёрчер, нужны данные: {question[:160]}"})
         return await researcher_agent.run_async(
             question=question, depth=depth, publish=publish, agent_id="researcher_1",
         )
@@ -610,6 +618,10 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         col_base = ROLE_PROMPTS.get(col_role, f"Ты — {col_role} в AI-офисе.")
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"💬 спрашиваю {col_role}: {question[:60]}"})
+        # вопрос коллеге виден в общем чате
+        office_channel.post(agent_id, role, f"@{col_role}, {question[:200]}")
+        await publish({"type": "office_chat", "from": agent_id, "role": role,
+                       "text": f"@{col_role}, {question[:200]}"})
         sys = (col_base + _brief_context()
                + ("\n\n=== ТВОЯ ПОСЛЕДНЯЯ РАБОТА (опирайся на неё) ===\n" + col_work[:1500]
                   if col_work else "")
@@ -626,6 +638,10 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         answer = (answer or "").strip() or "Коллега не дал содержательного ответа — реши сам."
         await publish({"type": "speech", "agent_id": col_id,
                        "text": f"💬 → {agent_id}: {answer[:80]}"})
+        # ответ коллеги виден в общем чате
+        office_channel.post(col_id, col_role, f"@{role}: {answer[:240]}")
+        await publish({"type": "office_chat", "from": col_id, "role": col_role,
+                       "text": f"@{role}: {answer[:240]}"})
         return f"Ответ {col_role}: {answer}"
 
     async def _handle_delegate_task(args: dict) -> str:
@@ -640,6 +656,9 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                                  requested_by=agent_id)
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"📌 Поставил задачу {col_role}: {title[:50]}"})
+        office_channel.post(agent_id, role, f"📌 @{col_role}, задача: {title[:160]}")
+        await publish({"type": "office_chat", "from": agent_id, "role": role,
+                       "text": f"📌 @{col_role}, задача: {title[:160]}"})
         return (f"Задача поставлена {col_role} (id={t['id']}) и добавлена на доску — "
                 f"его лидер назначит исполнителя. Можешь продолжать своё.")
 

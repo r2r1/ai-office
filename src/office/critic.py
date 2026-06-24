@@ -127,5 +127,7 @@ def critique_text(problems: list[str]) -> str:
     if not problems:
         return ""
     lines = "\n".join(f"- {p}" for p in problems)
-    return ("⚠ Приёмка не пройдена. Исправь и опубликуй заново через "
-            "use_integration('website','publish_site',{directory:'site',...}):\n" + lines)
+    # НЕ просим агента публиковать — офис публикует сам. Иначе агент зацикливается на
+    # publish_site (часто с неверной directory) и упирается в таймаут.
+    return ("⚠ Нужны небольшие правки. Исправь прямо в существующих файлах папки site/ "
+            "(НЕ начинай с нуля, НЕ вызывай publish_site — офис опубликует сам):\n" + lines)

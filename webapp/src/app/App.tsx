@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { TopBar } from "./components/TopBar"
 import { NavRail } from "./components/NavRail"
+import { TabBridge } from "./components/TabBridge"
 import { OfficeView } from "./components/OfficeView"
 import { RightPanel } from "./components/RightPanel"
 import { ProjectView } from "./views/ProjectView"
@@ -22,6 +23,7 @@ export default function App() {
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   )
   const { state } = useOffice()
+  const rowRef = useRef<HTMLDivElement>(null)
 
   const openAgent = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
   const openChat  = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
@@ -46,7 +48,7 @@ export default function App() {
   return (
     <div style={{
       display: "flex", flexDirection: "column", width: "100vw", height: "100vh",
-      background: "var(--bg)", color: "var(--text)", position: "relative",
+      background: "var(--bg-grad, var(--bg))", color: "var(--text)", position: "relative",
       transition: "background 0.4s ease, color 0.4s ease", overflow: "hidden",
     }}>
       {/* ── Статичный Mercury-амбиент (рисуется один раз, без анимаций/фильтров → 0 нагрузки на GPU) ── */}
@@ -69,11 +71,13 @@ export default function App() {
           theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
           onOpenAccount={() => changeView("account")} isMobile={isMobile} />
 
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, gap }}>
+        <div ref={rowRef} style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, gap, position: "relative" }}>
+
+          {!isMobile && <TabBridge active={view} enabled={!isMobile} containerRef={rowRef} />}
           {!isMobile && <NavRail active={view} onChange={changeView} />}
 
           {/* Основная область: glass-островок */}
-          <div className="glass" style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden",
+          <div id="main-panel" className="glass" style={{ flex: 1, minWidth: 0, position: "relative", 
             borderRadius: isMobile ? "var(--radius-lg)" : "var(--radius-xl)",
             transition: "background 0.4s ease, border-color 0.4s ease" }}>
             <AnimatePresence mode="wait" initial={false}>
@@ -84,8 +88,8 @@ export default function App() {
                 {view === "office"      && <OfficeView onOpenAgent={openAgent} />}
                 {view === "project"     && <ProjectView />}
                 {view === "team"        && <TeamView onOpenChat={openChat} />}
-                {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
                 {view === "results"     && <ResultsView />}
+                {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
                 {view === "connections" && <ConnectionsView />}
                 {view === "account"     && <AccountView />}
               </motion.div>

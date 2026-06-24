@@ -33,6 +33,7 @@ from src.office import plan as plan_module
 from src.agents import onboarding
 from src.agents import orchestrator
 from src.office import org
+from src.office import intake as intake_module
 from src.core import llm as llm_core
 from src.integrations import registry as integrations_registry
 from src.saas import db as saas_db, store as saas_store, auth as saas_auth
@@ -961,12 +962,67 @@ async def get_chat():
 _STEER_ROLES = {"developer", "designer", "integrator", "marketer", "salesman"}
 
 
+async def _post_ceo(text: str) -> None:
+    """CEO пишет в общий чат (и в SSE)."""
+    cmsg = office_channel.post("orchestrator_1", "orchestrator", text)
+    await bus.publish({"type": "office_chat", "from": "orchestrator_1", "role": "orchestrator",
+                       "text": text, "id": cmsg["id"]})
+
+
+async def _intake_from_chat(text: str) -> None:
+    """Discovery ПЕРЕД запуском офиса: сначала уточняем задачу, потом строим бриф и стартуем.
+    Глупый офис строил бы вслепую; умный — задаёт вопросы и понимает бизнес клиента."""
+    if not intake_module.active():
+        # первое сообщение — это идея клиента. Задаём уточняющие вопросы, НЕ начинаем работу.
+        await bus.publish({"type": "thinking", "agent_id": "orchestrator_1",
+                           "text": "Уточняю задачу перед стартом…"})
+        try:
+            qs = await onboarding.make_questions(text, publish=bus.publish)
+        except Exception:
+            qs = ["Какой результат вы считаете успехом?",
+                  "Кто ваша целевая аудитория и в какой нише?",
+                  "Что уже есть — продукт, бюджет, наработки, команда?"]
+        intake_module.start(text, qs)
+        reply = ("Класс, что хотите это запустить 🚀 Чтобы сделать по делу, а не строить вслепую, "
+                 "уточню несколько вещей:\n\n" + "\n".join(f"• {q}" for q in qs) +
+                 "\n\nОтветьте одним сообщением — и команда сразу приступит: исследование рынка → "
+                 "стратегия → план. Это не «лендинг за 5 минут», а настоящая работа.")
+        await _post_ceo(reply)
+        return
+
+    # это ответы на вопросы → собираем бриф и запускаем офис
+    st = intake_module.add_answer(text)
+    await bus.publish({"type": "thinking", "agent_id": "orchestrator_1",
+                       "text": "Формирую бриф по вашим ответам…"})
+    qa = [{"q": "; ".join(st.get("questions", [])), "a": "\n".join(st.get("answers", []))}]
+    try:
+        brief_data = await onboarding.build_brief(st.get("idea", ""), qa, publish=bus.publish)
+    except Exception:
+        joined = (st.get("idea", "") + " — " + " ".join(st.get("answers", []))).strip()
+        brief_data = {"summary": joined[:600], "goal": st.get("idea", "")[:300], "niche": ""}
+    brief.set_brief(brief_data)
+    memory.remember("Бриф клиента (приоритет)", brief_data.get("summary", ""))
+    intake_module.clear()
+    reply = (f"Принял ✅ Вот как я понял задачу:\n\n{brief_data.get('summary', '')}\n\n"
+             "Команда приступает: ресёрчер изучает рынок, стратег считает модель, дальше — "
+             "стратегия и план. Это займёт время — делаем по-настоящему. Пишите сюда в любой "
+             "момент, чтобы направлять или уточнять.")
+    await _post_ceo(reply)
+
+
 async def _steer_from_chat(text: str) -> None:
-    """CEO-триаж сообщения предпринимателя из общего чата: понять запрос и ОРГАНИЧНО
-    вписать в текущую работу — ответить, подправить этапы, поставить задачи, сохранить
-    директиву. Запускается в фоне, чтобы POST отвечал мгновенно; результат прилетает по SSE.
+    """Сообщение предпринимателя из чата. Если офис ещё не запущен (нет брифа) — ведём
+    discovery (уточняющие вопросы → бриф → старт). Если офис работает — CEO-триаж: понять
+    и органично вписать в работу. В фоне, чтобы POST отвечал мгновенно.
     """
-    brief_ready = brief.is_ready()
+    # ── DISCOVERY: офис ещё не запущен — сначала уточняем, потом строим бриф ──
+    if not brief.is_ready():
+        try:
+            await _intake_from_chat(text)
+        except Exception:
+            memory.remember("Указание пользователя офису", text)  # не теряем сообщение
+        return
+
     try:
         goal = brief.get().get("goal", "") or brief.summary()
         strategy = office_loop._strategy_text()
@@ -981,8 +1037,6 @@ async def _steer_from_chat(text: str) -> None:
             goal, strategy, ms, depts_text, board, text, publish=bus.publish)
     except Exception:
         memory.remember("Указание пользователя офису", text)  # фолбэк — прежнее поведение
-        if not brief_ready:
-            brief.set_brief({"summary": text[:600], "goal": text[:300], "niche": ""})
         return
 
     scope = (res.get("scope") or "steer").strip()
@@ -992,15 +1046,7 @@ async def _steer_from_chat(text: str) -> None:
     new_tasks = res.get("new_tasks") or []
     changes: list[str] = []
 
-    # Брифа ещё нет, а это осмысленный запрос → делаем его ЦЕЛЬЮ проекта. Тогда менеджер
-    # запустит офис и он сам спланирует работу (bootstrap). Без этого «написал в чат —
-    # ничего не происходит»: офис не стартует, задачи некому исполнять.
-    if scope == "steer" and not brief_ready:
-        brief.set_brief({"summary": text[:600], "goal": text[:300], "niche": ""})
-        memory.remember("Указание предпринимателя (приоритет)", directive or text)
-        await bus.publish({"type": "system",
-                           "text": "📝 Принял запрос как цель проекта — команда приступает к работе."})
-    elif scope == "steer":
+    if scope == "steer":
         # приоритетная директива — её чтят CEO и лидеры в своих решениях
         memory.remember("Указание предпринимателя (приоритет)", directive or text)
 

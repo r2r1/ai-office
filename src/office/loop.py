@@ -50,7 +50,26 @@ def _fallback_plan(goal: str) -> list[dict]:
     """Детерминированный план под типовой результат, когда LLM-генерация плана недоступна.
     Гарантирует, что офис всегда plan-driven (а не уходит в LLM-хаос)."""
     g = (goal or "").lower()
-    if any(w in g for w in ("бот", "telegram", "телеграм", "бота")):
+    # ЯВНЫЙ запрос продукта (императив «сделай/нужен X»), а не упоминание X как продукта бизнеса.
+    wants_bot = any(p in g for p in ("нужен бот", "нужен телеграм", "сделай бот", "сделать бот",
+                                     "хочу бот", "бот для записи", "бот записи", "бот заявок",
+                                     "телеграм-бот", "telegram-бот", "запусти бот"))
+    wants_site = any(p in g for p in ("нужен сайт", "нужен лендинг", "сделай сайт", "сделай лендинг",
+                                      "сделать сайт", "сделать лендинг", "хочу сайт", "хочу лендинг",
+                                      "одностраничник", "landing page", "собери лендинг", "собери сайт"))
+    if not wants_bot and not wants_site:
+        # ПО УМОЛЧАНИЮ не строим вслепую: готовим план запуска + рекомендации и СПРАШИВАЕМ
+        # клиента, что делать первым. (Раньше тут всегда был лендинг — главная причина «глупости».)
+        return [
+            {"id": "t1",
+             "title": "На основе исследования и стратегии подготовить КОРОТКИЙ план запуска "
+                      "и рекомендации (позиционирование, оффер, первые 2-3 шага). В конце ОБЯЗАТЕЛЬНО "
+                      "через ask_user задать клиенту 1-2 вопроса: что строить первым (лендинг / бот / "
+                      "MVP / контент-план) и какие ресурсы есть. НЕ строй продукт, пока клиент не выбрал.",
+             "role": "marketer", "deps": [],
+             "done_criterion": "готов план запуска + клиенту задан вопрос, что делать дальше"},
+        ]
+    if wants_bot:
         return [
             {"id": "t1", "title": "Подготовить тексты, услуги и приветствие для бота",
              "role": "marketer", "deps": [], "done_criterion": "готовы тексты и список услуг"},
@@ -181,16 +200,17 @@ async def _run_office(tid: str) -> None:
         if _engagement_complete():
             if not _completion_announced.get(tid):
                 _completion_announced[tid] = True
-                await _publish_site_auto(publish)  # убеждаемся, что результат опубликован
-                # Прогресс-бар на 100%: все бизнес-этапы помечаем выполненными.
+                await _publish_site_auto(publish)  # если есть сайт — публикуем
+                # ЧЕСТНО: помечаем выполненным только активный этап, НЕ фейкуем будущие
+                # («масштабирование» и т.п.). Прогресс-бар отражает реальность, а не 100% всегда.
                 for s in milestones.all_stages():
-                    if s.get("status") != "done":
+                    if s.get("status") == "active":
                         milestones.set_status(s["id"], "done")
-                await _set_progress_note("🎉 Цель достигнута — результат готов и собирает заявки. "
-                                         "Офис в режиме мониторинга.", publish)
+                await _set_progress_note("✅ Запланированная работа выполнена. Жду указаний — что делаем дальше.", publish)
                 await publish({"type": "system",
-                               "text": "🎉 Все задачи выполнены. Офис перешёл в режим ожидания: "
-                                       "результат готов, ждём заявки/новые указания."})
+                               "text": "✅ Запланированная работа выполнена. Напишите в чат, что делать "
+                                       "дальше — команда продолжит. Построить полноценную компанию за один "
+                                       "прогон нельзя, поэтому двигаемся итерациями."})
             await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
             continue
         if milestones.all_business_done():
@@ -240,7 +260,18 @@ async def _heal_stuck_agents(publish) -> None:
             state.save_last_run(aid)  # короткий cooldown перед повтором
             tid = _agent_task.pop(aid, None)
             if tid and plan.is_generated():
-                plan.revert(tid)  # доска: вернуть зависшую задачу в очередь
+                # АНТИЦИКЛ: если завис дизайнер/разработчик, но сайт УЖЕ написан —
+                # не гоняем задачу по кругу заново. Публикуем что есть и принимаем задачу.
+                rec = registry.get(aid)
+                site_ready = any(f["path"].endswith("index.html") for f in workspace.list_files())
+                if rec and rec.role in ("designer", "developer") and site_ready:
+                    await _publish_site_auto(publish)
+                    plan.complete(tid)
+                    await publish({"type": "system",
+                                   "text": f"✅ {aid} долго думал, но сайт уже готов — задача {tid} "
+                                           f"принята и опубликована (без перезапуска)."})
+                    continue
+                plan.revert(tid)  # иначе — вернуть зависшую задачу в очередь
             await publish({"type": "system",
                            "text": f"🔧 {aid} завис (> {MAX_THINK_SECS}s) — сброшен, задача переназначится"})
 

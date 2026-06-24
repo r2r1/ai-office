@@ -3,7 +3,22 @@ import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, STATUS_COLOR } from "./ui"
 import { useThrottled } from "../hooks"
+import { motion } from "motion/react"
 import { roleName } from "../../data/roles"
+
+// анимированные точки «печатает…»
+function TypingDots() {
+  return (
+    <span style={{ display: "inline-flex", gap: 3, flexShrink: 0 }}>
+      {[0, 1, 2].map(i => (
+        <motion.span key={i}
+          animate={{ opacity: [0.25, 1, 0.25], y: [0, -2, 0] }}
+          transition={{ repeat: Infinity, duration: 1, delay: i * 0.18, ease: "easeInOut" }}
+          style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--mercury-a)", display: "inline-block" }} />
+      ))}
+    </span>
+  )
+}
 
 // дружелюбное имя отправителя (CEO вместо orchestrator_1, имя агента в личном чате)
 function senderName(m: any, fallback?: string): string {
@@ -44,7 +59,8 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   const tick = useThrottled(state.feed.length, 2000)
   useEffect(() => { setPending([]); load() }, [active]) // eslint-disable-line — смена собеседника
   useEffect(() => { load() }, [tick])                   // eslint-disable-line — живой апдейт
-  useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) }, [messages, pending])
+  useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) },
+    [messages, pending, state.agents[active]?.lastMessage, state.agents[active]?.status]) // eslint-disable-line
 
   async function send() {
     const text = input.trim()
@@ -68,6 +84,12 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   const headerSub  = active === "office"
     ? `Сообщение получат все ${agents.length} агентов`
     : (activeAgent?.lastMessage ?? "Личный диалог")
+
+  // «печатает…» с реальной активностью агента (что делает прямо сейчас)
+  const showTyping = active !== "office" && !!activeAgent && (sending || activeAgent.status === "thinking")
+  const typingLabel = (activeAgent?.status === "thinking" && activeAgent?.lastMessage)
+    ? activeAgent.lastMessage.slice(0, 130)
+    : "печатает ответ…"
 
   return (
     <ViewShell>
@@ -156,6 +178,21 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                 </div>
               )
             })}
+
+            {/* живой индикатор «печатает…» с реальной активностью агента */}
+            {showTyping && (
+              <div style={{ alignSelf: "flex-start", maxWidth: "82%" }}>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>{activeAgent?.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 14px",
+                  borderRadius: "var(--radius-md) var(--radius-md) var(--radius-md) 4px",
+                  background: "var(--surface-strong)", border: "1px solid rgba(255,172,46,0.25)" }}>
+                  <TypingDots />
+                  <span style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45 }}>
+                    {typingLabel}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ввод */}

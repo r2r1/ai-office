@@ -4,6 +4,7 @@ import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
+import { AgentDetailModal } from "../components/AgentDetailModal"
 import type { Agent } from "../types"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
@@ -29,6 +30,8 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
   const { state } = useOffice()
   const agents = Object.values(state.agents)
   const active = agents.filter(a => a.status === "active" || a.status === "thinking").length
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const detailEmoji = detailId ? state.agents[detailId]?.emoji : undefined
 
   // collapsing header (через MotionValue — без ре-рендеров на скролл)
   const scrollY     = useMotionValue(0)
@@ -84,18 +87,21 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
             <AnimatePresence>
               {agents.map((agent, i) => (
                 <AgentCard key={agent.id} agent={agent} index={i} onOpenChat={onOpenChat}
-                  initialModel={models[agent.id] || ""} presets={presets} />
+                  initialModel={models[agent.id] || ""} presets={presets}
+                  onOpenDetail={() => setDetailId(agent.id)} />
               ))}
             </AnimatePresence>
           </div>
         )}
       </div>
+
+      <AgentDetailModal agentId={detailId} emoji={detailEmoji} onClose={() => setDetailId(null)} onOpenChat={onOpenChat} />
     </div>
   )
 }
 
 // ── Карточка агента ──────────────────────────────────────────────────────────
-function AgentCard({ agent, index, onOpenChat, initialModel, presets }: { agent: Agent; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[] }) {
+function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDetail }: { agent: Agent; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[]; onOpenDetail?: () => void }) {
   const [model, setModel]       = useState(initialModel)
   const [editModel, setEditModel] = useState(false)
   const [saving, setSaving]     = useState(false)
@@ -123,14 +129,16 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets }: { agent:
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.3, delay: index * 0.04 }}
       style={{
-        background: "var(--surface)", border: `1px solid ${isActive ? "rgba(160,224,171,0.2)" : isThinking ? "rgba(255,172,46,0.15)" : "var(--hairline)"}`,
+        background: "var(--surface)",
+        border: `1px solid ${isActive ? "rgba(160,224,171,0.3)" : isThinking ? "rgba(255,172,46,0.25)" : "var(--hairline-strong)"}`,
         borderRadius: "var(--radius-lg)", padding: 24, display: "flex", flexDirection: "column", gap: 16,
-        backdropFilter: "blur(28px) saturate(160%)", transition: "border-color 0.3s",
-        boxShadow: isActive ? "0 0 0 1px rgba(160,224,171,0.08), 0 16px 48px rgba(0,0,0,0.25)" : "var(--shadow)",
+        backdropFilter: "blur(26px) saturate(180%)", WebkitBackdropFilter: "blur(26px) saturate(180%)", transition: "border-color 0.3s",
+        boxShadow: "var(--shadow), 0 1px 0 var(--inset-hi) inset",
       }}>
 
-      {/* Верхняя строка: аватар + имя + статус */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+      {/* Верхняя строка: аватар + имя + статус (клик → подробности) */}
+      <div onClick={onOpenDetail} title="Подробнее об агенте"
+        style={{ display: "flex", alignItems: "flex-start", gap: 14, cursor: onOpenDetail ? "pointer" : "default" }}>
         {/* Аватар с анимацией */}
         <div style={{ position: "relative", flexShrink: 0 }}>
           <motion.div
@@ -168,9 +176,9 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets }: { agent:
         </div>
       </div>
 
-      {/* Описание роли */}
+      {/* Описание роли (клик → подробности) */}
       {desc && (
-        <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6 }}>{desc}</div>
+        <div onClick={onOpenDetail} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, cursor: onOpenDetail ? "pointer" : "default" }}>{desc}</div>
       )}
 
       {/* Скиллы */}
