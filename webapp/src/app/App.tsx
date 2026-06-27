@@ -78,7 +78,7 @@ export default function App() {
 
           {/* Основная область: glass-островок */}
           <div id="main-panel" className="glass" style={{ flex: 1, minWidth: 0, position: "relative", 
-            borderRadius: isMobile ? "var(--radius-lg)" : "var(--radius-xl)",
+            borderRadius: isMobile ? "var(--radius-lg)" : "var(--radius-xl)", overflow: "hidden",
             transition: "background 0.4s ease, border-color 0.4s ease" }}>
             <AnimatePresence mode="wait" initial={false}>
               <motion.div key={view}

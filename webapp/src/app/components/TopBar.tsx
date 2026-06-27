@@ -19,7 +19,7 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
-      height: 52, flexShrink: 0, padding: isMobile ? "0 12px" : "0 18px",
+      height: 56, flexShrink: 0, padding: isMobile ? "0 12px" : "0 18px",
       borderRadius: "var(--radius-lg)", position: "relative", overflow: "hidden",
       background: "var(--surface)",
       backdropFilter: "blur(30px) saturate(180%)", WebkitBackdropFilter: "blur(30px) saturate(180%)",
@@ -62,19 +62,38 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
           background: connected ? "#a0e0ab" : "var(--whisper)",
           boxShadow: connected ? "0 0 6px rgba(160,224,171,0.6)" : "none",
         }} />
-        {!isMobile && cost > 0 && (
-          <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)", padding: "3px 12px",
-            border: "1px solid var(--hairline)", borderRadius: "var(--radius-pill)" }}>
-            ${cost.toFixed(4)}
-          </span>
+         {!isMobile && cost > 0 && (
+          <div style={{
+            padding: "5px 12px", borderRadius: "var(--radius-pill)",
+            background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+            fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-dim)",
+            display: "flex", alignItems: "center", gap: 4
+          }}>
+            <span style={{ opacity: 0.6 }}>$</span>
+            {cost.toFixed(4)}
+          </div>
         )}
         {!isMobile && <ModelPlaque model={model} onOpenAccount={onOpenAccount} />}
-        <button onClick={onToggleTheme} title="Тема" style={{
-          width: 30, height: 30, borderRadius: "var(--radius-pill)", cursor: "pointer",
-          border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)", fontSize: 14,
-          display: "flex", alignItems: "center", justifyContent: "center", transition: "color 0.2s, border-color 0.2s",
-        }}>
-          {theme === "dark" ? "◐" : "◑"}
+        <button 
+          onClick={onToggleTheme} 
+          title={theme === "dark" ? "Светлая тема" : "Темная тема"}
+          style={{
+            width: 32, height: 32, borderRadius: "var(--radius-md)", cursor: "pointer",
+            border: "1px solid var(--hairline)", background: "transparent", 
+            color: "var(--text-dim)", fontSize: 16,
+            display: "flex", alignItems: "center", justifyContent: "center", 
+            transition: "all 0.2s ease",
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = "var(--surface-soft)"
+            e.currentTarget.style.color = "var(--text)"
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = "transparent"
+            e.currentTarget.style.color = "var(--text-dim)"
+          }}
+        >
+          {theme === "dark" ? "☀" : "☾"}
         </button>
       </div>
     </header>
@@ -87,43 +106,24 @@ function ModelPlaque({ model, onOpenAccount }: { model: string; onOpenAccount?: 
   return (
     <div style={{ position: "relative" }}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <button onClick={onOpenAccount}
+     <button onClick={onOpenAccount}
         style={{
-          display: "flex", alignItems: "center", gap: 7, padding: "4px 11px",
+          display: "flex", alignItems: "center", gap: 8, padding: "5px 12px",
           borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-          background: "var(--surface-soft)", cursor: onOpenAccount ? "pointer" : "default",
-          transition: "border-color 0.15s",
-        }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(255,172,46,0.4)")}
-        onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--hairline)")}>
-        <span style={{ fontSize: 12, lineHeight: 1 }}>🧠</span>
-        <span style={{ fontSize: 9, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.5px" }}>модель</span>
-        <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)", maxWidth: 130,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {model || "загрузка…"}
+          background: hover ? "var(--surface-soft)" : "transparent",
+          cursor: onOpenAccount ? "pointer" : "default",
+          transition: "all 0.2s ease",
+        }}>
+        <span style={{ fontSize: 14, lineHeight: 1 }}>🧠</span>
+        <span className="mono" style={{ 
+          fontSize: 11, color: "var(--text-dim)", maxWidth: 120,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" 
+        }}>
+          {model || "Загрузка..."}
         </span>
       </button>
 
-      {hover && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 10px)", right: 0, width: 250, zIndex: 50,
-          padding: "13px 15px", borderRadius: "var(--radius-md)",
-          background: "var(--surface-strong)", backdropFilter: "blur(16px) saturate(140%)",
-          border: "1px solid var(--hairline-strong)", boxShadow: "var(--shadow)",
-          animation: "fade-in 0.15s ease",
-        }}>
-          {/* стрелочка */}
-          <div style={{ position: "absolute", top: -5, right: 18, width: 9, height: 9, transform: "rotate(45deg)",
-            background: "var(--surface-strong)", borderTop: "1px solid var(--hairline-strong)", borderLeft: "1px solid var(--hairline-strong)" }} />
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>🧠 «Мозг» офиса</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-dim)", lineHeight: 1.55 }}>
-            Это AI-модель, на которой думают все агенты. Дешевле — экономнее, мощнее — умнее.
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--mercury-a)", marginTop: 8, fontWeight: 500 }}>
-            Сменить → раздел «Аккаунт»
-          </div>
-        </div>
-      )}
+      
     </div>
   )
 }

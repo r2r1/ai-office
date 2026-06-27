@@ -12,11 +12,11 @@ type Phase = "loading" | "landing" | "app"
 export function Gate() {
   const [phase, setPhase] = useState<Phase>("loading")
   const [authOpen, setAuthOpen] = useState(false)
-  const [flags, setFlags] = useState({ github: false, dev: false, demo: false })
+  const [flags, setFlags] = useState({ github: false, google: false, dev: false, demo: false })
 
   const check = useCallback(async () => {
     const [me, bs] = await Promise.all([api.me(), api.briefStatus()])
-    setFlags({ github: !!me?.github_available, dev: !!me?.dev_login, demo: !!bs?.demo })
+    setFlags({ github: !!me?.github_available, google: !!me?.google_available, dev: !!me?.dev_login, demo: !!bs?.demo })
     if (me?.authenticated) { setPhase("app"); return }
     setPhase("landing")
   }, [])
@@ -36,6 +36,7 @@ export function Gate() {
         open={authOpen}
         onClose={() => setAuthOpen(false)}
         githubAvailable={flags.github}
+        googleAvailable={flags.google}
         devLogin={flags.dev}
         onSuccess={() => { setAuthOpen(false); setPhase("app") }}
       />

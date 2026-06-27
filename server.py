@@ -148,10 +148,12 @@ async def get_me(request: Request):
     """Кто вошёл + его рабочее пространство (тенант). Фронт строит интерфейс по этому."""
     user = current_user(request)
     if not user:
+        from src.integrations import google_oauth as _goauth
         return {
-            "authenticated": False,
-            "github_available": saas_auth.github_configured(),
-            "dev_login": saas_auth.ALLOW_DEV_LOGIN,
+            "authenticated":    False,
+            "github_available":  saas_auth.github_configured(),
+            "google_available":  _goauth.is_configured(),
+            "dev_login":         saas_auth.ALLOW_DEV_LOGIN,
         }
     ws = saas_store.workspace_for_user(user["id"])
     return {
@@ -239,6 +241,100 @@ async def github_callback(request: Request, code: str = "", state: str = ""):
     resp = RedirectResponse("/")
     _set_session_cookie(resp, user["id"])
     return resp
+
+
+@app.get("/auth/google/start")
+async def google_oauth_start(request: Request, mode: str = "connect"):
+    """
+    Шаг 1: редирект на страницу согласия Google.
+    mode=login   — вход в приложение (создаёт/находит пользователя, ставит сессию)
+    mode=connect — только привязывает Google как интеграцию (access к Sheets/Gmail/Calendar)
+    """
+    from src.integrations import google_oauth
+    if not google_oauth.is_configured():
+        return JSONResponse(
+            {"error": "Задайте GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET в .env"},
+            status_code=400,
+        )
+    import jwt as _jwt
+    tenant = saas_context.get_tenant()
+    state = _jwt.encode(
+        {"k": "google", "tid": tenant, "mode": mode, "exp": int(time.time()) + 600},
+        saas_auth.APP_SECRET, algorithm="HS256",
+    )
+    return RedirectResponse(google_oauth.authorization_url(state))
+
+
+@app.get("/auth/google/callback")
+async def google_oauth_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+):
+    """Шаг 2: Google вернул code → обмениваем токены, действуем по mode."""
+    if error:
+        return RedirectResponse("/webapp/?google_error=denied")
+    if not code:
+        return JSONResponse({"error": "нет code"}, status_code=400)
+
+    import jwt as _jwt
+    try:
+        payload = _jwt.decode(state, saas_auth.APP_SECRET, algorithms=["HS256"])
+        if payload.get("k") != "google":
+            raise ValueError
+        tenant_id = payload.get("tid", "default")
+        mode      = payload.get("mode", "connect")
+    except Exception:
+        return JSONResponse({"error": "неверный state"}, status_code=400)
+
+    from src.integrations import google_oauth
+    try:
+        tokens = await google_oauth.exchange_code(code)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    email = tokens.get("email", "")
+
+    if mode == "login":
+        # ── Вход в аккаунт ──────────────────────────────────────────────────
+        # Создаём или находим пользователя по email, ставим сессию
+        user = saas_store.get_or_create_dev_user(email or "google@unknown")
+        ws   = saas_store.workspace_for_user(user["id"])
+        if ws:
+            saas_context.set_tenant(ws["id"])
+            # Также сохраняем Google-токены как интеграцию в этом workspace
+            connections.save({
+                "name":   "google",
+                "type":   "oauth",
+                "fields": tokens,
+                "note":   f"Google OAuth ({email})" if email else "Google OAuth",
+            })
+        resp = RedirectResponse("/webapp/")
+        _set_session_cookie(resp, user["id"])
+        return resp
+
+    else:
+        # ── Подключение интеграции (connect) ─────────────────────────────────
+        saas_context.set_tenant(tenant_id)
+        connections.save({
+            "name":   "google",
+            "type":   "oauth",
+            "fields": tokens,
+            "note":   f"Google OAuth ({email})" if email else "Google OAuth",
+        })
+        return RedirectResponse("/webapp/?connected=google")
+
+
+@app.post("/auth/google/disconnect")
+async def google_oauth_disconnect(request: Request):
+    """Отозвать Google-токен и удалить подключение."""
+    uid = current_user(request)
+    if not uid:
+        return JSONResponse({"error": "не авторизован"}, status_code=401)
+    from src.integrations import google_oauth
+    await google_oauth.revoke()
+    return JSONResponse({"ok": True})
 
 
 @app.post("/auth/dev-login")
