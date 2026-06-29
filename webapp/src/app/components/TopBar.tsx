@@ -13,9 +13,11 @@ interface TopBarProps {
   onToggleTheme: () => void
   onOpenAccount?: () => void
   isMobile: boolean
+  understanding?: { score: number } | null
+  onUnderstandingClick?: () => void
 }
 
-export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -73,6 +75,9 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
             {cost.toFixed(4)}
           </div>
         )}
+        {!isMobile && understanding != null && (
+          <UnderstandingBadge score={understanding.score} onClick={onUnderstandingClick} />
+        )}
         {!isMobile && <ModelPlaque model={model} onOpenAccount={onOpenAccount} />}
         <button 
           onClick={onToggleTheme} 
@@ -97,6 +102,29 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
         </button>
       </div>
     </header>
+  )
+}
+
+/** Индикатор «Понимание компании X%». Кликабелен — открывает попап. */
+function UnderstandingBadge({ score, onClick }: { score: number; onClick?: () => void }) {
+  const [hover, setHover] = useState(false)
+  const color = score >= 70 ? "#a0e0ab" : score >= 40 ? "#ffac2e" : "var(--text-dim)"
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      title="Насколько офис знает твой бизнес"
+      style={{
+        display: "flex", alignItems: "center", gap: 6, padding: "5px 10px",
+        borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
+        background: hover ? "var(--surface-soft)" : "transparent",
+        cursor: "pointer", transition: "all 0.2s ease",
+      }}>
+      <span style={{ fontSize: 13 }}>🧠</span>
+      <span className="mono" style={{ fontSize: 11, color }}>
+        {score}%
+      </span>
+    </button>
   )
 }
 

@@ -865,6 +865,20 @@ async def run_file(request: Request):
     return JSONResponse({"ok": ok, "output": output})
 
 
+@app.get("/api/digest")
+async def get_digest():
+    """Morning Digest — что офис сделал с последнего визита. Обновляет метку визита."""
+    from src.office import digest as digest_module
+    return digest_module.get_and_mark_seen()
+
+
+@app.get("/api/understanding")
+async def get_understanding():
+    """Индикатор «Понимание компании»: score 0–100, что есть и чего не хватает."""
+    from src.office import understanding as understanding_module
+    return understanding_module.payload()
+
+
 @app.get("/api/costs")
 async def get_costs():
     """Расход токенов и стоимость по агентам и суммарно (ROI-панель)."""

@@ -12,6 +12,7 @@ import { ResultsView } from "./views/ResultsView"
 import { ConnectionsView } from "./views/ConnectionsView"
 import { AccountView } from "./views/AccountView"
 import { useOffice } from "../data/OfficeProvider"
+import { api } from "../data/api"
 import type { Section, Theme } from "./types"
 
 export default function App() {
@@ -24,6 +25,13 @@ export default function App() {
   )
   const { state } = useOffice()
   const rowRef = useRef<HTMLDivElement>(null)
+
+  // Morning Digest
+  const [digest, setDigest] = useState<any>(null)
+  const [digestOpen, setDigestOpen] = useState(false)
+  // Company Understanding
+  const [understanding, setUnderstanding] = useState<any>(null)
+  const [understandingOpen, setUnderstandingOpen] = useState(false)
 
   const openAgent = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
   const openChat  = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
@@ -41,6 +49,22 @@ export default function App() {
   }, [])
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme) }, [theme])
+
+  // Загружаем дайджест при старте (однократно)
+  useEffect(() => {
+    api.digest().then(d => {
+      if (d && d.count > 0) { setDigest(d); setDigestOpen(true) }
+    })
+  }, [])
+
+  // Загружаем понимание компании
+  useEffect(() => {
+    api.understanding().then(u => { if (u) setUnderstanding(u) })
+    const t = setInterval(() => {
+      api.understanding().then(u => { if (u) setUnderstanding(u) })
+    }, 30000)
+    return () => clearInterval(t)
+  }, [])
 
   const isOffice = view === "office"
   const gap = isMobile ? 8 : 12
@@ -69,7 +93,87 @@ export default function App() {
         <TopBar progress={state.progress.percent} progressNote={state.progress.note}
           cost={state.cost} model={state.model} connected={state.connected}
           theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
-          onOpenAccount={() => changeView("account")} isMobile={isMobile} />
+          onOpenAccount={() => changeView("account")} isMobile={isMobile}
+          understanding={understanding}
+          onUnderstandingClick={() => setUnderstandingOpen(o => !o)} />
+
+        {/* Morning Digest — появляется поверх контента при наличии событий */}
+        <AnimatePresence>
+          {digestOpen && digest && (
+            <motion.div
+              initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}
+              style={{
+                position: "absolute", top: isMobile ? 64 : 70, left: isMobile ? 8 : 14, right: isMobile ? 8 : 14,
+                zIndex: 100, background: "var(--surface)",
+                border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-lg)",
+                boxShadow: "var(--shadow)", padding: "14px 16px", maxWidth: 520,
+              }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                  ☀ Пока тебя не было ({digest.since})
+                </div>
+                <button onClick={() => setDigestOpen(false)}
+                  style={{ background: "none", border: "none", cursor: "pointer",
+                    color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: "0 2px" }}>×</button>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {digest.items.slice(0, 6).map((item: any, i: number) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{item.icon}</span>
+                    <span style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.4 }}>{item.text}</span>
+                  </div>
+                ))}
+                {digest.count > 6 && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                    и ещё {digest.count - 6} событий...
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Попап "Понимание компании" */}
+        <AnimatePresence>
+          {understandingOpen && understanding && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: -8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: -8 }}
+              transition={{ duration: 0.2 }}
+              style={{
+                position: "absolute", top: isMobile ? 64 : 70, right: isMobile ? 8 : 14,
+                zIndex: 100, background: "var(--surface)",
+                border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-lg)",
+                boxShadow: "var(--shadow)", padding: "16px", width: 280,
+              }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Понимание компании</div>
+                <button onClick={() => setUnderstandingOpen(false)}
+                  style={{ background: "none", border: "none", cursor: "pointer",
+                    color: "var(--muted)", fontSize: 16 }}>×</button>
+              </div>
+              {understanding.items.map((item: any, i: number) => (
+                <div key={i} style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 5, display: "flex", gap: 6 }}>
+                  <span>{item.icon}</span><span>{item.label}</span>
+                </div>
+              ))}
+              {understanding.missing.length > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--hairline)" }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>Чтобы стать умнее:</div>
+                  {understanding.missing.slice(0, 4).map((item: any, i: number) => (
+                    <div key={i} style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 5 }}>
+                      <span style={{ marginRight: 5 }}>{item.icon}</span>
+                      <span style={{ fontWeight: 500 }}>{item.label}</span>
+                      {item.hint && <div style={{ color: "var(--muted)", marginLeft: 18, marginTop: 1 }}>{item.hint}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div ref={rowRef} style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, gap, position: "relative" }}>
 

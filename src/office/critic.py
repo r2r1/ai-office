@@ -122,6 +122,64 @@ async def review_site_llm(goal: str) -> list[str]:
         return []
 
 
+def check_bot() -> list[str]:
+    """
+    Проверка Telegram-бота: bot.py / main.py существует и содержит рабочую структуру.
+    Возвращает список проблем (пустой = всё ок).
+    """
+    files = {f["path"]: f for f in workspace.list_files()}
+    bot_path = next((p for p in ("bot.py", "main.py", "src/bot.py") if p in files), None)
+    if bot_path is None:
+        return ["Не найден файл бота (bot.py / main.py) — создай его через write_file."]
+
+    code = workspace.read_file(bot_path)
+    if not code or code.startswith("Файл не найден"):
+        return [f"{bot_path} пустой или не читается — перепиши его полностью."]
+
+    problems: list[str] = []
+    low = code.lower()
+
+    if "aiogram" not in low and "telebot" not in low and "telegram" not in low:
+        problems.append(f"{bot_path}: не импортируется библиотека бота (aiogram / telebot).")
+    if "token" not in low and "bot_token" not in low:
+        problems.append(f"{bot_path}: нет переменной TOKEN / BOT_TOKEN — бот не сможет запуститься.")
+    if "async def" not in low and "def " not in low:
+        problems.append(f"{bot_path}: нет обработчиков сообщений (async def handler).")
+    if len(code) < 300:
+        problems.append(f"{bot_path}: слишком мало кода ({len(code)} символов) — добавь обработчики команд.")
+
+    return problems
+
+
+def check_python_files() -> list[str]:
+    """
+    Компиляция всех .py файлов в рабочей папке. Возвращает список ошибок.
+    Дёшево, без LLM — ловит синтаксические ошибки до запуска.
+    """
+    import py_compile, tempfile, os
+    problems: list[str] = []
+    for f in workspace.list_files():
+        if not f["path"].endswith(".py"):
+            continue
+        code = workspace.read_file(f["path"])
+        if not code or code.startswith("Файл не найден"):
+            continue
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py",
+                                             delete=False, encoding="utf-8") as tmp:
+                tmp.write(code)
+                tmp_path = tmp.name
+            py_compile.compile(tmp_path, doraise=True)
+        except py_compile.PyCompileError as e:
+            problems.append(f"{f['path']}: синтаксическая ошибка — {str(e)[:120]}")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+    return problems
+
+
 def critique_text(problems: list[str]) -> str:
     """Человекочитаемый фидбэк исполнителю для доработки."""
     if not problems:

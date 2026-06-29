@@ -658,8 +658,42 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     Уроки сохраняются в память, выполненная задача плана отмечается готовой.
     """
     task_l = (task or "").lower()
-    site_related = any(w in task_l for w in ("сайт", "лендинг", "landing", "site", "страниц"))
     files = [f["path"] for f in workspace.list_files()]
+
+    # --- Верификация Python-кода ---
+    py_files = [p for p in files if p.endswith(".py")]
+    if py_files:
+        py_problems = critic.check_python_files()
+        if py_problems:
+            for p in py_problems:
+                lessons.add(role, f"Код: {p}")
+            feedback = "⚠ Синтаксические ошибки в коде:\n" + "\n".join(f"- {p}" for p in py_problems[:3])
+            await publish({"type": "speech", "agent_id": agent_id, "text": feedback[:200]})
+            fix_task = (f"{task}\n\n{feedback}\n\nИсправь ошибки в файлах. "
+                        f"Прочитай файл через read_file, найди ошибку, перепиши через write_file.")
+            ctx_task = _task_with_context(role, fix_task, skill, department=department, objective=objective)
+            fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+            await fn()
+
+    # --- Верификация Telegram-бота ---
+    bot_related = any(w in task_l for w in ("бот", "bot", "telegram", "телеграм"))
+    has_bot_file = any(p in ("bot.py", "main.py") for p in files)
+    if bot_related or has_bot_file:
+        bot_problems = critic.check_bot()
+        if bot_problems:
+            for p in bot_problems:
+                lessons.add(role, f"Бот: {p}")
+            feedback = critic.critique_text(bot_problems)
+            await publish({"type": "speech", "agent_id": agent_id,
+                           "text": f"🔁 Бот проверен — нужны правки: {feedback[:120]}"})
+            fix_task = (f"{task}\n\n{feedback}\n\n"
+                        f"Прочитай существующие файлы через list_files + read_file, исправь проблемы.")
+            ctx_task = _task_with_context(role, fix_task, skill, department=department, objective=objective)
+            fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+            await fn()
+        return  # бот-задача обработана
+
+    site_related = any(w in task_l for w in ("сайт", "лендинг", "landing", "site", "страниц"))
     has_index = any(p == "index.html" or p.endswith("/index.html") for p in files)
     if not (site_related or has_index):
         return  # не сайтовая задача — критик не применим (задачу закроет _job)
