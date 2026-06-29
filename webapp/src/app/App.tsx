@@ -12,6 +12,7 @@ import { ResultsView } from "./views/ResultsView"
 import { ConnectionsView } from "./views/ConnectionsView"
 import { AccountView } from "./views/AccountView"
 import { useOffice } from "../data/OfficeProvider"
+import { OnboardingFlow } from "./onboarding/OnboardingFlow"
 import { api } from "../data/api"
 import type { Section, Theme } from "./types"
 
@@ -47,6 +48,8 @@ export default function App() {
   const [memory, setMemory] = useState<any>(null)
   // Office pause/resume
   const [officePaused, setOfficePaused] = useState(false)
+  // Онбординг показан локально пока бэкенд не подтвердил готовность брифа
+  const [onboarded, setOnboarded] = useState(false)
 
   const openAgent = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
   const openChat  = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
@@ -104,6 +107,11 @@ export default function App() {
 
   const isOffice = view === "office"
   const gap = isMobile ? 8 : 12
+
+  // Онбординг: офис ещё не получил бриф → ведём клиента через CEO-интервью.
+  if (state.ready === false && !onboarded) {
+    return <OnboardingFlow onDone={() => { setOnboarded(true); setView("office") }} />
+  }
 
   return (
     <div style={{

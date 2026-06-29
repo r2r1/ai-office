@@ -488,6 +488,42 @@ async def brief_start(request: Request):
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
 
+@app.get("/api/onboarding/modes")
+async def onboarding_modes():
+    """3 сценария входа + вопросы интервью по каждому (для онбординг-флоу)."""
+    out = []
+    for key, meta in onboarding.MODES.items():
+        out.append({
+            "key": key,
+            "title": meta["title"],
+            "icon": meta["icon"],
+            "intro": meta["intro"],
+            "questions": onboarding.interview_questions(key),
+        })
+    return {"modes": out}
+
+
+@app.post("/api/onboarding/finish")
+async def onboarding_finish(request: Request):
+    """Завершение интервью: {mode, answers} → детерминированный бриф → старт офиса."""
+    data = await request.json()
+    mode = (data.get("mode") or "business").strip()
+    answers = data.get("answers", [])
+    if not any((a.get("answer") or "").strip() for a in answers):
+        return JSONResponse({"error": "нет ответов"}, status_code=400)
+    brief_data = onboarding.build_brief_structured(mode, answers)
+    # Сохраняем ответы интервью в память — слой USER для retrieval (knowledge.py)
+    from src.office import memory as memory_module
+    for a in answers:
+        q, ans = (a.get("question") or "").strip(), (a.get("answer") or "").strip()
+        if q and ans:
+            memory_module.remember(q, ans)
+    brief.set_brief(brief_data)  # сигналит офису о старте
+    await bus.publish({"type": "speech", "agent_id": "orchestrator_1",
+                       "text": f"Компания изучена. Запускаю офис: {brief_data.get('goal', '')[:80]}"})
+    return {"ok": True, "brief": brief_data}
+
+
 @app.get("/api/history")
 async def get_history():
     """Лента событий из прошлых запусков — фронт показывает её при загрузке."""

@@ -1,15 +1,120 @@
 """
-Onboarding Agent — встречает клиента.
+Onboarding Agent — CEO встречает клиента.
 
-Читает любой ввод клиента (идея / соцсети / инструкции) и:
-1. Задаёт 3-5 уточняющих вопросов, чтобы понять задачу.
-2. По ответам формирует структурированный бриф для всего офиса.
+Два режима работы:
+1. Свободный (legacy): любой ввод → 3-5 уточняющих вопросов → бриф (через LLM).
+2. Структурированное интервью: 3 сценария входа × 5 фиксированных измерений
+   (продукт → клиент → оборот → цель → ограничения). Бриф собирается
+   ДЕТЕРМИНИРОВАННО из ответов — работает даже при нулевом балансе LLM.
 """
 
 import json
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
+
+# ─────────────────────── Структурированное интервью ───────────────────────
+# Три сценария входа (item 4 плана). Для каждого — 5 вопросов по одним и тем же
+# измерениям, но с разной формулировкой под ситуацию клиента.
+MODES = {
+    "business": {
+        "title": "У меня есть бизнес",
+        "icon": "🏢",
+        "intro": "Отлично. Расскажите о вашем деле — и офис возьмётся за рост.",
+    },
+    "launch": {
+        "title": "Хочу открыть компанию",
+        "icon": "🚀",
+        "intro": "Поможем запуститься. Проведу вас по ключевым вопросам старта.",
+    },
+    "idea": {
+        "title": "У меня есть идея",
+        "icon": "💡",
+        "intro": "Проверим жизнеспособность за один цикл: рынок, экономика, спрос — и вердикт.",
+    },
+}
+
+# Измерения интервью (порядок = алгоритм). dimension → поле брифа.
+_DIMENSIONS = ["product", "client", "revenue", "goal", "constraints"]
+
+# Вопросы по сценарию и измерению.
+_INTERVIEW = {
+    "business": {
+        "product":     "Что вы продаёте? Опишите продукт или услугу.",
+        "client":      "Кто ваши клиенты? Опишите целевую аудиторию.",
+        "revenue":     "Какой сейчас примерный оборот и средний чек?",
+        "goal":        "Какой результат вы хотите от офиса? Что для вас = успех?",
+        "constraints": "Есть ограничения или пожелания? (бюджет, что нельзя использовать)",
+    },
+    "launch": {
+        "product":     "Какой бизнес хотите открыть? Идея продукта или услуги.",
+        "client":      "Для кого это? Кто будет покупать?",
+        "revenue":     "Какой стартовый бюджет и на какой доход рассчитываете?",
+        "goal":        "Какая цель на первые 3 месяца запуска?",
+        "constraints": "Что уже есть и какие ограничения? (опыт, команда, деньги)",
+    },
+    "idea": {
+        "product":     "Опишите вашу идею. Что это за продукт или сервис?",
+        "client":      "Кто будет этим пользоваться и какую проблему это решает?",
+        "revenue":     "Как планируете зарабатывать? Готова ли аудитория платить?",
+        "goal":        "Что хотите выяснить — стоит ли вообще это запускать?",
+        "constraints": "Сколько готовы вложить времени и денег в проверку идеи?",
+    },
+}
+
+
+def interview_questions(mode: str) -> list[dict]:
+    """5 вопросов выбранного сценария с метками измерений (для прогресс-бара)."""
+    mode = mode if mode in _INTERVIEW else "business"
+    qs = _INTERVIEW[mode]
+    return [{"dimension": d, "question": qs[d]} for d in _DIMENSIONS]
+
+
+def build_brief_structured(mode: str, answers: list[dict]) -> dict:
+    """
+    Детерминированно собирает бриф из ответов интервью — БЕЗ вызова LLM.
+    answers: [{"dimension": "...", "answer": "..."}, ...]
+    Это делает онбординг устойчивым к нехватке баланса.
+    """
+    mode = mode if mode in MODES else "business"
+    by_dim = {a.get("dimension", ""): (a.get("answer") or "").strip() for a in answers}
+    product = by_dim.get("product", "")
+    client = by_dim.get("client", "")
+    revenue = by_dim.get("revenue", "")
+    goal = by_dim.get("goal", "")
+    constraints = by_dim.get("constraints", "")
+
+    if mode == "idea":
+        # Цель «идеи» — всегда вердикт о жизнеспособности (Research + Finance + Marketing).
+        if goal:
+            goal = f"Проверить жизнеспособность и дать вердикт: {goal}"
+        else:
+            goal = f"Проверить жизнеспособность идеи и дать вердикт: {product[:120]}"
+
+    niche = product[:120] or MODES[mode]["title"]
+    summary_parts = []
+    if product:     summary_parts.append(f"Продукт: {product}")
+    if client:      summary_parts.append(f"Клиенты: {client}")
+    if revenue:     summary_parts.append(f"Экономика: {revenue}")
+    if goal:        summary_parts.append(f"Цель: {goal}")
+    if constraints: summary_parts.append(f"Ограничения: {constraints}")
+    summary = " ".join(summary_parts) or product or MODES[mode]["title"]
+
+    research_question = (
+        f"Актуальные тренды и тактики 2026 в нише: {niche}. Цель: {goal}. "
+        f"Что сейчас работает, кейсы, каналы привлечения."
+    )
+
+    return {
+        "mode": mode,
+        "niche": niche,
+        "goal": goal,
+        "audience": client,
+        "assets": revenue,
+        "constraints": constraints,
+        "research_question": research_question,
+        "summary": summary,
+    }
 
 _QUESTIONS_SYSTEM = """Ты — менеджер по работе с клиентами AI-офиса. Клиент прислал тебе
 свою идею / ссылки на соцсети / инструкции. Твоя задача — задать 3-5 КОРОТКИХ уточняющих
