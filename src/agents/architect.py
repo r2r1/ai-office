@@ -104,8 +104,10 @@ async def run_async(
 
     _save(result)
 
-    from src.office import state
+    from src.office import state, workspace as ws_module
     state.save_deliverable(agent_id, "architect", "Техническое задание", result)
+    # Сохраняем ТЗ в workspace — разработчик читает через list_files + read_file
+    ws_module.write_file("docs/tech_design.md", result)
 
     if publish:
         await publish({"type": "task_done", "agent_id": agent_id,

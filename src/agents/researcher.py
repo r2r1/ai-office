@@ -73,8 +73,10 @@ async def run_async(
 
     if save_report:
         _save_report(result, depth)
-        from src.office import state
+        from src.office import state, workspace as ws_module
         state.save_deliverable(agent_id, "researcher", question[:80], result)
+        # Сохраняем в workspace чтобы было видно в «Код» и доступно другим агентам
+        ws_module.write_file("docs/research.md", result)
 
     if publish:
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})

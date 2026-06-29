@@ -68,8 +68,9 @@ async def run_async(
     if save:
         _save_plan(result)
 
-    from src.office import state
+    from src.office import state, workspace as ws_module
     state.save_deliverable(agent_id, "strategist", "Бизнес-план офиса", result)
+    ws_module.write_file("docs/strategy.md", result)
 
     if publish:
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})
