@@ -8,6 +8,8 @@
 stateless между апдейтами и переживает рестарт сервера.
 """
 
+import asyncio
+
 import httpx
 
 from src.saas import context as ctx
@@ -65,6 +67,14 @@ async def handle_update(update: dict) -> None:
     token = bot_config.resolve_token()
     if not token or not cfg.get("enabled"):
         return
+
+    # ── AI-АГЕНТ РЕЖИМ ──────────────────────────────────────────────────────
+    # Когда kind="ai_agent" или ai_agent=True — бот отвечает через LLM с
+    # контекстом офиса вместо скриптового сценария записи.
+    if cfg.get("ai_agent") or cfg.get("kind") == "ai_agent":
+        await _handle_ai_agent(token, chat_id, text, cfg)
+        return
+    # ────────────────────────────────────────────────────────────────────────
 
     sessions = _load_sessions()
     key = str(chat_id)
@@ -124,6 +134,89 @@ async def handle_update(update: dict) -> None:
     sessions.pop(key, None)
     _save_sessions(sessions)
     await _send(token, chat_id, "Давайте начнём заново — отправьте /start.")
+
+
+async def _handle_ai_agent(token: str, chat_id, text: str, cfg: dict) -> None:
+    """AI-агент режим: LLM отвечает клиенту от лица бизнеса, используя контекст офиса.
+    Поддерживает историю диалога, умеет собирать заявки через естественную беседу."""
+    from src.office import brief as brief_mod
+    from src.core import llm as llm_mod
+    from src.office import models as models_module
+
+    sessions = _load_sessions()
+    key = str(chat_id)
+    sess = sessions.get(key, {"history": [], "lead_saved": False})
+    history = sess.get("history", [])
+
+    # Контекст бизнеса из офиса
+    b = brief_mod.get()
+    business_ctx = b.get("summary", "") or b.get("goal", "")
+
+    title = (cfg.get("title") or "ассистент компании").strip()
+    ai_greeting = cfg.get("ai_greeting") or "Привет! Я AI-ассистент. Чем могу помочь?"
+    custom_instructions = cfg.get("ai_system_prompt") or ""
+
+    # Приветствие при /start
+    if text == "/start":
+        sessions[key] = {"history": [], "lead_saved": False}
+        _save_sessions(sessions)
+        await _send(token, chat_id, ai_greeting)
+        return
+
+    system = (
+        f"Ты — {title}. Отвечаешь клиентам в Telegram от лица компании.\n"
+        f"О компании: {business_ctx[:600]}\n"
+        f"{custom_instructions}\n\n"
+        "Правила:\n"
+        "- Общайся коротко, дружелюбно, по-деловому. Максимум 3-4 предложения за ответ.\n"
+        "- Если клиент хочет заявку, консультацию или покупку — собери имя и контакт "
+        "(телефон или email) в ходе естественной беседы. Спрашивай по одному полю.\n"
+        "- Когда собраны имя + контакт — подтверди заявку и напиши 'ЗАЯВКА_ПРИНЯТА: <имя> | <контакт>'.\n"
+        "- Не выдумывай цены/условия, которых нет в описании компании.\n"
+        "- Отвечай ТОЛЬКО на русском языке."
+    )
+
+    history.append({"role": "user", "content": text})
+    # Передаём историю без последнего сообщения (оно идёт как user в run_agent)
+    try:
+        raw = await asyncio.wait_for(
+            llm_mod.run_agent(
+                system=system,
+                user=text,
+                model=models_module.get_default(),
+                max_tokens=300,
+                use_search=False,
+                agent_id="bot_agent_1",
+                history=history[:-1],
+            ),
+            timeout=30.0,
+        )
+    except Exception:
+        raw = "Извините, произошла ошибка. Попробуйте написать ещё раз."
+
+    history.append({"role": "assistant", "content": raw})
+    # Ограничиваем историю последними 20 сообщениями
+    sess["history"] = history[-20:]
+
+    # Если агент сообщил о сборе заявки — сохраняем лид
+    if "ЗАЯВКА_ПРИНЯТА:" in raw and not sess.get("lead_saved"):
+        try:
+            parts = raw.split("ЗАЯВКА_ПРИНЯТА:")[-1].strip().split("|")
+            name = parts[0].strip() if parts else "Клиент из Telegram"
+            contact = parts[1].strip() if len(parts) > 1 else str(chat_id)
+            leads.add(cfg.get("lead_slug", "telegram-bot"), name, contact,
+                      f"Заявка через Telegram-бота (chat_id={chat_id})")
+            sess["lead_saved"] = True
+        except Exception:
+            pass
+        # Убираем служебный тег из ответа пользователю
+        raw = raw.replace(f"ЗАЯВКА_ПРИНЯТА: {raw.split('ЗАЯВКА_ПРИНЯТА:')[-1]}", "").strip()
+        if not raw:
+            raw = "Отлично, ваша заявка принята! Скоро свяжемся с вами. ✅"
+
+    sessions[key] = sess
+    _save_sessions(sessions)
+    await _send(token, chat_id, raw)
 
 
 async def _finalize(token: str, chat_id, cfg: dict, sess: dict) -> None:

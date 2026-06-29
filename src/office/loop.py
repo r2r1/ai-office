@@ -199,10 +199,17 @@ async def _run_office(tid: str) -> None:
         # вроде «масштабирование до 1М») и не даёт офису ходить кругами после результата.
         if _engagement_complete():
             if not _completion_announced.get(tid):
+                # Финальная верификация: проверяем сайт перед объявлением готовности.
+                # Если есть незакрытые критические проблемы — добавляем fix-задачу вместо
+                # того чтобы молча считать результат принятым.
+                await _publish_site_auto(publish)
+                fix_added = await _verify_and_fix_if_needed(strategy, publish)
+                if fix_added:
+                    # Задача добавлена — офис продолжит работу, не засыпаем
+                    await asyncio.sleep(LOOP_INTERVAL)
+                    continue
                 _completion_announced[tid] = True
-                await _publish_site_auto(publish)  # если есть сайт — публикуем
-                # ЧЕСТНО: помечаем выполненным только активный этап, НЕ фейкуем будущие
-                # («масштабирование» и т.п.). Прогресс-бар отражает реальность, а не 100% всегда.
+                # ЧЕСТНО: помечаем выполненным только активный этап, НЕ фейкуем будущие.
                 for s in milestones.all_stages():
                     if s.get("status") == "active":
                         milestones.set_status(s["id"], "done")
@@ -274,6 +281,37 @@ async def _heal_stuck_agents(publish) -> None:
                 plan.revert(tid)  # иначе — вернуть зависшую задачу в очередь
             await publish({"type": "system",
                            "text": f"🔧 {aid} завис (> {MAX_THINK_SECS}s) — сброшен, задача переназначится"})
+
+
+async def _verify_and_fix_if_needed(strategy: str, publish) -> bool:
+    """Финальная верификация: если сайт есть и у него критические проблемы —
+    добавляем fix-задачу на доску вместо того чтобы объявить работу готовой.
+    Возвращает True если задача добавлена (офис продолжит работу)."""
+    problems = critic.check_site()
+    # Критические (не косметические) проблемы — только те, что ломают работу сайта
+    critical = [p for p in problems if any(w in p.lower() for w in
+                ("не отправляет", "нет формы", "не найден index", "пустой или не читается"))]
+    if not critical:
+        return False
+    # Смотрим, не добавляли ли уже аналогичную fix-задачу
+    existing_titles = {t.get("title", "").lower() for t in plan.all_tasks()}
+    fix_title = "Исправить критические проблемы сайта: " + "; ".join(critical[:2])[:120]
+    if any("исправить критические" in t for t in existing_titles):
+        return False  # уже есть, не дублируем
+    await publish({"type": "system",
+                   "text": f"🔍 Финальная проверка нашла проблемы: {'; '.join(critical[:2])[:100]} — "
+                           "добавляю задачу на исправление"})
+    fix_task = {
+        "id": f"fix_{int(__import__('time').time())}",
+        "title": fix_title,
+        "role": "developer",
+        "deps": [],
+        "done_criterion": "форма шлёт на /api/site-lead, сайт открывается без ошибок",
+        "status": "pending",
+    }
+    plan.add_task(fix_task["title"], fix_task["role"], fix_task["done_criterion"],
+                  requested_by="orchestrator_1")
+    return True
 
 
 async def _publish_site_auto(publish) -> bool:

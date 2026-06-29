@@ -330,12 +330,25 @@ async def decide_company(
             dept_lines.append(f"⚪ {did} ({info['name']}) — закрыт. Назначение: {info['hint']}")
     dept_text = "\n\n".join(dept_lines)
 
-    from src.office import memory as memory_module
+    from src.office import memory as memory_module, lessons as lessons_module
     user_directives = memory_module.context_block() or ""
     directives_section = (
         f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ) ===\n{user_directives}\n"
         if user_directives.strip() else ""
     )
+
+    # Нерешённые замечания от критика — CEO видит незакрытые проблемы результатов
+    all_lessons = lessons_module.all_lessons()
+    if all_lessons:
+        lessons_lines = []
+        for role, items in all_lessons.items():
+            for it in items[-3:]:  # последние 3 по роли
+                lessons_lines.append(f"  [{role}] {it.get('text','')[:120]}")
+        if lessons_lines:
+            directives_section += (
+                "\n=== ОТКРЫТЫЕ ЗАМЕЧАНИЯ ПО РЕЗУЛЬТАТАМ (требуют внимания) ===\n"
+                + "\n".join(lessons_lines) + "\n"
+            )
 
     if publish:
         await publish({"type": "thinking", "agent_id": "orchestrator_1",

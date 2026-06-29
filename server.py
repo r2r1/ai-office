@@ -1069,11 +1069,15 @@ async def _intake_from_chat(text: str) -> None:
     """Discovery ПЕРЕД запуском офиса: сначала уточняем задачу, потом строим бриф и стартуем.
     Глупый офис строил бы вслепую; умный — задаёт вопросы и понимает бизнес клиента."""
     if not intake_module.active():
-        # первое сообщение — это идея клиента. Задаём уточняющие вопросы, НЕ начинаем работу.
+        # немедленно сигнализируем — пользователь видит реакцию, пока LLM думает
         await bus.publish({"type": "thinking", "agent_id": "orchestrator_1",
                            "text": "Уточняю задачу перед стартом…"})
+        await _post_ceo("Читаю вашу идею, сейчас сформулирую уточняющие вопросы... ⏳")
         try:
-            qs = await onboarding.make_questions(text, publish=bus.publish)
+            qs = await asyncio.wait_for(
+                onboarding.make_questions(text, publish=bus.publish),
+                timeout=20.0,
+            )
         except Exception:
             qs = ["Какой результат вы считаете успехом?",
                   "Кто ваша целевая аудитория и в какой нише?",
@@ -1092,7 +1096,10 @@ async def _intake_from_chat(text: str) -> None:
                        "text": "Формирую бриф по вашим ответам…"})
     qa = [{"q": "; ".join(st.get("questions", [])), "a": "\n".join(st.get("answers", []))}]
     try:
-        brief_data = await onboarding.build_brief(st.get("idea", ""), qa, publish=bus.publish)
+        brief_data = await asyncio.wait_for(
+            onboarding.build_brief(st.get("idea", ""), qa, publish=bus.publish),
+            timeout=25.0,
+        )
     except Exception:
         joined = (st.get("idea", "") + " — " + " ".join(st.get("answers", []))).strip()
         brief_data = {"summary": joined[:600], "goal": st.get("idea", "")[:300], "niche": ""}

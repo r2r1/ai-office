@@ -16,7 +16,7 @@ _FILE = "bot_config.json"
 
 _DEFAULTS = {
     "enabled": False,            # запущен ли бот (выставлен webhook)
-    "kind": "booking",           # тип сценария (пока один — запись клиентов)
+    "kind": "booking",           # тип сценария: "booking" | "ai_agent"
     "title": "",                 # как бот представляется
     "greeting": "Здравствуйте! Я помогу вам записаться. Выберите услугу:",
     "services": [],              # список услуг (кнопки)
@@ -26,6 +26,10 @@ _DEFAULTS = {
     "lead_slug": "telegram-bot", # под каким slug писать лиды (вкладка «Лиды»)
     "webhook_secret": "",        # секрет в URL вебхука
     "bot_username": "",          # @username бота (для ссылок)
+    # AI-агент режим: умный бот на базе LLM с контекстом офиса
+    "ai_agent": False,           # True — бот отвечает через LLM вместо скриптового сценария
+    "ai_system_prompt": "",      # дополнительные инструкции для AI-агента бота
+    "ai_greeting": "Привет! Я AI-ассистент. Чем могу помочь?",
 }
 
 
@@ -37,7 +41,7 @@ def get() -> dict:
 
 def update(patch: dict) -> dict:
     cfg = get()
-    cfg.update({k: v for k, v in patch.items() if k in _DEFAULTS})
+    cfg.update({k: v for k, v in patch.items() if k in _DEFAULTS or k == "kind"})
     ctx.write_json(_FILE, cfg)
     return cfg
 
