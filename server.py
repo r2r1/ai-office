@@ -902,6 +902,31 @@ async def get_leads():
     return {"leads": leads_module.all_leads()}
 
 
+@app.get("/api/office/status")
+async def office_status():
+    """Статус офис-цикла (работает / на паузе)."""
+    from src.office import control as control_module
+    return control_module.status()
+
+
+@app.post("/api/office/pause")
+async def office_pause():
+    """Поставить офис на паузу (агенты доделают текущие задачи, новые не начнут)."""
+    from src.office import control as control_module, bus as bus_module
+    control_module.pause("Пауза по запросу пользователя")
+    await bus_module.publish({"type": "system", "text": "⏸ Офис поставлен на паузу пользователем"})
+    return {"ok": True}
+
+
+@app.post("/api/office/resume")
+async def office_resume():
+    """Возобновить работу офиса."""
+    from src.office import control as control_module, bus as bus_module
+    control_module.resume()
+    await bus_module.publish({"type": "system", "text": "▶ Офис возобновил работу"})
+    return {"ok": True}
+
+
 @app.post("/api/brief/reset")
 async def brief_reset():
     """Полный сброс ТЕКУЩЕГО тенанта: новый клиент с чистого листа."""

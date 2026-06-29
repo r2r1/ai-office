@@ -14,7 +14,7 @@ import asyncio
 import os
 import time
 
-from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites
+from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
@@ -194,6 +194,12 @@ async def _run_office(tid: str) -> None:
     cycle = 0
     while True:
         cycle += 1
+
+        # Проверка паузы — пользователь или quota-стоп
+        if control.is_paused():
+            await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
+            continue
+
         # Завершение по ДОСКЕ: все задачи плана сделаны → цель клиента достигнута.
         # Это надёжнее «бизнес-этапов» (которые могут содержать недостижимую фантазию
         # вроде «масштабирование до 1М») и не даёт офису ходить кругами после результата.
@@ -245,12 +251,16 @@ async def _run_office(tid: str) -> None:
         try:
             await _orchestrate(strategy, publish, tech_design=tech_design, cycle=cycle)
         except Exception as e:
-            # Сбой одного цикла НЕ должен убивать офис (иначе менеджер рестартит его и
-            # плодит «Офис восстановлен»). Логируем и продолжаем следующим циклом.
+            err_str = str(e)
             import traceback
-            await publish({"type": "error", "agent_id": "orchestrator_1",
-                           "text": f"Сбой цикла: {str(e)[:150]}"})
-            traceback.print_exc()
+            if _is_quota_error(err_str):
+                reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
+                control.pause(reason)
+                await publish({"type": "system", "text": reason})
+            else:
+                await publish({"type": "error", "agent_id": "orchestrator_1",
+                               "text": f"Сбой цикла: {err_str[:150]}"})
+                traceback.print_exc()
         await asyncio.sleep(LOOP_INTERVAL)
 
 
@@ -606,6 +616,16 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                 await _assign(agent_id, rec.role, task, publish, department=dept_id, objective=objective)
 
 
+def _is_quota_error(err: str) -> bool:
+    """Определяет ошибку нехватки баланса у LLM-провайдера."""
+    low = err.lower()
+    return (
+        "insufficient" in low or "额度不足" in err or "余额不足" in err
+        or ("403" in err and ("quota" in low or "balance" in low or "额度" in err or "余额" in err))
+        or "预扣费" in err
+    )
+
+
 async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                   department: str = "", objective: str = "", task_id: str = "") -> None:
     await publish({"type": "speech", "agent_id": "orchestrator_1",
@@ -640,10 +660,16 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             if summary:
                 await publish({"type": "speech", "agent_id": agent_id, "text": f"✅ Готово: {summary}"})
         except Exception as e:
-            await publish({"type": "error", "agent_id": agent_id, "text": str(e)[:100]})
+            err_str = str(e)
+            await publish({"type": "error", "agent_id": agent_id, "text": err_str[:100]})
             registry.update_status(agent_id, "idle")
             if task_id and plan.is_generated():
                 plan.revert(task_id)  # упала — вернуть в очередь
+            # Quota/billing 403 → ставим офис на паузу, чтобы не сжигать остаток
+            if _is_quota_error(err_str):
+                reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
+                control.pause(reason)
+                await publish({"type": "system", "text": reason})
         finally:
             _thinking_since.pop(agent_id, None)
             _agent_task.pop(agent_id, None)
@@ -683,7 +709,7 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
         if bot_problems:
             for p in bot_problems:
                 lessons.add(role, f"Бот: {p}")
-            feedback = critic.critique_text(bot_problems)
+            feedback = critic.critique_text_bot(bot_problems)
             await publish({"type": "speech", "agent_id": agent_id,
                            "text": f"🔁 Бот проверен — нужны правки: {feedback[:120]}"})
             fix_task = (f"{task}\n\n{feedback}\n\n"

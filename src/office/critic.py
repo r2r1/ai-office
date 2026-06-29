@@ -181,11 +181,18 @@ def check_python_files() -> list[str]:
 
 
 def critique_text(problems: list[str]) -> str:
-    """Человекочитаемый фидбэк исполнителю для доработки."""
+    """Человекочитаемый фидбэк исполнителю по сайту."""
     if not problems:
         return ""
     lines = "\n".join(f"- {p}" for p in problems)
-    # НЕ просим агента публиковать — офис публикует сам. Иначе агент зацикливается на
-    # publish_site (часто с неверной directory) и упирается в таймаут.
     return ("⚠ Нужны небольшие правки. Исправь прямо в существующих файлах папки site/ "
             "(НЕ начинай с нуля, НЕ вызывай publish_site — офис опубликует сам):\n" + lines)
+
+
+def critique_text_bot(problems: list[str]) -> str:
+    """Человекочитаемый фидбэк исполнителю по боту."""
+    if not problems:
+        return ""
+    lines = "\n".join(f"- {p}" for p in problems)
+    return ("⚠ Нужны правки в боте. Прочитай файл через read_file, "
+            "исправь проблемы, перезапись через write_file:\n" + lines)

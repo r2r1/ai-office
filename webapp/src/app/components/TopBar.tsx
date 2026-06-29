@@ -15,9 +15,11 @@ interface TopBarProps {
   isMobile: boolean
   understanding?: { score: number } | null
   onUnderstandingClick?: () => void
+  officePaused?: boolean
+  onToggleOffice?: () => void
 }
 
-export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -78,6 +80,7 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
         {!isMobile && understanding != null && (
           <UnderstandingBadge score={understanding.score} onClick={onUnderstandingClick} />
         )}
+        <OfficeToggle paused={!!officePaused} onClick={onToggleOffice} isMobile={isMobile} />
         {!isMobile && <ModelPlaque model={model} onOpenAccount={onOpenAccount} />}
         <button 
           onClick={onToggleTheme} 
@@ -102,6 +105,34 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
         </button>
       </div>
     </header>
+  )
+}
+
+/** Кнопка Пауза / Возобновить офис. */
+function OfficeToggle({ paused, onClick, isMobile }: { paused: boolean; onClick?: () => void; isMobile: boolean }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      title={paused ? "Возобновить работу офиса" : "Поставить офис на паузу"}
+      style={{
+        display: "flex", alignItems: "center", gap: isMobile ? 0 : 5,
+        padding: isMobile ? "6px 8px" : "5px 11px",
+        borderRadius: "var(--radius-pill)",
+        border: `1px solid ${paused ? "rgba(255,172,46,0.5)" : "var(--hairline)"}`,
+        background: paused
+          ? (hover ? "rgba(255,172,46,0.18)" : "rgba(255,172,46,0.08)")
+          : (hover ? "var(--surface-soft)" : "transparent"),
+        cursor: "pointer", transition: "all 0.2s ease", flexShrink: 0,
+      }}>
+      <span style={{ fontSize: 13 }}>{paused ? "▶" : "⏸"}</span>
+      {!isMobile && (
+        <span className="mono" style={{ fontSize: 11, color: paused ? "#ffac2e" : "var(--text-dim)" }}>
+          {paused ? "Пауза" : "Стоп"}
+        </span>
+      )}
+    </button>
   )
 }
 

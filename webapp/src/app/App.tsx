@@ -32,6 +32,8 @@ export default function App() {
   // Company Understanding
   const [understanding, setUnderstanding] = useState<any>(null)
   const [understandingOpen, setUnderstandingOpen] = useState(false)
+  // Office pause/resume
+  const [officePaused, setOfficePaused] = useState(false)
 
   const openAgent = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
   const openChat  = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
@@ -56,6 +58,25 @@ export default function App() {
       if (d && d.count > 0) { setDigest(d); setDigestOpen(true) }
     })
   }, [])
+
+  // Статус офиса (пауза)
+  useEffect(() => {
+    api.officeStatus().then(s => { if (s) setOfficePaused(s.paused) })
+    const t = setInterval(() => {
+      api.officeStatus().then(s => { if (s) setOfficePaused(s.paused) })
+    }, 15000)
+    return () => clearInterval(t)
+  }, [])
+
+  async function handleToggleOffice() {
+    if (officePaused) {
+      await api.officeResume()
+      setOfficePaused(false)
+    } else {
+      await api.officePause()
+      setOfficePaused(true)
+    }
+  }
 
   // Загружаем понимание компании
   useEffect(() => {
@@ -95,7 +116,9 @@ export default function App() {
           theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
           onOpenAccount={() => changeView("account")} isMobile={isMobile}
           understanding={understanding}
-          onUnderstandingClick={() => setUnderstandingOpen(o => !o)} />
+          onUnderstandingClick={() => setUnderstandingOpen(o => !o)}
+          officePaused={officePaused}
+          onToggleOffice={handleToggleOffice} />
 
         {/* Morning Digest — появляется поверх контента при наличии событий */}
         <AnimatePresence>
