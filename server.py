@@ -945,8 +945,8 @@ async def office_status():
     return control_module.status()
 
 
-@app.get("/api/memory")
-async def get_memory():
+@app.get("/api/knowledge")
+async def get_knowledge():
     """Трёхслойная память офиса: что он знает о клиенте и отделах."""
     from src.office import knowledge as knowledge_module
     facts = knowledge_module.all_facts()
@@ -955,6 +955,14 @@ async def get_memory():
         k = f.get("layer", "department")
         layers[k] = layers.get(k, 0) + 1
     return {"facts": facts, "count": len(facts), "layers": layers}
+
+
+@app.get("/api/department-events")
+async def get_department_events():
+    """Доменные события офиса (Event Layer): сигналы отделов и их статус."""
+    from src.office import events as events_module
+    evs = events_module.recent(40)
+    return {"events": evs, "pending": sum(1 for e in evs if not e.get("processed"))}
 
 
 @app.post("/api/office/pause")

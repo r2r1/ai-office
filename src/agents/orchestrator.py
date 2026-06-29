@@ -96,6 +96,7 @@ _DECIDE_SYSTEM = """Ты — директор автономного AI-офис
 - ПРИОРИТЕТ УКАЗАНИЙ ПОЛЬЗОВАТЕЛЯ: если в разделе «Указания пользователя» есть решение клиента — оно ГЛАВНЕЕ стратегии и ТЗ. Не ставь задачи, противоречащие ему (пример: клиент сказал «не BotsBox, пишем своего бота» → задачи про BotsBox ЗАПРЕЩЕНЫ, поручай разработку своего бота).
 - Не поручай подключение платных сторонних конструкторов (Tilda, BotsBox и т.п.), если клиент их не одобрил: сайт публикуется встроенной интеграцией website, бот/код разработчик пишет сам.
 - КРИТИЧНО: Все API-ключи доступны ЛЮБОМУ агенту через get_connection(). НЕ выбирай агента потому что "у него ключ".
+- СИГНАЛЫ ОТ ОТДЕЛОВ: если есть блок «Сигналы от отделов» — интерпретируй их. Проблема/блокер → поставь задачу нужному отделу на устранение; возможность → задача на её реализацию; наблюдение → учти в решении. Это и есть твоя работа CEO: превращать сигналы отделов в действия.
 - Если текущий этап достигнут — пометь его выполненным и опиши, что сделано.
 - При найме (action=hire) — указывай конкретный skill агента: его специализацию на весь проект.
 
@@ -436,7 +437,12 @@ async def decide(
 
     # Указания пользователя (его ответы агентам) — приоритетнее стратегии и ТЗ
     from src.office import memory as memory_module
+    from src.office import events as events_module
     user_directives = memory_module.context_block() or ""
+
+    # Event Layer: необработанные сигналы отделов — CEO интерпретирует их этим ходом
+    pending_events = events_module.pending()
+    events_section = events_module.context_block()
 
     if publish:
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
@@ -444,6 +450,7 @@ async def decide(
 
     tdd_section = f"\nТЗ архитектора:\n{tech_design[:500]}\n" if tech_design else ""
     directives_section = f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ над стратегией/ТЗ) ===\n{user_directives}\n" if user_directives.strip() else ""
+    directives_section += events_section
     user = (
         f"Цель: {goal}\n\n"
         f"Стратегия (кратко):\n{strategy[:400]}\n"
@@ -465,6 +472,15 @@ async def decide(
         agent_id="orchestrator_1",
     )
     decision = _parse_json(raw)
+
+    # Event Layer: сигналы показаны CEO этим ходом — помечаем обработанными,
+    # чтобы не зацикливать их в каждом цикле. Решение по ним уже в decision.
+    if pending_events:
+        events_module.mark_processed([e["id"] for e in pending_events])
+        if publish and decision:
+            await publish({"type": "speech", "agent_id": "orchestrator_1",
+                           "text": f"📨 Учёл {len(pending_events)} сигнал(ов) от отделов: {decision.get('thought', '')[:70]}"})
+
     if not decision:
         return {"action": "wait", "thought": "Не удалось принять решение, жду следующий цикл"}
 

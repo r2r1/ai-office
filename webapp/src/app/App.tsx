@@ -98,7 +98,7 @@ export default function App() {
   useEffect(() => {
     const load = () => {
       api.understanding().then(u => { if (u) setUnderstanding(u) })
-      api.memory().then(m => { if (m) setMemory(m) })
+      api.knowledge().then(m => { if (m) setMemory(m) })
     }
     load()
     const t = setInterval(load, 30000)

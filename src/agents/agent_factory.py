@@ -22,6 +22,8 @@ from src.office import office_channel
 from src.office import threads as threads_module
 from src.office import workspace as workspace_module
 from src.office import registry as registry_module
+from src.office import tool_router
+from src.office import events as events_module
 from src.integrations import registry as integrations_registry
 
 _AUTONOMY_RULES = """
@@ -48,7 +50,12 @@ _TEAM_PREAMBLE = (
 
 _INTER_AGENT_SUFFIX = (
     "\nКоллеги: быстрый вопрос → ask_colleague(role, вопрос) (ответ сразу); поставить коллеге "
-    "ЗАДАЧУ → delegate_task(role, что сделать). Если подключение не работает — опиши ошибку конкретно."
+    "ЗАДАЧУ → delegate_task(role, что сделать). "
+    "Заметил проблему/возможность/блокер ЗА рамками своей задачи (низкая конверсия, прибыльный "
+    "канал, не хватает данных от другого отдела) → raise_event(kind, summary) — сообщи КОМПАНИИ, "
+    "CEO интерпретирует и поручит нужному отделу. Не дёргай всех напрямую. "
+    "Нужно действие во внешнем сервисе — опиши словами через use_capability, инструмент подберётся сам. "
+    "Если подключение не работает — опиши ошибку конкретно."
 )
 
 _LEADER_RULES = (
@@ -227,6 +234,30 @@ _ASK_COLLEAGUE_TOOL = {
     },
 }
 
+# Инструмент: поднять СОБЫТИЕ в компанию (Event Layer) — не конкретному коллеге, а CEO
+_RAISE_EVENT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "raise_event",
+        "description": "Сообщить КОМПАНИИ важный сигнал, не дёргая конкретного коллегу: "
+                       "проблему, блокер, найденную возможность или наблюдение, которое "
+                       "касается других отделов. CEO увидит это, интерпретирует и решит, "
+                       "что делать (поставит задачу нужному отделу). Используй, когда "
+                       "обнаружил что-то выходящее за рамки твоей задачи: «конверсия лендинга "
+                       "низкая», «нашёл прибыльный канал», «нет данных от аналитика».",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["problem", "blocker", "opportunity", "signal", "info"],
+                         "description": "Тип сигнала"},
+                "summary": {"type": "string", "description": "Суть одной фразой"},
+                "detail": {"type": "string", "description": "Детали и рекомендация (опционально)"},
+            },
+            "required": ["kind", "summary"],
+        },
+    },
+}
+
 # Инструмент: поставить задачу коллеге на общую доску (видна в его to-do и у его лидера)
 _DELEGATE_TASK_TOOL = {
     "type": "function",
@@ -319,6 +350,28 @@ _LIST_INTEGRATIONS_TOOL = {
         "name": "list_integrations",
         "description": "Список интеграций с внешними сервисами: доступные действия и статус подключения. Вызови перед use_integration.",
         "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+# Инструмент: Tool Router — опиши потребность словами, инструмент подберётся сам
+_USE_CAPABILITY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "use_capability",
+        "description": "Опиши ПОТРЕБНОСТЬ обычными словами («опубликовать лендинг», "
+                       "«отправить сообщение в telegram», «создать репозиторий»), а система "
+                       "сама подберёт нужный внешний инструмент и выполнит. Не нужно знать "
+                       "точные имена интеграций/действий — это делает роутер. Если нужен "
+                       "конкретный сервис с параметрами — используй use_integration.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "need": {"type": "string", "description": "Что нужно сделать, своими словами"},
+                "params": {"type": "object", "description": "Параметры для действия (если знаешь): "
+                           "например {chat_id, text} для сообщения, {slug, html} для лендинга"},
+            },
+            "required": ["need"],
+        },
     },
 }
 
@@ -648,6 +701,23 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                        "text": f"@{role}: {answer[:240]}"})
         return f"Ответ {col_role}: {answer}"
 
+    async def _handle_raise_event(args: dict) -> str:
+        kind = (args.get("kind") or "signal").strip()
+        summary = (args.get("summary") or "").strip()
+        detail = (args.get("detail") or "").strip()
+        if not summary:
+            return "Опиши суть сигнала одной фразой."
+        ev = events_module.raise_event(kind, summary, detail, from_role=role, from_agent=agent_id)
+        if not ev:
+            return "Событие не создано (пустая суть)."
+        label = events_module.KINDS.get(ev["kind"], ev["kind"])
+        await _publish_and_log({"type": "speech", "agent_id": agent_id,
+                                "text": f"📨 Сигнал компании [{label}]: {summary[:70]}"})
+        await publish({"type": "department_event", "agent_id": agent_id, "kind": ev["kind"],
+                       "text": f"{label} от {role}: {summary[:120]}"})
+        return ("Событие передано CEO — он интерпретирует его и при необходимости поручит "
+                "нужному отделу. Продолжай свою задачу.")
+
     async def _handle_delegate_task(args: dict) -> str:
         from src.office import plan as plan_module
         col_role = (args.get("role") or "").strip()
@@ -763,10 +833,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             return "Пока нет доступных интеграций."
         return "Доступные интеграции:\n" + "\n".join(lines)
 
-    async def _handle_use_integration(args: dict) -> str:
-        name = (args.get("name") or "").strip()
-        action_name = (args.get("action") or "").strip()
-        params = args.get("params") or {}
+    async def _execute_integration(name: str, action_name: str, params: dict) -> str:
+        """Ядро вызова интеграции — общее для use_integration и use_capability."""
         if isinstance(params, str):
             try:
                 params = json.loads(params)
@@ -798,7 +866,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         await _publish_and_log({"type": "speech", "agent_id": agent_id,
                                 "text": f"⚙️ {integ.title}.{action_name}…"})
         try:
-            result = await action.handler(creds, params)
+            result = await action.handler(creds, params or {})
         except Exception as e:
             err = str(e)[:200]
             await _report_connection_error(integ.title, err)
@@ -810,6 +878,37 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                        "integration": integ.name, "action": action_name,
                        "text": f"⚙️ {integ.title}.{action_name} → {result[:120]}"})
         return result
+
+    async def _handle_use_integration(args: dict) -> str:
+        return await _execute_integration(
+            (args.get("name") or "").strip(),
+            (args.get("action") or "").strip(),
+            args.get("params") or {},
+        )
+
+    async def _handle_use_capability(args: dict) -> str:
+        """Tool Router: потребность словами → подбор интеграции+действия → исполнение."""
+        need = (args.get("need") or "").strip()
+        params = args.get("params") or {}
+        if not need:
+            return "Опиши потребность словами (например «опубликовать лендинг»)."
+        match = tool_router.best(need)
+        if match:
+            await _publish_and_log({"type": "speech", "agent_id": agent_id,
+                                    "text": f"🧭 «{need[:50]}» → {match['title']}.{match['action']}"})
+            return await _execute_integration(match["integration"], match["action"], params)
+        # Неоднозначно или нет совпадений — показываем варианты, пусть агент выберет
+        cands = tool_router.route(need, top=3)
+        if not cands:
+            avail = ", ".join(i.name for i in integrations_registry.all_integrations())
+            return (f"Под потребность «{need}» не нашёл готового инструмента. "
+                    f"Доступные интеграции: {avail}. Посмотри list_integrations.")
+        lines = "\n".join(
+            f"- {c['integration']}.{c['action']} ({c['title']}, {'✅' if c['connected'] else '⚪'})"
+            for c in cands
+        )
+        return ("Уточни — под эту потребность подходят несколько инструментов. "
+                f"Вызови use_integration с нужным:\n{lines}")
 
     async def _report_connection_error(platform: str, error: str) -> None:
         """Публикует событие ошибки подключения чтобы пользователь видел в интерфейсе."""
@@ -848,18 +947,21 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _ASK_COLLEAGUE_TOOL,
-                         _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL, _READ_OFFICE_CHAT_TOOL,
-                         _LIST_INTEGRATIONS_TOOL, _USE_INTEGRATION_TOOL,
+                         _RAISE_EVENT_TOOL, _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL,
+                         _READ_OFFICE_CHAT_TOOL,
+                         _LIST_INTEGRATIONS_TOOL, _USE_CAPABILITY_TOOL, _USE_INTEGRATION_TOOL,
                          _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
                          _EXECUTE_CODE_TOOL, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
                 "ask_colleague": _handle_ask_colleague,
+                "raise_event": _handle_raise_event,
                 "delegate_task": _handle_delegate_task,
                 "read_office_chat": _handle_read_office_chat,
                 "get_connection": _handle_get_connection,
                 "list_integrations": _handle_list_integrations,
+                "use_capability": _handle_use_capability,
                 "use_integration": _handle_use_integration,
                 "write_file": _handle_write_file,
                 "read_file": _handle_read_file,
