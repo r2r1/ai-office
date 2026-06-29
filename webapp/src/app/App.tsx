@@ -15,6 +15,17 @@ import { useOffice } from "../data/OfficeProvider"
 import { api } from "../data/api"
 import type { Section, Theme } from "./types"
 
+/** Маленький чип-счётчик слоя памяти. */
+function MemChip({ label }: { label: string }) {
+  return (
+    <span className="mono" style={{
+      fontSize: 10, padding: "2px 7px", borderRadius: "var(--radius-pill)",
+      background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+      color: "var(--text-dim)",
+    }}>{label}</span>
+  )
+}
+
 export default function App() {
   const [view, setView]             = useState<Section>("team")
   const [theme, setTheme]           = useState<Theme>("dark")
@@ -32,6 +43,8 @@ export default function App() {
   // Company Understanding
   const [understanding, setUnderstanding] = useState<any>(null)
   const [understandingOpen, setUnderstandingOpen] = useState(false)
+  // Память офиса (трёхслойная)
+  const [memory, setMemory] = useState<any>(null)
   // Office pause/resume
   const [officePaused, setOfficePaused] = useState(false)
 
@@ -78,12 +91,14 @@ export default function App() {
     }
   }
 
-  // Загружаем понимание компании
+  // Загружаем понимание компании + память офиса
   useEffect(() => {
-    api.understanding().then(u => { if (u) setUnderstanding(u) })
-    const t = setInterval(() => {
+    const load = () => {
       api.understanding().then(u => { if (u) setUnderstanding(u) })
-    }, 30000)
+      api.memory().then(m => { if (m) setMemory(m) })
+    }
+    load()
+    const t = setInterval(load, 30000)
     return () => clearInterval(t)
   }, [])
 
@@ -192,6 +207,19 @@ export default function App() {
                       {item.hint && <div style={{ color: "var(--muted)", marginLeft: 18, marginTop: 1 }}>{item.hint}</div>}
                     </div>
                   ))}
+                </div>
+              )}
+              {memory && memory.count > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--hairline)" }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
+                    <span>🧩 Память офиса</span>
+                    <span className="mono" style={{ opacity: 0.7 }}>{memory.count} фактов</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {memory.layers.user > 0 && <MemChip label={`клиент ${memory.layers.user}`} />}
+                    {memory.layers.global > 0 && <MemChip label={`бизнес ${memory.layers.global}`} />}
+                    {memory.layers.department > 0 && <MemChip label={`отделы ${memory.layers.department}`} />}
+                  </div>
                 </div>
               )}
             </motion.div>

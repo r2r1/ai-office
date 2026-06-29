@@ -14,7 +14,7 @@ import asyncio
 import os
 import time
 
-from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control
+from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
@@ -651,6 +651,8 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             registry.update_status(agent_id, "done")
             state.save_last_run(agent_id)
             _attribute_result(agent_id, role, result)
+            # Память отдела: фиксируем, что отдел сделал — пригодится коллегам в след. циклах
+            knowledge.note_result(department, role, result or "")
             # Доска: закрываем ИМЕННО эту задачу (а не «первую по роли»).
             if task_id and plan.is_generated():
                 plan.complete(task_id)
@@ -768,10 +770,13 @@ def _task_with_context(role: str, task: str, skill: str = "",
     tdd = architect.load()
     tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:1200]}\n" if tdd else ""
     lessons_section = lessons.context_block(role)  # память: уроки прошлых задач этой роли
+    # Трёхслойная память: подбираем релевантные ИМЕННО этой задаче факты
+    # (ограничения клиента, его ответы, что отдел уже сделал).
+    knowledge_section = knowledge.context_block(task, department=department)
     return (
         f"Цель компании: {goal}\n{stage}{dept_line}{skill_line}"
         f"Твоя задача от руководителя: {task}\n"
-        f"{tdd_section}{lessons_section}\n"
+        f"{tdd_section}{knowledge_section}{lessons_section}\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
         f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
     )

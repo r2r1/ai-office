@@ -909,6 +909,18 @@ async def office_status():
     return control_module.status()
 
 
+@app.get("/api/memory")
+async def get_memory():
+    """Трёхслойная память офиса: что он знает о клиенте и отделах."""
+    from src.office import knowledge as knowledge_module
+    facts = knowledge_module.all_facts()
+    layers = {"global": 0, "user": 0, "department": 0}
+    for f in facts:
+        k = f.get("layer", "department")
+        layers[k] = layers.get(k, 0) + 1
+    return {"facts": facts, "count": len(facts), "layers": layers}
+
+
 @app.post("/api/office/pause")
 async def office_pause():
     """Поставить офис на паузу (агенты доделают текущие задачи, новые не начнут)."""
