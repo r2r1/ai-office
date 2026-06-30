@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, Card, Empty, SectionLabel } from "./ui"
+import { ViewBody, Card, Empty, SectionLabel } from "./ui"
 import { useThrottled } from "../hooks"
 
 /* Иконки Google-сервисов отдельно — не эмодзи */
@@ -118,7 +118,9 @@ function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) 
   )
 }
 
-export function ConnectionsView() {
+/** Тело раздела «Доступы» без обёртки ViewShell — переиспользуется во вкладке
+ *  «Компания → Доступы». */
+export function ConnectionsBody() {
   const { state } = useOffice()
   const [connections, setConnections]   = useState<any[]>([])
   const [integrations, setIntegrations] = useState<any[]>([])
@@ -141,9 +143,6 @@ export function ConnectionsView() {
   }, [])
 
   return (
-    <ViewShell>
-      <ViewHead title="Доступы" sub="Подключения к внешним сервисам и API-ключи" />
-
       <ViewBody>
         {/* Каталог интеграций */}
         <SectionLabel style={{ marginBottom: 14 }}>
@@ -189,6 +188,5 @@ export function ConnectionsView() {
           </div>
         )}
       </ViewBody>
-    </ViewShell>
   )
 }

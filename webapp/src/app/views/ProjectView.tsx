@@ -3,7 +3,7 @@ import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import type { ReactNode } from "react"
-import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel } from "./ui"
+import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar } from "./ui"
 import { Modal, ModalSection, ModalPre } from "../components/Modal"
 import { useThrottled } from "../hooks"
 
@@ -12,47 +12,34 @@ type ModalContent = { title: ReactNode; subtitle?: ReactNode; body: ReactNode } 
 const TABS = [
   { id: "milestones", label: "Этапы" },
   { id: "tasks",      label: "Задачи" },
-  { id: "results",    label: "Итоги" },
 ]
 
 export function ProjectView() {
   const { state } = useOffice()
   const [tab, setTab] = useState("milestones")
   const [milestones, setMilestones] = useState<any[]>([])
-  const [deliverables, setDeliverables] = useState<any[]>([])
   const tasks = state.plan.tasks || []
   const tick = useThrottled(state.feed.length, 2500)
   const [modal, setModal] = useState<ModalContent>(null)
 
   useEffect(() => {
     api.milestones().then(d => setMilestones(d.stages || []))
-    api.deliverables().then(d => setDeliverables(d.deliverables || []))
   }, [tick])
 
   const tabsWithBadges = TABS.map(t => ({
     ...t,
     badge: t.id === "tasks" ? tasks.filter((x: any) => x.status === "in_progress").length
       : t.id === "milestones" ? milestones.length
-      : t.id === "results" ? deliverables.length
       : undefined,
   }))
 
-  const metrics = [
-    { label: "Выполнено задач",  value: `${state.plan.progress.done}/${state.plan.progress.total}`, icon: "✓" },
-    { label: "Общий прогресс",   value: `${state.progress.percent}%`,                               icon: "◎" },
-    { label: "Лиды",             value: String(state.leads.length),                                  icon: "◈" },
-    { label: "Сайтов",           value: String(state.sites.length),                                  icon: "⊟" },
-    { label: "Расход",           value: `$${state.cost.toFixed(4)}`,                                 icon: "💸" },
-  ]
-
   return (
     <ViewShell>
-      <ViewHead title="Проект" sub={state.ready ? state.progress.note || "Офис работает" : "Ожидание брифа"} />
+      <ViewHead title="Проект" sub={state.ready ? state.progress.note || "План работы офиса" : "Ожидание брифа"} />
       <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
 
       {tab === "milestones" && <MilestonesTab milestones={milestones} progress={state.progress} onOpen={setModal} />}
-      {tab === "tasks"      && <TasksTab tasks={tasks} metrics={metrics} />}
-      {tab === "results"    && <ResultsTab deliverables={deliverables} onOpen={setModal} />}
+      {tab === "tasks"      && <TasksTab tasks={tasks} />}
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.title} subtitle={modal?.subtitle}>
         {modal?.body}
@@ -157,66 +144,9 @@ const COLS = [
   { key: "done",        label: "Готово",      dot: "#a0e0ab" },
 ]
 
-function TasksTab({ tasks, metrics }: { tasks: any[]; metrics: { label: string; value: string; icon: string }[] }) {
-  const [initiatives, setInitiatives] = useState<any[]>([])
-  useEffect(() => {
-    api.get("/api/initiatives").then(d => setInitiatives(d?.pending || [])).catch(() => {})
-  }, [tasks.length])
-
-  const handleInitiative = async (iid: string, action: "accept" | "reject") => {
-    await api.post(`/api/initiative/${iid}/${action}`, {})
-    setInitiatives(prev => prev.filter(i => i.id !== iid))
-  }
-
+function TasksTab({ tasks }: { tasks: any[] }) {
   return (
     <ViewBody>
-      {/* инициативы CEO */}
-      {initiatives.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          <SectionLabel style={{ marginBottom: 12 }}>💡 Инициативы CEO · {initiatives.length}</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {initiatives.map((ini: any) => (
-              <Card key={ini.id} style={{ borderLeft: "3px solid var(--mercury-a)", padding: "14px 16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 500, marginBottom: 5 }}>{ini.title}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 5 }}>{ini.rationale}</div>
-                    {ini.expected_outcome && (
-                      <Pill accent>📈 {ini.expected_outcome}</Pill>
-                    )}
-                    {ini.estimated_effort && (
-                      <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: 8 }}>Усилий: {ini.estimated_effort}</span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <button onClick={() => handleInitiative(ini.id, "accept")}
-                      style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
-                        border: "1px solid #a0e0ab", background: "rgba(160,224,171,0.15)", color: "#a0e0ab" }}>
-                      ✅ Принять
-                    </button>
-                    <button onClick={() => handleInitiative(ini.id, "reject")}
-                      style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
-                        border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
-                      ✖
-                    </button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* метрики */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 28 }}>
-        {metrics.map(m => (
-          <div key={m.label} className="card" style={{ borderRadius: "var(--radius-md)", padding: "14px 16px" }}>
-            <div className="display" style={{ fontSize: 26, color: "var(--text)", lineHeight: 1 }}>{m.value}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>{m.label}</div>
-          </div>
-        ))}
-      </div>
-
       {tasks.length === 0 ? (
         <Empty icon="◉" text="План задач появится после старта офиса"
           hint="Директор сформирует доску после получения стратегии" />
@@ -259,42 +189,3 @@ function TasksTab({ tasks, metrics }: { tasks: any[]; metrics: { label: string; 
   )
 }
 
-// ── Итоги / Результаты ────────────────────────────────────────────────────────
-function ResultsTab({ deliverables, onOpen }: { deliverables: any[]; onOpen: (c: ModalContent) => void }) {
-  if (deliverables.length === 0) return (
-    <ViewBody>
-      <Empty icon="◎" text="Готовые материалы появятся здесь"
-        hint="Результаты работы агентов — стратегия, ТЗ, код и другие артефакты" />
-    </ViewBody>
-  )
-
-  return (
-    <ViewBody>
-      <SectionLabel style={{ marginBottom: 16 }}>Готовые материалы · {deliverables.length}</SectionLabel>
-      <div style={{ display: "grid", gap: 12 }}>
-        {deliverables.map((d: any, i: number) => {
-          const full = d.content || d.result || ""
-          return (
-            <Card key={i} onClick={() => onOpen({
-              title: roleName(d.role), subtitle: d.title || d.task,
-              body: <ModalPre>{full}</ModalPre>,
-            })}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
-                <Pill accent>{roleName(d.role)}</Pill>
-                <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 500 }}>{d.title}</span>
-              </div>
-              {full && (
-                <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.6,
-                  display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden",
-                  whiteSpace: "pre-wrap", borderTop: "1px solid var(--hairline-soft)", paddingTop: 10, marginTop: 4 }}>
-                  {full}
-                </div>
-              )}
-              <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 8 }}>Нажмите, чтобы открыть полностью →</div>
-            </Card>
-          )
-        })}
-      </div>
-    </ViewBody>
-  )
-}

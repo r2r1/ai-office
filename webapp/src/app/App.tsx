@@ -11,7 +11,6 @@ import { CompanyView } from "./views/CompanyView"
 import { ChatsView } from "./views/ChatsView"
 import { TeamView } from "./views/TeamView"
 import { ResultsView } from "./views/ResultsView"
-import { ConnectionsView } from "./views/ConnectionsView"
 import { AccountView } from "./views/AccountView"
 import { useOffice } from "../data/OfficeProvider"
 import { OnboardingFlow } from "./onboarding/OnboardingFlow"
@@ -149,9 +148,9 @@ export default function App() {
         width: "100%", height: "100%", padding: isMobile ? 8 : 14, gap,
       }}>
         <TopBar progress={state.progress.percent} progressNote={state.progress.note}
-          cost={state.cost} model={state.model} connected={state.connected}
+          cost={state.cost} connected={state.connected}
           theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
-          onOpenAccount={() => changeView("account")} isMobile={isMobile}
+          isMobile={isMobile}
           understanding={understanding}
           onUnderstandingClick={() => setUnderstandingOpen(o => !o)}
           officePaused={officePaused}
@@ -269,12 +268,11 @@ export default function App() {
                 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
                 {view === "office"      && <OfficeView onOpenAgent={openAgent} />}
-                {view === "dashboard"   && <DashboardView />}
+                {view === "dashboard"   && <DashboardView onNavigate={changeView} />}
                 {view === "project"     && <ProjectView />}
                 {view === "team"        && <TeamView onOpenChat={openChat} />}
                 {view === "results"     && <ResultsView />}
                 {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
-                {view === "connections" && <ConnectionsView />}
                 {view === "company"     && <CompanyView />}
                 {view === "account"     && <AccountView />}
               </motion.div>

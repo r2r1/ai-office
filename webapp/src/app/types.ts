@@ -1,5 +1,5 @@
 // Разделы навигации — мои 4 + системные (решение пользователя).
-export type Section = "office" | "dashboard" | "project" | "team" | "results" | "chats" | "connections" | "company" | "account"
+export type Section = "office" | "dashboard" | "project" | "team" | "results" | "chats" | "company" | "account"
 
 export type AgentStatus = "active" | "thinking" | "idle" | "done"
 

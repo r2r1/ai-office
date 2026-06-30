@@ -1,43 +1,87 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
+import { roleName } from "../../data/roles"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, SectionLabel } from "./ui"
+import { Modal, ModalPre } from "../components/Modal"
 import { useThrottled } from "../hooks"
-import { FileExplorer } from "./FileExplorer"
+
+type ModalContent = { title: ReactNode; subtitle?: ReactNode; body: ReactNode } | null
 
 const TABS = [
-  { id: "leads", label: "Лиды" },
-  { id: "sites", label: "Сайты" },
-  { id: "files", label: "Код" },
+  { id: "outputs", label: "Итоги" },
+  { id: "sites",   label: "Сайты" },
+  { id: "leads",   label: "Лиды" },
 ]
 
 export function ResultsView() {
   const { state } = useOffice()
-  const [tab, setTab] = useState("leads")
-  const [files, setFiles] = useState<any[]>([])
+  const [tab, setTab] = useState("outputs")
+  const [deliverables, setDeliverables] = useState<any[]>([])
+  const [modal, setModal] = useState<ModalContent>(null)
 
   const tick = useThrottled(state.feed.length, 2500)
   useEffect(() => {
-    api.files().then(d => setFiles(d.files || []))
+    api.deliverables().then(d => setDeliverables(d.deliverables || []))
   }, [tick])
 
   const tabsWithBadges = TABS.map(t => ({
     ...t,
-    badge: t.id === "leads" ? state.leads.length
+    badge: t.id === "outputs" ? deliverables.length
       : t.id === "sites" ? state.sites.length
-      : t.id === "files" ? files.length
+      : t.id === "leads" ? state.leads.length
       : undefined,
   }))
 
   return (
     <ViewShell>
-      <ViewHead title="Итоги" sub="Лиды, опубликованные сайты и код проекта" />
+      <ViewHead title="Результаты" sub="Готовые материалы, сайты и собранные заявки" />
       <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
 
-      {tab === "leads" && <LeadsTab leads={state.leads} />}
-      {tab === "sites" && <SitesTab sites={state.sites} leads={state.leads} />}
-      {tab === "files" && <FileExplorer files={files} />}
+      {tab === "outputs" && <DeliverablesTab deliverables={deliverables} onOpen={setModal} />}
+      {tab === "sites"   && <SitesTab sites={state.sites} leads={state.leads} />}
+      {tab === "leads"   && <LeadsTab leads={state.leads} />}
+
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.title} subtitle={modal?.subtitle}>
+        {modal?.body}
+      </Modal>
     </ViewShell>
+  )
+}
+
+// ── Итоги (deliverables) ──────────────────────────────────────────────────────
+function DeliverablesTab({ deliverables, onOpen }: { deliverables: any[]; onOpen: (c: ModalContent) => void }) {
+  if (deliverables.length === 0) return (
+    <ViewBody>
+      <Empty icon="◎" text="Готовые материалы появятся здесь"
+        hint="Результаты работы агентов — стратегия, ТЗ, тексты и другие артефакты" />
+    </ViewBody>
+  )
+  return (
+    <ViewBody>
+      <SectionLabel style={{ marginBottom: 16 }}>Готовые материалы · {deliverables.length}</SectionLabel>
+      <div style={{ display: "grid", gap: 12 }}>
+        {deliverables.map((d: any, i: number) => {
+          const full = d.content || d.result || ""
+          return (
+            <Card key={i} onClick={() => onOpen({ title: roleName(d.role), subtitle: d.title || d.task, body: <ModalPre>{full}</ModalPre> })}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+                <Pill accent>{roleName(d.role)}</Pill>
+                <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 500 }}>{d.title}</span>
+              </div>
+              {full && (
+                <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.6,
+                  display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden",
+                  whiteSpace: "pre-wrap", borderTop: "1px solid var(--hairline-soft)", paddingTop: 10, marginTop: 4 }}>
+                  {full}
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 8 }}>Нажмите, чтобы открыть полностью →</div>
+            </Card>
+          )
+        })}
+      </div>
+    </ViewBody>
   )
 }
 

@@ -1,55 +1,39 @@
-import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, ViewBody, Card } from "./ui"
-import { ModelPicker, type Preset } from "../components/ModelPicker"
 
 export function AccountView() {
   const { state } = useOffice()
-  const [model, setModel] = useState("")
-  const [presets, setPresets] = useState<Preset[]>([])
-  const [saved, setSaved] = useState(false)
-
-  useEffect(() => {
-    api.models().then(m => { setModel(m.default || ""); setPresets(m.presets || []) })
-  }, [])
-
-  async function saveModel(next: string) {
-    const m = next.trim()
-    if (!m) return
-    setModel(m)
-    await api.setModel(m)
-    setSaved(true); setTimeout(() => setSaved(false), 1800)
-  }
 
   return (
     <ViewShell>
-      <ViewHead title="Аккаунт" sub="Рабочее пространство и настройки" />
+      <ViewHead title="Аккаунт" sub="Рабочее пространство, тариф и системные настройки" />
       <ViewBody style={{ maxWidth: 560 }}>
         <Card style={{ marginBottom: 16 }}>
           <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 12 }}>Рабочее пространство</div>
           <Field label="ID" value={state.workspace?.id || "—"} />
           <Field label="Название" value={state.workspace?.name || "—"} />
-          <Field label="Тариф" value={state.workspace?.plan || "—"} />
           <Field label="Статус офиса" value={state.ready ? "работает" : "ожидает бриф"} accent={!!state.ready} />
         </Card>
 
-        <Card>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
-            <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1px" }}>🧠 Модель офиса</div>
-            {saved && <span style={{ fontSize: 11, color: "#a0e0ab" }}>сохранено ✓</span>}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 14 }}>
-            На этой AI-модели по умолчанию работают <b style={{ color: "var(--text-dim)" }}>все агенты</b>.
-            Дешевле — экономнее, мощнее — умнее. Выберите из списка или впишите свою.
-          </div>
-          <ModelPicker value={model} presets={presets} onSave={saveModel} />
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>
-            Расход за сессию: <b style={{ color: "var(--text-dim)" }}>${state.cost.toFixed(4)}</b>
+        {/* Тариф и платежи (витрина; реальная оплата подключается отдельно) */}
+        <Card style={{ marginBottom: 16 }}>
+          <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 12 }}>Тариф и платежи</div>
+          <Field label="Текущий тариф" value={state.workspace?.plan || "Базовый"} />
+          <Field label="Расход за сессию" value={`$${state.cost.toFixed(4)}`} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 12 }}>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>
+              Лимиты расхода — в разделе «Компания → Лимиты».
+            </div>
+            <button disabled title="Скоро"
+              style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-pill)", padding: "9px 18px",
+                background: "transparent", color: "var(--faint)", cursor: "not-allowed", fontSize: 13, whiteSpace: "nowrap" }}>
+              Пополнить
+            </button>
           </div>
         </Card>
 
-        <Card style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <Card style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
             <div style={{ fontSize: 13, color: "var(--text)" }}>Логи работы офиса</div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>Полный текстовый отчёт: бриф, команда, этапы, события, результаты</div>

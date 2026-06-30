@@ -3,6 +3,7 @@ import { api } from "../../data/api"
 import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty } from "./ui"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
 import { FileExplorer } from "./FileExplorer"
+import { ConnectionsBody } from "./ConnectionsView"
 
 const GROWTH_STYLES = [
   { id: "aggressive", label: "Агрессивный — скорость важнее осторожности" },
@@ -315,34 +316,9 @@ function StorageTab() {
   return <FileExplorer files={files} />
 }
 
-// ── Доступы: статусы интеграций (OAuth — этап подготовки) ─────────────────────
+// ── Доступы: полный каталог интеграций + сохранённые ключи (OAuth) ────────────
 function AccessTab() {
-  const [items, setItems] = useState<any[]>([])
-  useEffect(() => { api.integrations().then(d => setItems(d.integrations || [])) }, [])
-  return (
-    <ViewBody style={{ maxWidth: 620 }}>
-      <SectionLabel>Подготовка: подключения и интеграции</SectionLabel>
-      <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 16 }}>
-        Прежде чем офис начнёт работать с внешними системами, подключите нужные сервисы.
-        OAuth-интеграции (Google, GitHub) авторизуются в один клик во вкладке «Доступы».
-      </div>
-      {items.length === 0 ? <Empty text="Список интеграций загружается…" /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-          {items.map((it: any) => (
-            <Card key={it.name}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 13, color: "var(--text)" }}>{it.title || it.name}</span>
-                <span style={{ fontSize: 11, color: it.connected ? "#a0e0ab" : "var(--faint)" }}>
-                  {it.connected ? "● подключено" : "○ нет"}
-                </span>
-              </div>
-              {it.how_to && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>{it.how_to}</div>}
-            </Card>
-          ))}
-        </div>
-      )}
-    </ViewBody>
-  )
+  return <ConnectionsBody />
 }
 
 // ── Мелкие поля ───────────────────────────────────────────────────────────────

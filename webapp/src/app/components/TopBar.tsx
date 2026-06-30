@@ -7,11 +7,9 @@ interface TopBarProps {
   progress: number
   progressNote: string
   cost: number
-  model: string
   connected?: boolean
   theme: Theme
   onToggleTheme: () => void
-  onOpenAccount?: () => void
   isMobile: boolean
   understanding?: { score: number } | null
   onUnderstandingClick?: () => void
@@ -28,7 +26,7 @@ interface TopBarProps {
 
 const AUTONOMY_ICONS: Record<string, string> = { scout: "🔍", guided: "🤝", trusted: "✅", autonomous: "🚀" }
 
-export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick, health, trust, onHealthClick, qualityMode, onQualityClick }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick, health, trust, onHealthClick, qualityMode, onQualityClick }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -89,27 +87,18 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
         {!isMobile && understanding != null && (
           <UnderstandingBadge score={understanding.score} onClick={onUnderstandingClick} />
         )}
-        {!isMobile && health && (
-          <button onClick={onHealthClick} title={`Здоровье компании: ${health.company}/100`}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+        {!isMobile && (health || trust) && (
+          <button onClick={onHealthClick}
+            title={`Здоровье ${health?.company ?? "—"}/100 · доверие ${trust?.company ?? "—"}/100`}
+            style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 11px",
               borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
               background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
             onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
             onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
-            <span style={{ fontSize: 12 }}>{health.status}</span>
-            <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{health.company}</span>
+            {health && <span style={{ fontSize: 12 }}>{health.status} <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{health.company}</span></span>}
+            {trust && <span style={{ fontSize: 12 }}>🤝 <span className="mono" style={{ fontSize: 11,
+              color: trust.company >= 70 ? "#a0e0ab" : trust.company >= 40 ? "#ffac2e" : "var(--text-dim)" }}>{trust.company}</span></span>}
           </button>
-        )}
-        {!isMobile && trust && (
-          <div title={`Trust: ${trust.company}/100 · streak ${trust.streak}`}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
-              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)" }}>
-            <span style={{ fontSize: 12 }}>🤝</span>
-            <span className="mono" style={{ fontSize: 11,
-              color: trust.company >= 70 ? "#a0e0ab" : trust.company >= 40 ? "#ffac2e" : "var(--text-dim)" }}>
-              {trust.company}{trust.streak >= 3 ? `·${trust.streak}` : ""}
-            </span>
-          </div>
         )}
         {!isMobile && autonomyLevel && (
           <button onClick={onAutonomyClick} title={`Уровень автономности: ${autonomyLevel}`}
@@ -134,9 +123,8 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
             <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{qualityMode.label}</span>
           </button>
         )}
-        {!isMobile && <ModelPlaque model={model} onOpenAccount={onOpenAccount} />}
-        <button 
-          onClick={onToggleTheme} 
+        <button
+          onClick={onToggleTheme}
           title={theme === "dark" ? "Светлая тема" : "Темная тема"}
           style={{
             width: 32, height: 32, borderRadius: "var(--radius-md)", cursor: "pointer",
@@ -212,30 +200,3 @@ function UnderstandingBadge({ score, onClick }: { score: number; onClick?: () =>
   )
 }
 
-/** Плашка текущей модели офиса + понятная подсказка при наведении. */
-function ModelPlaque({ model, onOpenAccount }: { model: string; onOpenAccount?: () => void }) {
-  const [hover, setHover] = useState(false)
-  return (
-    <div style={{ position: "relative" }}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-     <button onClick={onOpenAccount}
-        style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "5px 12px",
-          borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-          background: hover ? "var(--surface-soft)" : "transparent",
-          cursor: onOpenAccount ? "pointer" : "default",
-          transition: "all 0.2s ease",
-        }}>
-        <span style={{ fontSize: 14, lineHeight: 1 }}>🧠</span>
-        <span className="mono" style={{ 
-          fontSize: 11, color: "var(--text-dim)", maxWidth: 120,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" 
-        }}>
-          {model || "Загрузка..."}
-        </span>
-      </button>
-
-      
-    </div>
-  )
-}
