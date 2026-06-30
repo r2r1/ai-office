@@ -3,6 +3,7 @@ import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, SectionLabel } from "./ui"
 import { useThrottled } from "../hooks"
+import { FileExplorer } from "./FileExplorer"
 
 const TABS = [
   { id: "leads", label: "Лиды" },
@@ -14,19 +15,11 @@ export function ResultsView() {
   const { state } = useOffice()
   const [tab, setTab] = useState("leads")
   const [files, setFiles] = useState<any[]>([])
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState<string>("")
 
   const tick = useThrottled(state.feed.length, 2500)
   useEffect(() => {
     api.files().then(d => setFiles(d.files || []))
   }, [tick])
-
-  async function openFile(path: string) {
-    setSelectedFile(path)
-    const d = await api.fileContent(path)
-    setFileContent(d.content || "")
-  }
 
   const tabsWithBadges = TABS.map(t => ({
     ...t,
@@ -39,11 +32,11 @@ export function ResultsView() {
   return (
     <ViewShell>
       <ViewHead title="Итоги" sub="Лиды, опубликованные сайты и код проекта" />
-      <SubTabs tabs={tabsWithBadges} active={tab} onChange={t => { setTab(t); setSelectedFile(null) }} />
+      <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
 
       {tab === "leads" && <LeadsTab leads={state.leads} />}
       {tab === "sites" && <SitesTab sites={state.sites} leads={state.leads} />}
-      {tab === "files" && <FilesTab files={files} selected={selectedFile} content={fileContent} onOpen={openFile} />}
+      {tab === "files" && <FileExplorer files={files} />}
     </ViewShell>
   )
 }
@@ -136,55 +129,3 @@ function SitesTab({ sites, leads }: { sites: any[]; leads: any[] }) {
   )
 }
 
-// ── Файлы / Код ───────────────────────────────────────────────────────────────
-function FilesTab({ files, selected, content, onOpen }: {
-  files: any[]; selected: string | null; content: string; onOpen: (p: string) => void
-}) {
-  if (files.length === 0) return (
-    <ViewBody>
-      <Empty icon="⟨/⟩" text="Рабочая папка пуста"
-        hint="Разработчик напишет код через инструмент write_file — файлы появятся здесь" />
-    </ViewBody>
-  )
-
-  return (
-    <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <div style={{ width: 240, flexShrink: 0, borderRight: "1px solid var(--hairline)", overflowY: "auto", padding: "12px 0" }}>
-        {files.map((f: any, i: number) => (
-          <div key={i} onClick={() => onOpen(f.path)}
-            style={{
-              padding: "8px 18px", cursor: "pointer", fontSize: 12,
-              color: selected === f.path ? "var(--text)" : "var(--text-dim)",
-              background: selected === f.path ? "var(--hairline-soft)" : "transparent",
-              borderLeft: `2px solid ${selected === f.path ? "var(--mercury-a)" : "transparent"}`,
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={e => { if (selected !== f.path) (e.currentTarget as HTMLElement).style.background = "var(--surface-soft)" }}
-            onMouseLeave={e => { if (selected !== f.path) (e.currentTarget as HTMLElement).style.background = "transparent" }}>
-            <span className="mono">{f.path}</span>
-            <span style={{ float: "right", fontSize: 10, color: "var(--faint)" }}>
-              {f.size ? `${f.size}b` : ""}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
-        {selected ? (
-          <>
-            <div className="mono" style={{ fontSize: 10, color: "var(--muted)", marginBottom: 14 }}>{selected}</div>
-            <pre style={{
-              fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-dim)", lineHeight: 1.65,
-              whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0,
-            }}>
-              {content || "Загрузка…"}
-            </pre>
-          </>
-        ) : (
-          <div style={{ color: "var(--faint)", fontSize: 13, paddingTop: 40, textAlign: "center" }}>
-            Выберите файл слева
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}

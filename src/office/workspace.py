@@ -153,6 +153,16 @@ def delete_file(path: str) -> str:
     return f"Файл удалён: {path}"
 
 
+def _utf8_env() -> dict:
+    """Окружение с UTF-8 для дочерних процессов — иначе русский/эмодзи-вывод
+    падает на Windows (cp1251) с UnicodeEncodeError. Агенты пишут русский код."""
+    import os
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
 def execute_code(path: str, stdin_input: str = "") -> str:
     """Запускает файл из рабочей папки, возвращает stdout+stderr (макс. 30 сек)."""
     import subprocess
@@ -177,9 +187,12 @@ def execute_code(path: str, stdin_input: str = "") -> str:
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
             cwd=str(_base()),
             input=stdin_input or None,
+            env=_utf8_env(),
         )
         out = result.stdout[-3000:] if result.stdout else ""
         err = result.stderr[-1500:] if result.stderr else ""
@@ -199,6 +212,49 @@ def execute_code(path: str, stdin_input: str = "") -> str:
         return f"❌ Интерпретатор не найден: {e}"
     except Exception as e:
         return f"❌ Ошибка запуска: {e}"
+
+
+def run_command(cmd: str, cwd_rel: str = "") -> str:
+    """
+    Выполняет произвольную команду в рабочей папке тенанта (терминал).
+    cwd_rel — подпапка внутри workspace, откуда запускать (для вложенности).
+    Ограничения: таймаут 30 сек, рабочая директория — внутри workspace.
+    """
+    import subprocess
+
+    cmd = (cmd or "").strip()
+    if not cmd:
+        return "(пустая команда)"
+
+    # Рабочая директория: подпапка внутри workspace (или корень)
+    workdir = _base().resolve()
+    if cwd_rel:
+        sub = _safe(cwd_rel)
+        if sub is not None and sub.is_dir():
+            workdir = sub
+
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True,
+            timeout=30, cwd=str(workdir),
+            encoding="utf-8", errors="replace",
+            env=_utf8_env(),
+        )
+        out = (result.stdout or "")[-4000:]
+        err = (result.stderr or "")[-2000:]
+        parts = []
+        if out:
+            parts.append(out.rstrip())
+        if err:
+            parts.append(err.rstrip())
+        body = "\n".join(parts) if parts else "(нет вывода)"
+        if result.returncode != 0:
+            body += f"\n[код выхода {result.returncode}]"
+        return body
+    except subprocess.TimeoutExpired:
+        return "❌ Таймаут: команда работала более 30 секунд и была остановлена."
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
 
 
 def reset() -> None:

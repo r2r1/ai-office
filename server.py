@@ -901,6 +901,19 @@ async def run_file(request: Request):
     return JSONResponse({"ok": ok, "output": output})
 
 
+@app.post("/api/terminal")
+async def terminal(request: Request):
+    """Терминал рабочей папки: выполняет команду в workspace тенанта (cwd — подпапка)."""
+    data = await request.json()
+    cmd = (data.get("cmd") or "").strip()
+    cwd = (data.get("cwd") or "").strip()
+    if not cmd:
+        return JSONResponse({"ok": False, "output": "Введите команду."})
+    output = workspace_module.run_command(cmd, cwd)
+    ok = not output.startswith("❌")
+    return JSONResponse({"ok": ok, "output": output})
+
+
 @app.get("/api/digest")
 async def get_digest():
     """Morning Digest — что офис сделал с последнего визита. Обновляет метку визита."""
