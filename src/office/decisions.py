@@ -20,7 +20,7 @@ _MAX = 200  # максимум записей
 
 
 def _load() -> list:
-    return ctx.read_json("decisions") or []
+    return ctx.read_json("decisions", None) or []
 
 
 def _save(items: list) -> None:
@@ -92,3 +92,4 @@ def recent(n: int = 20) -> list:
 def payload() -> dict:
     items = recent(30)
     return {"decisions": items, "total": len(_load())}
+

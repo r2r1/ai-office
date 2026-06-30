@@ -58,7 +58,7 @@ def _idx(level: str) -> int:
 
 
 def get_level() -> str:
-    d = ctx.read_json("autonomy") or {}
+    d = ctx.read_json("autonomy", None) or {}
     level = d.get("level", _DEFAULT_LEVEL)
     return level if level in LEVELS else _DEFAULT_LEVEL
 
@@ -66,7 +66,7 @@ def get_level() -> str:
 def set_level(level: str) -> None:
     if level not in LEVELS:
         raise ValueError(f"Неизвестный уровень: {level}. Допустимые: {LEVELS}")
-    d = ctx.read_json("autonomy") or {}
+    d = ctx.read_json("autonomy", None) or {}
     d["level"] = level
     ctx.write_json("autonomy", d)
 
@@ -94,3 +94,4 @@ def payload() -> dict:
             for l in LEVELS
         ],
     }
+

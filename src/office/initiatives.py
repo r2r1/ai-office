@@ -16,7 +16,7 @@ _EXPIRE_SECS = 7 * 24 * 3600  # 7 дней
 
 
 def _load() -> list:
-    return ctx.read_json("initiatives") or []
+    return ctx.read_json("initiatives", None) or []
 
 
 def _save(items: list) -> None:
@@ -123,3 +123,4 @@ def payload() -> dict:
         "pending_count": len(p),
         "total": len(all_items),
     }
+

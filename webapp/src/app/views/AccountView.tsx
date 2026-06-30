@@ -31,7 +31,7 @@ export function AccountView() {
           <Field label="ID" value={state.workspace?.id || "—"} />
           <Field label="Название" value={state.workspace?.name || "—"} />
           <Field label="Тариф" value={state.workspace?.plan || "—"} />
-          <Field label="Статус офиса" value={state.ready ? "работает" : "ожидает бриф"} accent={state.ready} />
+          <Field label="Статус офиса" value={state.ready ? "работает" : "ожидает бриф"} accent={!!state.ready} />
         </Card>
 
         <Card>

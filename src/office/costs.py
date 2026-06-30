@@ -71,6 +71,40 @@ def payload() -> dict:
     return {"total": totals(), "agents": by_agent()}
 
 
+# ── Бюджетные лимиты (Конституция → авто-пауза при превышении) ───────────────
+_LIMITS_FILE = "limits.json"
+
+
+def limits() -> dict:
+    """Лимиты расхода: {total_usd, daily_usd}; 0 = без лимита."""
+    return ctx.read_json(_LIMITS_FILE, {"total_usd": 0.0, "daily_usd": 0.0})
+
+
+def set_limits(total_usd: float = 0.0, daily_usd: float = 0.0) -> None:
+    ctx.write_json(_LIMITS_FILE, {
+        "total_usd": max(0.0, float(total_usd or 0)),
+        "daily_usd": max(0.0, float(daily_usd or 0)),
+    })
+
+
+def over_limit() -> bool:
+    """Превышен ли общий лимит расхода (для авто-паузы)."""
+    lim = limits()
+    cap = lim.get("total_usd", 0.0)
+    return cap > 0 and totals()["cost"] >= cap
+
+
+def limit_payload() -> dict:
+    lim = limits()
+    spent = totals()["cost"]
+    return {
+        "total_usd": lim.get("total_usd", 0.0),
+        "daily_usd": lim.get("daily_usd", 0.0),
+        "spent": spent,
+        "over_limit": over_limit(),
+    }
+
+
 def load() -> None:
     pass
 

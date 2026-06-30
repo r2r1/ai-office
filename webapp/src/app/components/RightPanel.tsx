@@ -295,9 +295,9 @@ function FeedTab() {
               )
             })()}
           </div>
-          {f.ts && (
+          {(f as any).ts && (
             <span className="mono" style={{ fontSize: 8.5, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>
-              {new Date(f.ts * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
+              {new Date((f as any).ts * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
         </div>

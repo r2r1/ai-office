@@ -28,7 +28,7 @@ _UPGRADE_STREAK = 8   # подряд успешных задач
 
 
 def _load() -> dict:
-    d = ctx.read_json("trust") or {}
+    d = ctx.read_json("trust", None) or {}
     return {
         _COMPANY_KEY: d.get(_COMPANY_KEY, 20),
         "tech":       d.get("tech", 20),
@@ -138,3 +138,4 @@ def payload() -> dict:
         "total_done": d.get("total_done", 0),
         "total_fail": d.get("total_fail", 0),
     }
+

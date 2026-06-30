@@ -33,7 +33,7 @@ _DEFAULT: dict = {
 
 
 def load() -> dict:
-    data = ctx.read_json("philosophy") or {}
+    data = ctx.read_json("philosophy", None) or {}
     return {**_DEFAULT, **data}
 
 
@@ -68,3 +68,4 @@ def context_block() -> str:
         lines.append(f"Аппетит к риску: {risk}")
     lines.append("Все решения должны соответствовать этой философии.")
     return "\n".join(lines)
+

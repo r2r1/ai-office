@@ -30,7 +30,7 @@ _DEFAULT: dict = {
 
 
 def load() -> dict:
-    data = ctx.read_json("constitution") or {}
+    data = ctx.read_json("constitution", None) or {}
     return {**_DEFAULT, **data}
 
 
@@ -87,3 +87,4 @@ def payload() -> dict:
         "action_rules": rules,
         "custom_rules": d.get("custom_rules") or [],
     }
+

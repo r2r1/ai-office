@@ -12,6 +12,23 @@ const PATHS: Record<string, ReactNode> = {
       <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
     </>
   ),
+  // Сводка — спидометр/датчик
+  dashboard: (
+    <>
+      <path d="M3.5 14a8.5 8.5 0 0 1 17 0" />
+      <path d="M12 14l4-3.5" />
+      <circle cx="12" cy="14" r="1.3" />
+    </>
+  ),
+  // Компания — здание с колоннами
+  company: (
+    <>
+      <path d="M3.5 9.5 12 4l8.5 5.5" />
+      <path d="M5 9.5V20h14V9.5" />
+      <path d="M9 20v-6M12 20v-6M15 20v-6" />
+      <path d="M3.5 20h17" />
+    </>
+  ),
   // Проект — канбан-колонки
   project: (
     <>

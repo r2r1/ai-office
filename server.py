@@ -1401,6 +1401,23 @@ async def get_health(request: Request):
     return health_module.payload()
 
 
+@app.get("/api/limits")
+async def get_limits(request: Request):
+
+    return costs_module.limit_payload()
+
+
+@app.post("/api/limits")
+async def post_limits(request: Request):
+
+    data = await request.json()
+    costs_module.set_limits(
+        total_usd=data.get("total_usd", 0),
+        daily_usd=data.get("daily_usd", 0),
+    )
+    return {"ok": True, **costs_module.limit_payload()}
+
+
 @app.post("/api/chat")
 async def post_chat(request: Request):
     """Предприниматель пишет в общий канал офиса. Сообщение сохраняется и сразу

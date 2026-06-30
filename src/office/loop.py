@@ -14,7 +14,7 @@ import asyncio
 import os
 import time
 
-from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge, trust, decisions, autonomy, initiatives, board
+from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge, trust, decisions, autonomy, initiatives, board, costs
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
@@ -197,6 +197,14 @@ async def _run_office(tid: str) -> None:
 
         # Проверка паузы — пользователь или quota-стоп
         if control.is_paused():
+            await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
+            continue
+
+        # Бюджетный лимит из Конституции: превышен общий лимит расхода → авто-пауза.
+        if costs.over_limit():
+            control.pause("Достигнут лимит расхода — офис на паузе. Повысьте лимит в «Компания → Лимиты».")
+            await publish({"type": "system",
+                           "text": "⛔ Достигнут бюджетный лимит — офис поставлен на паузу."})
             await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
             continue
 

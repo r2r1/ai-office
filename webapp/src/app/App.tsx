@@ -6,6 +6,8 @@ import { TabBridge } from "./components/TabBridge"
 import { OfficeView } from "./components/OfficeView"
 import { RightPanel } from "./components/RightPanel"
 import { ProjectView } from "./views/ProjectView"
+import { DashboardView } from "./views/DashboardView"
+import { CompanyView } from "./views/CompanyView"
 import { ChatsView } from "./views/ChatsView"
 import { TeamView } from "./views/TeamView"
 import { ResultsView } from "./views/ResultsView"
@@ -150,9 +152,9 @@ export default function App() {
           officePaused={officePaused}
           onToggleOffice={handleToggleOffice}
           autonomyLevel={autonomyLevel}
-          onAutonomyClick={() => changeView("project")}
+          onAutonomyClick={() => changeView("dashboard")}
           health={health} trust={trust}
-          onHealthClick={() => changeView("project")} />
+          onHealthClick={() => changeView("dashboard")} />
 
         {/* Morning Digest — появляется поверх контента при наличии событий */}
         <AnimatePresence>
@@ -260,11 +262,13 @@ export default function App() {
                 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
                 {view === "office"      && <OfficeView onOpenAgent={openAgent} />}
+                {view === "dashboard"   && <DashboardView />}
                 {view === "project"     && <ProjectView />}
                 {view === "team"        && <TeamView onOpenChat={openChat} />}
                 {view === "results"     && <ResultsView />}
                 {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
                 {view === "connections" && <ConnectionsView />}
+                {view === "company"     && <CompanyView />}
                 {view === "account"     && <AccountView />}
               </motion.div>
             </AnimatePresence>

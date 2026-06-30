@@ -88,11 +88,13 @@ function buildPath(H: number, by: number): string {
 
 const NAV: Array<{ id: Section; label: string; group: "top" | "bottom" }> = [
   { id: "office",      label: "Офис",    group: "top" },
+  { id: "dashboard",   label: "Сводка",  group: "top" },
   { id: "project",     label: "Проект",  group: "top" },
   { id: "team",        label: "Команда", group: "top" },
   { id: "results",     label: "Итоги",   group: "top" },
   { id: "chats",       label: "Чаты",    group: "top" },
   { id: "connections", label: "Доступы", group: "bottom" },
+  { id: "company",     label: "Компания", group: "bottom" },
   { id: "account",     label: "Аккаунт", group: "bottom" },
 ]
 
