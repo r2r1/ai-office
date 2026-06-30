@@ -220,6 +220,20 @@ function FeedTab() {
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }) }, [state.feed.length])
 
+  // Блок 3: подгружаем последние решения CEO для UI «Почему?»
+  const [decisions, setDecisions] = useState<any[]>([])
+  const [expandedDid, setExpandedDid] = useState<string | null>(null)
+  useEffect(() => {
+    const load = () => { api.get("/api/decisions").then(d => setDecisions(d?.decisions || [])).catch(() => {}) }
+    load(); const t = setInterval(load, 8000); return () => clearInterval(t)
+  }, [])
+  // Сопоставляем CEO-feed-итемы с решениями по времени и совпадению мысли
+  const decisionForFeed = (f: any) => {
+    if (f.who !== "orchestrator" && !(f.text || "").startsWith("🧭")) return null
+    const txt = (f.text || "").replace(/^🧭\s*/, "").slice(0, 30).toLowerCase()
+    return decisions.find(d => (d.thought || "").slice(0, 30).toLowerCase() === txt) || null
+  }
+
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
       {feed.length === 0 && (
@@ -243,6 +257,43 @@ function FeedTab() {
             }}>
               {f.text}
             </div>
+            {(() => {
+              const dec = decisionForFeed(f)
+              if (!dec) return null
+              const open = expandedDid === dec.id
+              return (
+                <div style={{ marginTop: 4 }}>
+                  <button onClick={() => setExpandedDid(open ? null : dec.id)}
+                    style={{ fontSize: 10, color: "var(--mercury-a)", background: "transparent",
+                      border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                    🔍 Почему? {open ? "↑" : "↓"}
+                  </button>
+                  {open && (
+                    <div style={{ marginTop: 6, padding: "8px 10px", background: "var(--surface-soft)",
+                      borderLeft: "2px solid var(--mercury-a)", borderRadius: 4, fontSize: 11 }}>
+                      <div style={{ color: "var(--text-dim)" }}>Уверенность: <b>{dec.confidence}/100</b></div>
+                      {dec.expected_effect && <div style={{ color: "var(--text-dim)", marginTop: 4 }}>
+                        Ожидаемый эффект: {dec.expected_effect}</div>}
+                      {dec.alternatives?.length > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ color: "var(--muted)", marginBottom: 3 }}>Рассматривал:</div>
+                          {dec.alternatives.map((a: any, i: number) => (
+                            <div key={i} style={{ color: "var(--text-dim)", fontSize: 10.5, marginLeft: 6 }}>
+                              • <b>{a.action}</b> — {a.reason}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {dec.risks?.length > 0 && (
+                        <div style={{ marginTop: 6, color: "#ffac2e", fontSize: 10.5 }}>
+                          ⚠ {dec.risks.join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
           {f.ts && (
             <span className="mono" style={{ fontSize: 8.5, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>

@@ -41,8 +41,8 @@ def needs_session_by_wait() -> bool:
     d = _load()
     streak = d.get("wait_streak", 0)
     last = d.get("last_session_ts", 0)
-    # 3+ подряд wait и совет не собирался последние 30 мин
-    return streak >= 3 and (time.time() - last > 1800)
+    # 2+ подряд wait и совет не собирался последние 15 мин (был 3/30 — слишком редко)
+    return streak >= 2 and (time.time() - last > 900)
 
 
 def needs_session_by_blockers() -> bool:

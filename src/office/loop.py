@@ -339,15 +339,47 @@ async def _publish_site_auto(publish) -> bool:
         return False
 
     # Блок 2: Если уровень автономности требует разрешения перед публикацией — спрашиваем
+    # БЛОКИРУЮЩЕ через personal-thread CEO (как делает agent_factory.ask_user).
+    tid = ctx.get_tenant()
     if not autonomy.can_auto("publish_site"):
+        from src.office import questions as questions_mod, threads as threads_mod
+        question_text = "Сайт готов к публикации. Опубликовать сейчас? (да/нет)"
+        # Дедуп: если такой вопрос уже висит — не плодим повторно
+        pending = [m for m in questions_mod.list_pending() if m.get("text") == question_text]
+        if pending:
+            return False
+        qid, fut = questions_mod.ask(question_text, publish, agent_id="orchestrator_1")
+        threads_mod.post("orchestrator_1", "orchestrator", question_text,
+                         kind="question", question_id=qid)
+        await publish({"type": "agent_message", "agent_id": "orchestrator_1", "from": "agent",
+                       "kind": "question", "question_id": qid, "text": question_text})
         await publish({"type": "system",
-                       "text": "🔐 Сайт готов к публикации — ожидаю разрешения (уровень автономности: guided)."})
-        from src.office import questions as questions_mod
-        questions_mod.ask(
-            "Сайт готов к публикации. Опубликовать сейчас?",
-            agent_id="orchestrator_1",
-        )
-        return False
+                       "text": f"🔐 Сайт готов — ожидаю разрешения в чате с CEO (уровень: {autonomy.get_level()})"})
+        try:
+            answer = await asyncio.wait_for(fut, timeout=600)
+        except asyncio.TimeoutError:
+            questions_mod.answer(qid, "")
+            threads_mod.mark_answered(qid)
+            await publish({"type": "system",
+                           "text": "⌛ Клиент не ответил по публикации — оставляю на согласовании"})
+            return False
+        threads_mod.mark_answered(qid)
+        await publish({"type": "question_answered", "question_id": qid, "agent_id": "orchestrator_1"})
+        ok = (answer or "").strip().lower()
+        if ok and not any(no in ok for no in ("нет", "no", "стоп", "поз")):
+            # Положительный ответ → повышаем доверие (клиент дал OK)
+            from src.office import decisions as decisions_mod
+            decisions_mod.record(
+                action="publish_site", target=f"site (после OK клиента)",
+                thought="Клиент одобрил публикацию",
+                alternatives=[], confidence=95, risks=[],
+                expected_effect="Лендинг живой, форма собирает заявки",
+                data_used=["user_approval"], made_by="orchestrator_1",
+            )
+        else:
+            await publish({"type": "system",
+                           "text": "⛔ Публикация отклонена клиентом — продолжаю доработку"})
+            return False
 
     tid = ctx.get_tenant()
     title = (brief.get().get("goal", "") or "Сайт")[:60]
@@ -439,6 +471,36 @@ async def _orchestrate(strategy: str, publish, tech_design: str = "", cycle: int
     if need_ceo:
         company = await orchestrator.decide_company(goal, strategy, ms, publish)
         await _apply_company_decision(company, publish)
+
+    # ---- Блок 4: Инициативы из opportunity-событий ----
+    # CEO превращает наблюдённые возможности отделов в конкретные предложения
+    # с ROI-оценкой. Пользователь видит карточку и принимает или отклоняет.
+    try:
+        from src.office import events as events_mod
+        opp_events = [e for e in events_mod.pending() if e.get("kind") == "opportunity"]
+        for ev in opp_events[:2]:  # макс 2 инициативы за цикл
+            summary = ev.get("summary", "")
+            if not summary or initiatives.has_pending_similar(summary):
+                events_mod.mark_processed([ev["id"]])
+                continue
+            ini = await orchestrator.generate_initiative(goal, strategy, summary, publish)
+            if ini and ini.get("title"):
+                iid = initiatives.add(
+                    title=ini["title"],
+                    rationale=ini.get("rationale", summary),
+                    expected_outcome=ini.get("expected_outcome", ""),
+                    estimated_effort=ini.get("estimated_effort", "1-2 цикла"),
+                    tasks=ini.get("tasks", []),
+                    source="event",
+                )
+                await publish({"type": "initiative", "id": iid, "title": ini["title"],
+                               "expected_outcome": ini.get("expected_outcome", "")})
+                await publish({"type": "speech", "agent_id": "orchestrator_1",
+                               "text": f"💡 Новая инициатива: {ini['title']} → {ini.get('expected_outcome','')[:60]}"})
+            events_mod.mark_processed([ev["id"]])
+    except Exception as e:
+        await publish({"type": "error", "agent_id": "orchestrator_1",
+                       "text": f"Инициатива не сгенерирована: {str(e)[:100]}"})
 
     # ---- Детерминированный автостарт ----
     # Слабые модели порой возвращают wait и офис висит без единого отдела (как в логе).

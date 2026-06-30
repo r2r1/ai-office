@@ -19,11 +19,14 @@ interface TopBarProps {
   onToggleOffice?: () => void
   autonomyLevel?: string
   onAutonomyClick?: () => void
+  health?: { company: number; status: string } | null
+  trust?: { company: number; streak: number } | null
+  onHealthClick?: () => void
 }
 
 const AUTONOMY_ICONS: Record<string, string> = { scout: "🔍", guided: "🤝", trusted: "✅", autonomous: "🚀" }
 
-export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick, health, trust, onHealthClick }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -83,6 +86,28 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
         )}
         {!isMobile && understanding != null && (
           <UnderstandingBadge score={understanding.score} onClick={onUnderstandingClick} />
+        )}
+        {!isMobile && health && (
+          <button onClick={onHealthClick} title={`Здоровье компании: ${health.company}/100`}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
+              background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
+            <span style={{ fontSize: 12 }}>{health.status}</span>
+            <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{health.company}</span>
+          </button>
+        )}
+        {!isMobile && trust && (
+          <div title={`Trust: ${trust.company}/100 · streak ${trust.streak}`}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)" }}>
+            <span style={{ fontSize: 12 }}>🤝</span>
+            <span className="mono" style={{ fontSize: 11,
+              color: trust.company >= 70 ? "#a0e0ab" : trust.company >= 40 ? "#ffac2e" : "var(--text-dim)" }}>
+              {trust.company}{trust.streak >= 3 ? `·${trust.streak}` : ""}
+            </span>
+          </div>
         )}
         {!isMobile && autonomyLevel && (
           <button onClick={onAutonomyClick} title={`Уровень автономности: ${autonomyLevel}`}
