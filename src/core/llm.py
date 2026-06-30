@@ -164,8 +164,19 @@ async def run_agent(
         )
         usage = getattr(resp, "usage", None)
         if usage:
-            in_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            out_tokens += getattr(usage, "completion_tokens", 0) or 0
+            pin = getattr(usage, "prompt_tokens", 0) or 0
+            pout = getattr(usage, "completion_tokens", 0) or 0
+            in_tokens += pin
+            out_tokens += pout
+            # ИНКРЕМЕНТАЛЬНЫЙ учёт: пишем расход СРАЗУ после каждого ответа API,
+            # а не в конце run_agent. Иначе длинные/зависшие прогоны (deep research,
+            # агент, сброшенный watchdog) тратят реальные деньги, но в индикаторе $0.
+            if pin or pout:
+                try:
+                    from src.office import costs
+                    costs.record(agent_id, model, pin, pout)
+                except Exception:
+                    pass
         msg = resp.choices[0].message
 
         if msg.content and msg.content.strip():
@@ -235,14 +246,9 @@ async def run_agent(
                 "content": result[:2500],
             })
 
-    # Учёт расхода токенов/стоимости (ленивый импорт — core не зависит от office)
-    if in_tokens or out_tokens:
-        try:
-            from src.office import costs
-            costs.record(agent_id, model, in_tokens, out_tokens)
-        except Exception:
-            pass
-
+    # Учёт расхода теперь инкрементальный — пишется внутри цикла после каждого
+    # ответа API (см. выше), чтобы расход был виден в реальном времени и не терялся
+    # при зависании/сбросе агента. Здесь больше ничего записывать не нужно.
     return final_text
 
 
