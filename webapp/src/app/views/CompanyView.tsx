@@ -19,10 +19,13 @@ const RISK = [
 const TABS = [
   { id: "profile", label: "Профиль" },
   { id: "intellect", label: "Интеллект" },
+  { id: "roles", label: "Роли" },
   { id: "limits", label: "Лимиты" },
   { id: "storage", label: "Хранилище" },
   { id: "access", label: "Доступы" },
 ]
+
+const DEPT_RU: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
 
 export function CompanyView() {
   const { active, setActive } = useSubTab(TABS)
@@ -32,6 +35,7 @@ export function CompanyView() {
       <SubTabs tabs={TABS} active={active} onChange={setActive} />
       {active === "profile" && <ProfileTab />}
       {active === "intellect" && <IntellectTab />}
+      {active === "roles" && <RolesTab />}
       {active === "limits" && <LimitsTab />}
       {active === "storage" && <StorageTab />}
       {active === "access" && <AccessTab />}
@@ -203,6 +207,43 @@ function IntellectTab() {
         <ModelPicker value={model} presets={presets}
           onSave={v => { setModel(v); api.setModel(v).then(flash) }} />
       </Card>
+    </ViewBody>
+  )
+}
+
+// ── Роли: Role Definition (read-only) ─────────────────────────────────────────
+function RolesTab() {
+  const [roles, setRoles] = useState<any[]>([])
+  useEffect(() => { api.get("/api/roles").then(r => r?.roles && setRoles(r.roles)) }, [])
+  return (
+    <ViewBody style={{ maxWidth: 680 }}>
+      <SectionLabel>Роли компании — описание, а не зашитый промпт</SectionLabel>
+      <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 16 }}>
+        У каждой роли есть миссия, зона ответственности, инструменты и ограничения.
+        Итоговый промпт собирается под задачу автоматически.
+      </div>
+      {roles.length === 0 ? <Empty text="Загрузка…" /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {roles.map((r: any) => (
+            <Card key={r.role}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 14, color: "var(--text)" }}>{r.title || r.role}</span>
+                {r.department && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{DEPT_RU[r.department] || r.department}</span>}
+              </div>
+              {r.mission && <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45, marginBottom: 8 }}>{r.mission}</div>}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {(r.responsibilities || []).map((x: string, i: number) => (
+                  <span key={i} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99,
+                    background: "var(--surface-soft)", border: "1px solid var(--hairline)", color: "var(--text-dim)" }}>{x}</span>
+                ))}
+              </div>
+              {(r.constraints || []).length > 0 && (
+                <div style={{ fontSize: 10.5, color: "#ffac2e", marginTop: 8 }}>🚫 {(r.constraints || []).join(" · ")}</div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
     </ViewBody>
   )
 }

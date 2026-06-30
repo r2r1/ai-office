@@ -1,0 +1,154 @@
+"""
+Role Definitions — роли как ДАННЫЕ, а не зашитые в код промпты (см. docs/arhitecture.md).
+
+Идея: у агента нет собственного постоянного промпта. Есть описание роли
+(миссия, зона ответственности, инструменты, полномочия, ограничения, метрики)
+и операционный «playbook». Итоговый системный промпт собирает prompt_builder
+динамически под конкретную задачу.
+
+Базовые тексты ролей берутся из встроенного каталога (seed). Клиент может
+переопределить любую роль — оверрайды хранятся per-tenant в roles.json и имеют
+приоритет над seed. Так роль становится редактируемыми данными, а не кодом.
+"""
+
+from src.saas import context as ctx
+
+_FILE = "roles.json"
+
+# Структурированные описания ролей (для UI и будущего редактора).
+# Операционный текст («как именно работать») остаётся в seed-playbook —
+# его источник один: agent_factory.ROLE_PROMPTS (берётся лениво, без дублирования).
+ROLE_META: dict[str, dict] = {
+    "cto": {
+        "department": "tech", "title": "CTO",
+        "mission": "Вести технический отдел к продукту, который решает задачу клиента.",
+        "responsibilities": ["продукт", "код", "боты", "сайты", "технические интеграции"],
+        "tools": ["delegate_task", "hire", "ask_colleague"],
+        "constraints": ["не делать работу руками — управлять подчинёнными"],
+        "success_metrics": ["работающий продукт", "закрытые задачи отдела"],
+    },
+    "cmo": {
+        "department": "marketing", "title": "CMO",
+        "mission": "Растить узнаваемость и привлечение аудитории.",
+        "responsibilities": ["контент", "соцсети", "реклама", "бренд"],
+        "tools": ["delegate_task", "hire", "ask_colleague"],
+        "constraints": ["не делать работу руками — управлять подчинёнными"],
+        "success_metrics": ["охват", "лиды"],
+    },
+    "sales_lead": {
+        "department": "sales", "title": "Head of Sales",
+        "mission": "Превращать интерес в платящих клиентов.",
+        "responsibilities": ["поиск клиентов", "переговоры", "конверсия лидов", "CRM"],
+        "tools": ["delegate_task", "hire", "ask_colleague"],
+        "constraints": ["не делать работу руками — управлять подчинёнными"],
+        "success_metrics": ["сделки", "конверсия"],
+    },
+    "developer": {
+        "department": "tech", "title": "Разработчик",
+        "mission": "Писать и запускать реальный рабочий код.",
+        "responsibilities": ["боты", "скрипты/API", "сайты"],
+        "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file"],
+        "constraints": ["не использовать платные конструкторы (Tilda/Webflow)", "артефакты только через write_file"],
+        "success_metrics": ["код компилируется и работает"],
+    },
+    "designer": {
+        "department": "tech", "title": "Дизайнер",
+        "mission": "Создавать визуально премиальные многостраничные сайты.",
+        "responsibilities": ["UI/UX", "вёрстка site/", "анимации"],
+        "tools": ["write_file", "list_files"],
+        "constraints": ["не использовать конструкторы — писать код", "только статика, бэкенд не строить"],
+        "success_metrics": ["красивый рабочий многофайловый сайт"],
+    },
+    "integrator": {
+        "department": "tech", "title": "Интегратор",
+        "mission": "Подключать офис к внешним сервисам и запускать ботов.",
+        "responsibilities": ["интеграции", "запуск ботов", "проверка подключений"],
+        "tools": ["list_integrations", "use_integration", "configure_bot", "ask_user"],
+        "constraints": ["не публиковать сайты", "не делать ручную работу в сервисе"],
+        "success_metrics": ["работающие подключения и боты"],
+    },
+    "marketer": {
+        "department": "marketing", "title": "Маркетолог",
+        "mission": "Создавать оффер, контент и тексты для сайта и бота.",
+        "responsibilities": ["оффер/УТП", "контент сайта", "тексты бота"],
+        "tools": ["write_file", "request_research"],
+        "constraints": ["сохранять результаты в workspace через write_file"],
+        "success_metrics": ["готовые тексты, которыми пользуются коллеги"],
+    },
+    "analyst": {
+        "department": "marketing", "title": "Аналитик",
+        "mission": "Собирать данные и давать выводы с цифрами.",
+        "responsibilities": ["анализ рынка/конкурентов/клиентов"],
+        "tools": ["web_search", "write_file"],
+        "constraints": ["сохранять анализ в workspace через write_file"],
+        "success_metrics": ["выводы с цифрами и рекомендациями"],
+    },
+    "salesman": {
+        "department": "sales", "title": "Продажник",
+        "mission": "Находить клиентов и писать цепляющие холодные сообщения.",
+        "responsibilities": ["поиск лидов", "оффер", "холодные сообщения"],
+        "tools": ["web_search"],
+        "constraints": [],
+        "success_metrics": ["ответы и встречи"],
+    },
+}
+
+
+def _overrides() -> dict:
+    return ctx.read_json(_FILE, None) or {}
+
+
+def _seed_text(role: str) -> str:
+    """Базовый операционный текст роли из встроенного каталога (ленивый импорт)."""
+    try:
+        from src.agents import agent_factory
+        return agent_factory.ROLE_PROMPTS.get(role, "")
+    except Exception:
+        return ""
+
+
+def base_text(role: str) -> str:
+    """Текст-основа роли: оверрайд клиента или seed. '' если роль неизвестна."""
+    ov = _overrides().get(role) or {}
+    if ov.get("playbook"):
+        return ov["playbook"]
+    seed = _seed_text(role)
+    if seed:
+        return seed
+    return f"Ты — {role} агент AI-агентства. Выполни задачу профессионально."
+
+
+def render(role: str) -> str:
+    """Системная основа промпта роли. Сейчас = base_text (поведение 1:1 с прежним
+    ROLE_PROMPTS); структурированная мета используется в UI и доступна для будущей
+    динамической сборки заголовка роли."""
+    return base_text(role)
+
+
+def get(role: str) -> dict:
+    meta = dict(ROLE_META.get(role, {}))
+    ov = _overrides().get(role) or {}
+    meta.update({k: v for k, v in ov.items() if k != "playbook"})
+    meta["role"] = role
+    meta["playbook"] = base_text(role)
+    return meta
+
+
+def all_roles() -> list[dict]:
+    return [get(r) for r in ROLE_META]
+
+
+def set_role(role: str, patch: dict) -> None:
+    """Переопределить поля роли (включая playbook) — данные клиента."""
+    ov = _overrides()
+    cur = ov.get(role) or {}
+    cur.update(patch or {})
+    ov[role] = cur
+    ctx.write_json(_FILE, ov)
+
+
+def payload() -> dict:
+    return {"roles": [
+        {k: v for k, v in get(r).items() if k != "playbook"} | {"has_playbook": bool(base_text(r))}
+        for r in ROLE_META
+    ]}

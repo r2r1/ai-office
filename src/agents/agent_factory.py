@@ -604,11 +604,10 @@ def _brief_context() -> str:
 
 def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]], skill: str = ""):
     """Возвращает async-функцию, запускающую агента."""
-    base = ROLE_PROMPTS.get(role, f"Ты — {role} агент AI-агентства. Выполни задачу профессионально.")
-    skill_line = f"\n\nТвоя специализация в этом проекте: {skill}" if skill else ""
-    # Собираем системный промпт: роль + специализация + бриф + память + правила автономности + межагентный суффикс
-    system = (base + skill_line + _brief_context() + memory_module.context_block()
-              + _AUTONOMY_RULES + _TEAM_PREAMBLE + _INTER_AGENT_SUFFIX)
+    # Системный промпт собирает Prompt Builder: роль теперь — данные (roles.py),
+    # сборка централизована (см. docs/arhitecture.md). Поведение 1:1 с прежним.
+    from src.office import prompt_builder
+    system = prompt_builder.build(role, task, agent_id, skill=skill)
 
     async def _handle_request_research(args: dict) -> str:
         question = args.get("question", "")
@@ -677,7 +676,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         colleague = next((a for a in registry_module.all_agents() if a.role == col_role), None)
         col_id = colleague.agent_id if colleague else f"{col_role}_1"
         col_work = state.result_for(col_id) if colleague else ""
-        col_base = ROLE_PROMPTS.get(col_role, f"Ты — {col_role} в AI-офисе.")
+        from src.office import roles as roles_module
+        col_base = roles_module.render(col_role)
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"💬 спрашиваю {col_role}: {question[:60]}"})
         # вопрос коллеге виден в общем чате

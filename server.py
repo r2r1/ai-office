@@ -47,6 +47,7 @@ from src.office import initiatives as initiatives_module
 from src.office import health as health_module
 from src.office import capabilities as capabilities_module
 from src.office import skills as skills_module
+from src.office import roles as roles_module
 
 load_dotenv()
 
@@ -1428,6 +1429,12 @@ async def post_capabilities(request: Request):
 async def get_skills(request: Request):
 
     return {"skills": skills_module.catalog_payload()}
+
+
+@app.get("/api/roles")
+async def get_roles(request: Request):
+
+    return roles_module.payload()
 
 
 @app.get("/api/limits")
