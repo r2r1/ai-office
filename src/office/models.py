@@ -66,7 +66,11 @@ def _role_of(agent_id: str) -> str:
 
 
 def for_agent(agent_id: str) -> str:
-    """Модель агента: точечная на agent_id → на роль → глобальная по умолчанию."""
+    """
+    Модель агента: точечная на agent_id → на роль → режим качества (capability) →
+    глобальная по умолчанию. Режим качества переопределяет лишь специализированные
+    capability (код/картинки/видео); если режим прозрачен — берётся дефолт офиса.
+    """
     cfg = _cfg()
     pa = cfg.get("per_agent", {})
     if agent_id in pa:
@@ -75,6 +79,14 @@ def for_agent(agent_id: str) -> str:
     pr = cfg.get("per_role", {})
     if role in pr:
         return pr[role]
+    # Режим качества (capabilities) — мягкий слой поверх дефолта офиса.
+    try:
+        from src.office import capabilities
+        cap_model = capabilities.model_for_role(role)
+        if cap_model:
+            return cap_model
+    except Exception:
+        pass
     return cfg.get("default", ENV_DEFAULT)
 
 

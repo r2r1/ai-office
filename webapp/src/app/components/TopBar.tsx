@@ -22,11 +22,13 @@ interface TopBarProps {
   health?: { company: number; status: string } | null
   trust?: { company: number; streak: number } | null
   onHealthClick?: () => void
+  qualityMode?: { icon: string; label: string } | null
+  onQualityClick?: () => void
 }
 
 const AUTONOMY_ICONS: Record<string, string> = { scout: "🔍", guided: "🤝", trusted: "✅", autonomous: "🚀" }
 
-export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick, health, trust, onHealthClick }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick, health, trust, onHealthClick, qualityMode, onQualityClick }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -121,6 +123,17 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
           </button>
         )}
         <OfficeToggle paused={!!officePaused} onClick={onToggleOffice} isMobile={isMobile} />
+        {!isMobile && qualityMode && (
+          <button onClick={onQualityClick} title={`Режим качества: ${qualityMode.label}`}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
+              background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
+            <span style={{ fontSize: 12 }}>{qualityMode.icon}</span>
+            <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{qualityMode.label}</span>
+          </button>
+        )}
         {!isMobile && <ModelPlaque model={model} onOpenAccount={onOpenAccount} />}
         <button 
           onClick={onToggleTheme} 

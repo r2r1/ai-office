@@ -45,6 +45,8 @@ from src.office import trust as trust_module
 from src.office import decisions as decisions_module
 from src.office import initiatives as initiatives_module
 from src.office import health as health_module
+from src.office import capabilities as capabilities_module
+from src.office import skills as skills_module
 
 load_dotenv()
 
@@ -1399,6 +1401,33 @@ async def reject_initiative(iid: str, request: Request):
 async def get_health(request: Request):
 
     return health_module.payload()
+
+
+@app.get("/api/capabilities")
+async def get_capabilities(request: Request):
+
+    return capabilities_module.payload()
+
+
+@app.post("/api/capabilities")
+async def post_capabilities(request: Request):
+
+    data = await request.json()
+    mode = data.get("mode")
+    if mode:
+        if mode not in capabilities_module.QUALITY_MODES:
+            return JSONResponse({"error": "Неизвестный режим"}, status_code=400)
+        capabilities_module.set_mode(mode)
+    # Эксперт-режим: точечные оверрайды по capability.
+    for cap, model in (data.get("expert") or {}).items():
+        capabilities_module.set_expert(cap, model)
+    return {"ok": True, **capabilities_module.payload()}
+
+
+@app.get("/api/skills")
+async def get_skills(request: Request):
+
+    return {"skills": skills_module.catalog_payload()}
 
 
 @app.get("/api/limits")

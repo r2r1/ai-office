@@ -52,6 +52,7 @@ export default function App() {
   const [autonomyLevel, setAutonomyLevel] = useState<string>("")
   const [health, setHealth] = useState<{ company: number; status: string } | null>(null)
   const [trust, setTrust] = useState<{ company: number; streak: number } | null>(null)
+  const [qualityMode, setQualityMode] = useState<{ icon: string; label: string } | null>(null)
   // Office pause/resume
   const [officePaused, setOfficePaused] = useState(false)
   // Онбординг показан локально пока бэкенд не подтвердил готовность брифа
@@ -108,6 +109,10 @@ export default function App() {
       api.get("/api/autonomy").then(a => { if (a?.level) setAutonomyLevel(a.level) }).catch(() => {})
       api.get("/api/health").then(h => { if (h?.company !== undefined) setHealth({ company: h.company, status: h.status }) }).catch(() => {})
       api.get("/api/trust").then(t => { if (t?.company !== undefined) setTrust({ company: t.company, streak: t.streak || 0 }) }).catch(() => {})
+      api.get("/api/capabilities").then(c => {
+        const m = (c?.modes || []).find((x: any) => x.id === c?.mode)
+        if (m) setQualityMode({ icon: m.icon, label: m.label })
+      }).catch(() => {})
     }
     load()
     const t = setInterval(load, 30000)
@@ -154,7 +159,9 @@ export default function App() {
           autonomyLevel={autonomyLevel}
           onAutonomyClick={() => changeView("dashboard")}
           health={health} trust={trust}
-          onHealthClick={() => changeView("dashboard")} />
+          onHealthClick={() => changeView("dashboard")}
+          qualityMode={qualityMode}
+          onQualityClick={() => changeView("company")} />
 
         {/* Morning Digest — появляется поверх контента при наличии событий */}
         <AnimatePresence>

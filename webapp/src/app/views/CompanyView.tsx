@@ -115,34 +115,94 @@ function ProfileTab() {
   )
 }
 
-// ── Интеллект: модель офиса + по ролям (Phase 2 добавит режимы качества) ───────
+// ── Интеллект: режимы качества + эксперт-режим + базовая модель ────────────────
+const CAP_LABELS: Record<string, string> = {
+  text: "Текст", reasoning: "Рассуждение", coding: "Код", image: "Картинки",
+  video: "Видео", search: "Поиск", voice: "Голос",
+}
+
 function IntellectTab() {
   const [model, setModel] = useState("")
   const [presets, setPresets] = useState<Preset[]>([])
-  const [roles, setRoles] = useState<Record<string, string>>({})
+  const [caps, setCaps] = useState<any>(null)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    api.models().then(m => { setModel(m.default || ""); setPresets(m.presets || []); setRoles(m.per_role || {}) })
+    api.models().then(m => { setModel(m.default || ""); setPresets(m.presets || []) })
+    api.get("/api/capabilities").then(c => c && setCaps(c))
   }, [])
   function flash() { setSaved(true); setTimeout(() => setSaved(false), 1600) }
 
+  function pickMode(mode: string) {
+    setCaps((c: any) => ({ ...c, mode }))
+    api.post("/api/capabilities", { mode }).then(c => { if (c) setCaps(c); flash() })
+  }
+  function setExpert(cap: string, m: string) {
+    api.post("/api/capabilities", { expert: { [cap]: m } }).then(c => { if (c) setCaps(c); flash() })
+  }
+
   return (
-    <ViewBody style={{ maxWidth: 620 }}>
+    <ViewBody style={{ maxWidth: 640 }}>
       {saved && <div style={{ fontSize: 11, color: "#a0e0ab", marginBottom: 10 }}>сохранено ✓</div>}
+
+      <SectionLabel>Режим качества</SectionLabel>
+      <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 14 }}>
+        Выберите качество — система сама подберёт лучшие модели под каждый тип задачи
+        (код, картинки, видео могут идти на разные модели).
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 22 }}>
+        {(caps?.modes || []).map((mo: any) => {
+          const on = caps?.mode === mo.id
+          return (
+            <button key={mo.id} onClick={() => pickMode(mo.id)}
+              style={{ textAlign: "left", padding: "12px 14px", borderRadius: "var(--radius-md)", cursor: "pointer",
+                border: `1px solid ${on ? "var(--mercury-a)" : "var(--hairline)"}`,
+                background: on ? "rgba(255,172,46,0.08)" : "var(--surface-soft)", transition: "all 0.15s" }}>
+              <div style={{ fontSize: 14, color: "var(--text)", marginBottom: 4 }}>{mo.icon} {mo.label}</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", lineHeight: 1.4 }}>{mo.desc}</div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Эксперт-режим — точечный выбор модели под capability */}
+      {caps?.mode === "expert" ? (
+        <>
+          <SectionLabel>Модели по типу задачи</SectionLabel>
+          <Card style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+            {(caps?.capabilities || []).map((cap: string) => (
+              <div key={cap} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 12, color: "var(--text-dim)", width: 96, flexShrink: 0 }}>{CAP_LABELS[cap] || cap}</span>
+                <div style={{ flex: 1 }}>
+                  <ModelPicker value={caps?.expert?.[cap] || ""} presets={presets} allowDefault compact
+                    onSave={m => setExpert(cap, m)} />
+                </div>
+              </div>
+            ))}
+          </Card>
+        </>
+      ) : (
+        <>
+          <SectionLabel>Что выбрано под каждый тип</SectionLabel>
+          <Card style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 7 }}>
+            {Object.entries<any>(caps?.resolved || {}).map(([cap, m]) => (
+              <div key={cap} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: "var(--muted)" }}>{CAP_LABELS[cap] || cap}</span>
+                <span className="mono" style={{ color: "var(--text-dim)" }}>{m || "базовая модель"}</span>
+              </div>
+            ))}
+          </Card>
+        </>
+      )}
+
       <SectionLabel>🧠 Базовая модель офиса</SectionLabel>
-      <Card style={{ marginBottom: 18 }}>
+      <Card>
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>
-          На этой модели по умолчанию работают <b style={{ color: "var(--text-dim)" }}>все агенты</b>.
-          Дешевле — экономнее, мощнее — умнее.
+          Резервная модель для задач, у которых нет специализации в режиме.
         </div>
         <ModelPicker value={model} presets={presets}
           onSave={v => { setModel(v); api.setModel(v).then(flash) }} />
       </Card>
-      <div style={{ fontSize: 11.5, color: "var(--faint)", lineHeight: 1.55 }}>
-        Скоро здесь появятся режимы качества (🟣 Экономия → ⚫ Эксперт) с автоматическим
-        выбором лучших моделей под тип задачи.
-      </div>
     </ViewBody>
   )
 }
