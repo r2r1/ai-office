@@ -768,7 +768,7 @@ def _task_with_context(role: str, task: str, skill: str = "",
         if objective:
             dept_line += f"Цель отдела от CEO: {objective}\n"
     tdd = architect.load()
-    tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:1200]}\n" if tdd else ""
+    tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:3000]}\n" if tdd else ""
     lessons_section = lessons.context_block(role)  # память: уроки прошлых задач этой роли
     # Трёхслойная память: подбираем релевантные ИМЕННО этой задаче факты
     # (ограничения клиента, его ответы, что отдел уже сделал).

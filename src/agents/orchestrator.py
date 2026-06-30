@@ -357,7 +357,7 @@ async def decide_company(
 
     user = (
         f"Цель компании: {goal}\n\n"
-        f"Стратегия (кратко):\n{strategy[:400]}\n"
+        f"Стратегия (кратко):\n{strategy[:1500]}\n"
         f"{directives_section}\n"
         f"Этапы пути:\n{ms_text}\n\n"
         f"Отделы сейчас:\n{dept_text}\n\n"
@@ -448,12 +448,12 @@ async def decide(
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Анализирую команду и решаю, что делать дальше..."})
 
-    tdd_section = f"\nТЗ архитектора:\n{tech_design[:500]}\n" if tech_design else ""
+    tdd_section = f"\nТЗ архитектора:\n{tech_design[:1500]}\n" if tech_design else ""
     directives_section = f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ над стратегией/ТЗ) ===\n{user_directives}\n" if user_directives.strip() else ""
     directives_section += events_section
     user = (
         f"Цель: {goal}\n\n"
-        f"Стратегия (кратко):\n{strategy[:400]}\n"
+        f"Стратегия (кратко):\n{strategy[:1500]}\n"
         f"{tdd_section}"
         f"{directives_section}\n"
         f"Этапы пути:\n{ms_text}\n\n"

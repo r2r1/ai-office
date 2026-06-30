@@ -974,6 +974,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         )
 
         state.save_deliverable(agent_id, role, task, result)
+        # Уведомление в личный чат агента: коротко «что сделал», полный текст — в «Итогах».
+        note = (result or "").strip().replace("\n", " ")
+        if note:
+            short = note[:400] + (" … (подробнее во вкладке «Итоги»)" if len(note) > 400 else "")
+            threads_module.post(agent_id, "agent", short, kind="msg")
+            await publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
+                           "kind": "msg", "text": short})
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})
         return result
 

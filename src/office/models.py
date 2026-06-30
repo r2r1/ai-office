@@ -22,7 +22,7 @@ PRESETS = [
     {"id": "gpt-5-nano",             "label": "GPT-5 nano · $0.05/$0.40 за 1M · дёшево"},
     {"id": "gpt-5.3-codex",          "label": "GPT-5.3 Codex · $0.08/$0.64 за 1M · для кода"},
     {"id": "gpt-4.1-nano",           "label": "GPT-4.1 nano · $0.10/$0.40 за 1M"},
-    {"id": "gpt-5.4",                "label": "GPT-5.4 · $0.12/$0.72 за 1M · баланс цена/ум"},
+    {"id": "gpt-5.4",                "label": "GPT-5.4 · $2.5/$15 за 1M · умная, не из дешёвых"},
     {"id": "gpt-4o-mini",            "label": "GPT-4o mini · $0.15/$0.61 за 1M"},
     {"id": "qwen3-vl-flash",         "label": "Qwen3 VL Flash · $0.15/$1.50 за 1M · vision"},
     {"id": "kimi-k2",                "label": "Kimi K2 · $0.60/$1.50 за 1M"},
