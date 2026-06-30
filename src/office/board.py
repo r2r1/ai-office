@@ -15,7 +15,7 @@ from src.saas import context as ctx
 
 
 def _load() -> dict:
-    return ctx.read_json("board") or {"sessions": [], "wait_streak": 0, "last_session_ts": 0}
+    return ctx.read_json("board", None) or {"sessions": [], "wait_streak": 0, "last_session_ts": 0}
 
 
 def _save(d: dict) -> None:
@@ -140,3 +140,4 @@ async def run_session(conflict_summary: str, publish) -> dict:
 
 def recent_sessions(n: int = 5) -> list:
     return list(reversed((_load().get("sessions") or [])[-n:]))
+

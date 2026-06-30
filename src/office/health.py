@@ -36,13 +36,14 @@ def _dept_score(dept_id: str) -> dict:
     done_rate = done / max(total, 1)
 
     # Зависшие агенты отдела
+    from src.office import state as state_mod
     member_roles = org_mod.member_roles(dept_id) + [org_mod.lead_role(dept_id)]
     agents = [a for a in reg_mod.all_agents() if a.role in member_roles]
     now = time.time()
     stuck = sum(
         1 for a in agents
         if a.status == "thinking"
-        and (now - (a.last_run or now)) > 240  # > 4 мин
+        and (now - state_mod.last_run_for(a.agent_id)) > 240  # > 4 мин
     )
     agent_count = max(len(agents), 1)
 

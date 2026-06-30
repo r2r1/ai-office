@@ -344,9 +344,8 @@ async def _publish_site_auto(publish) -> bool:
                        "text": "🔐 Сайт готов к публикации — ожидаю разрешения (уровень автономности: guided)."})
         from src.office import questions as questions_mod
         questions_mod.ask(
-            "orchestrator_1", "orchestrator",
             "Сайт готов к публикации. Опубликовать сейчас?",
-            metadata={"action": "publish_site"},
+            agent_id="orchestrator_1",
         )
         return False
 
