@@ -36,6 +36,13 @@ def _ensure_workspace(user: dict) -> dict:
         "INSERT INTO workspaces (id, owner_user_id, name, plan, created_at) VALUES (?,?,?,?,?)",
         (wid, user["id"], f"{name}", "free", time.time()),
     )
+    # Свой apinet-ключ на профиль (если заданы APINET_ACCESS_TOKEN/USER_ID).
+    # Не валим создание workspace, если apinet недоступен.
+    try:
+        from src.office import llm_settings
+        llm_settings.provision_tenant_key(wid, name=f"office-{wid}")
+    except Exception:
+        pass
     return workspace_for_user(user["id"])
 
 

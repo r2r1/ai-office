@@ -7,14 +7,19 @@ from src.saas import context as ctx
 
 _FILE = "costs.json"
 
+# Цены в $ за 1M токенов (вход, выход). Сверены с прайсом apinet
+# (GET /api/pricing → model_ratio×$2/1M вход, ×completion_ratio выход).
+# ⚠️ gpt-5.4 раньше стояла (0.12, 0.72) — это была ОШИБКА ~21x: реальная цена
+# $2.5/$15 за 1M. Из-за этого индикатор расхода показывал в ~21 раз меньше реальной
+# суммы, списанной с баланса apinet. При смене дефолтной модели сверяйся с /api/pricing.
 PRICES: dict[str, tuple[float, float]] = {
     "glm-4.5-flash": (0.01, 0.01), "glm-4-flash": (0.01, 0.01),
     "gpt-5-nano": (0.05, 0.40), "gpt-5.3-codex": (0.08, 0.64),
-    "gpt-4.1-nano": (0.10, 0.40), "gpt-5.4": (0.12, 0.72),
-    "gpt-4o-mini": (0.15, 0.61), "qwen3-vl-flash": (0.15, 1.50),
-    "gemini-2.5-flash": (0.30, 2.50), "kimi-k2": (0.60, 1.50),
-    "qwen3-vl-plus": (1.0, 10.0), "gemini-2.5-pro": (1.25, 10.0),
-    "gpt-4.1": (2.0, 8.0), "gpt-4o": (2.5, 10.0),
+    "gpt-4.1-nano": (0.10, 0.40), "gpt-4o-mini": (0.15, 0.60),
+    "qwen3-vl-flash": (0.15, 1.50), "gemini-2.5-flash": (0.30, 2.50),
+    "kimi-k2": (0.60, 1.50), "qwen3-vl-plus": (1.0, 10.0),
+    "gemini-2.5-pro": (1.25, 10.0), "gpt-4.1": (2.0, 8.0),
+    "gpt-4o": (2.5, 10.0), "gpt-5.4": (2.5, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0), "claude-opus-4-8": (5.0, 25.0),
 }
 DEFAULT_PRICE = (0.0, 0.0)

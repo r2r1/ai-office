@@ -934,6 +934,16 @@ async def get_costs():
     return costs_module.payload()
 
 
+@app.get("/api/apinet/balance")
+async def apinet_balance():
+    """Реальный баланс/расход аккаунта apinet (точные цифры из их API).
+    Работает только если заданы APINET_ACCESS_TOKEN/USER_ID."""
+    from src.saas import apinet
+    if not apinet.is_configured():
+        return {"configured": False}
+    return {"configured": True, **apinet.balance()}
+
+
 @app.get("/api/sites")
 async def get_sites():
     """Список опубликованных лендингов (с числом заявок)."""

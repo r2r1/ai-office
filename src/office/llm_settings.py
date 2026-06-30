@@ -52,6 +52,31 @@ def credentials() -> tuple[str, str]:
     return base_url, api_key
 
 
+def provision_tenant_key(tenant_id: str, name: str = "") -> dict:
+    """
+    Выдаёт тенанту СВОЙ apinet-ключ с лимитом квоты (изоляция расхода).
+    Работает только если заданы APINET_ACCESS_TOKEN/USER_ID — иначе пропускает
+    (тенант продолжит использовать общий ключ оператора из .env).
+    Безопасно вызывать при создании workspace.
+    """
+    from src.saas import apinet
+    if not apinet.is_configured():
+        return {"ok": False, "skipped": "apinet creds не заданы"}
+
+    prev = ctx.get_tenant()
+    ctx.set_tenant(tenant_id)
+    try:
+        if has_own_key():
+            return {"ok": True, "reused": True}
+        res = apinet.create_token(name or f"office-{tenant_id}")
+        if res.get("ok") and res.get("key"):
+            set_settings(ENV_BASE_URL, res["key"])
+            return {"ok": True, "key_id": res.get("id"), "reused": res.get("reused", False)}
+        return {"ok": False, "message": res.get("message", "не удалось создать ключ")}
+    finally:
+        ctx.set_tenant(prev)
+
+
 def public() -> dict:
     """Для UI: без открытого ключа."""
     cfg = _cfg()
