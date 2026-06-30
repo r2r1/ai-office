@@ -38,6 +38,13 @@ from src.core import llm as llm_core
 from src.integrations import registry as integrations_registry
 from src.saas import db as saas_db, store as saas_store, auth as saas_auth
 from src.saas import context as saas_context
+from src.office import philosophy as philosophy_module
+from src.office import constitution as constitution_module
+from src.office import autonomy as autonomy_module
+from src.office import trust as trust_module
+from src.office import decisions as decisions_module
+from src.office import initiatives as initiatives_module
+from src.office import health as health_module
 
 load_dotenv()
 
@@ -1303,6 +1310,95 @@ async def _steer_from_chat(text: str) -> None:
                            "text": reply, "id": cmsg["id"]})
     if changes:
         await bus.publish({"type": "system", "text": "📌 План обновлён: " + "; ".join(changes[:6])})
+
+
+@app.get("/api/philosophy")
+async def get_philosophy(request: Request):
+
+    return philosophy_module.load()
+
+
+@app.post("/api/philosophy")
+async def post_philosophy(request: Request):
+
+    data = await request.json()
+    philosophy_module.save(data)
+    return {"ok": True}
+
+
+@app.get("/api/constitution")
+async def get_constitution(request: Request):
+
+    return constitution_module.payload()
+
+
+@app.post("/api/constitution")
+async def post_constitution(request: Request):
+
+    data = await request.json()
+    constitution_module.save(data)
+    return {"ok": True}
+
+
+@app.get("/api/autonomy")
+async def get_autonomy(request: Request):
+
+    return autonomy_module.payload()
+
+
+@app.post("/api/autonomy")
+async def post_autonomy(request: Request):
+
+    data = await request.json()
+    level = data.get("level", "")
+    if level not in autonomy_module.LEVELS:
+        return JSONResponse({"error": f"Уровень должен быть одним из: {autonomy_module.LEVELS}"}, status_code=400)
+    autonomy_module.set_level(level)
+    return {"ok": True, "level": level}
+
+
+@app.get("/api/trust")
+async def get_trust(request: Request):
+
+    return trust_module.payload()
+
+
+@app.get("/api/decisions")
+async def get_decisions(request: Request):
+
+    return decisions_module.payload()
+
+
+@app.get("/api/initiatives")
+async def get_initiatives(request: Request):
+
+    return initiatives_module.payload()
+
+
+@app.post("/api/initiative/{iid}/accept")
+async def accept_initiative(iid: str, request: Request):
+
+    tasks = initiatives_module.accept(iid)
+    for t in tasks:
+        role = (t.get("role") or "").strip()
+        title = (t.get("title") or "").strip()
+        if role and title:
+            plan_module.add_task(title, role, t.get("done_criterion", ""), requested_by="user")
+    office_loop.wake_tenant()
+    return {"ok": True, "tasks_added": len(tasks)}
+
+
+@app.post("/api/initiative/{iid}/reject")
+async def reject_initiative(iid: str, request: Request):
+
+    initiatives_module.reject(iid)
+    return {"ok": True}
+
+
+@app.get("/api/health")
+async def get_health(request: Request):
+
+    return health_module.payload()
 
 
 @app.post("/api/chat")

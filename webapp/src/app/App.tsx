@@ -46,6 +46,8 @@ export default function App() {
   const [understandingOpen, setUnderstandingOpen] = useState(false)
   // Память офиса (трёхслойная)
   const [memory, setMemory] = useState<any>(null)
+  // Autonomy level
+  const [autonomyLevel, setAutonomyLevel] = useState<string>("")
   // Office pause/resume
   const [officePaused, setOfficePaused] = useState(false)
   // Онбординг показан локально пока бэкенд не подтвердил готовность брифа
@@ -99,6 +101,7 @@ export default function App() {
     const load = () => {
       api.understanding().then(u => { if (u) setUnderstanding(u) })
       api.knowledge().then(m => { if (m) setMemory(m) })
+      api.get("/api/autonomy").then(a => { if (a?.level) setAutonomyLevel(a.level) }).catch(() => {})
     }
     load()
     const t = setInterval(load, 30000)
@@ -141,7 +144,9 @@ export default function App() {
           understanding={understanding}
           onUnderstandingClick={() => setUnderstandingOpen(o => !o)}
           officePaused={officePaused}
-          onToggleOffice={handleToggleOffice} />
+          onToggleOffice={handleToggleOffice}
+          autonomyLevel={autonomyLevel}
+          onAutonomyClick={() => changeView("project")} />
 
         {/* Morning Digest — появляется поверх контента при наличии событий */}
         <AnimatePresence>

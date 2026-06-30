@@ -4,6 +4,8 @@ import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import { ViewShell, ViewHead, ViewBody, Card, Empty, Pill } from "./ui"
 
+const DEPT_NAMES: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
+
 const COLS = [
   { key: "pending", label: "В очереди" },
   { key: "in_progress", label: "В работе" },
@@ -13,9 +15,15 @@ const COLS = [
 export function DashboardView() {
   const { state } = useOffice()
   const [deliverables, setDeliverables] = useState<any[]>([])
+  const [health, setHealth] = useState<any>(null)
+  const [autonomy, setAutonomy] = useState<any>(null)
   const tasks = state.plan.tasks || []
 
   useEffect(() => { api.deliverables().then(d => setDeliverables(d.deliverables || [])) }, [state.feed.length])
+  useEffect(() => {
+    api.get("/api/health").then(setHealth).catch(() => {})
+    api.get("/api/autonomy").then(setAutonomy).catch(() => {})
+  }, [state.feed.length])
 
   const metrics = [
     { label: "Выполнено задач", value: `${state.plan.progress.done}/${state.plan.progress.total}` },
@@ -29,6 +37,56 @@ export function DashboardView() {
     <ViewShell>
       <ViewHead title="Сводка" sub={state.ready ? "Что компания сделала на текущий момент" : "Офис ожидает бриф"} />
       <ViewBody>
+        {/* Health Score по отделам */}
+        {health && (
+          <>
+            <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1px", margin: "4px 0 12px" }}>
+              Здоровье компании {health.status} {health.company}/100
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
+              {Object.entries<any>(health.departments || {}).map(([dept, ds]) => (
+                <Card key={dept}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: "var(--text)" }}>{DEPT_NAMES[dept] || dept}</span>
+                    <span>{ds.status} <span className="mono" style={{ fontSize: 12, color: "var(--text-dim)" }}>{ds.score}</span></span>
+                  </div>
+                  <div style={{ height: 4, background: "var(--hairline)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${ds.score}%`, background: ds.score >= 75 ? "#a0e0ab" : ds.score >= 45 ? "#ffac2e" : "#e05a5a", transition: "width 0.5s" }} />
+                  </div>
+                  {ds.issues?.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 10, color: "#ffac2e" }}>⚠ {ds.issues.join(" · ")}</div>
+                  )}
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Уровень автономности */}
+        {autonomy && (
+          <div style={{ marginBottom: 20 }}>
+            <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Автономность офиса</div>
+            <Card style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px" }}>
+              <span style={{ fontSize: 22 }}>{autonomy.icon}</span>
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>{autonomy.name}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>{autonomy.desc}</div>
+              </div>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                {["scout","guided","trusted","autonomous"].map(lvl => (
+                  <button key={lvl} onClick={() => api.post("/api/autonomy", { level: lvl }).then(() => api.get("/api/autonomy").then(setAutonomy))}
+                    style={{ padding: "4px 10px", borderRadius: "var(--radius-pill)", fontSize: 10, cursor: "pointer",
+                      border: `1px solid ${autonomy.level === lvl ? "var(--mercury-a)" : "var(--hairline)"}`,
+                      background: autonomy.level === lvl ? "rgba(160,224,171,0.15)" : "transparent",
+                      color: autonomy.level === lvl ? "var(--mercury-a)" : "var(--text-dim)" }}>
+                    {lvl}
+                  </button>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
         {/* метрики */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 24 }}>
           {metrics.map(m => (

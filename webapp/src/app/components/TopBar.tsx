@@ -17,9 +17,13 @@ interface TopBarProps {
   onUnderstandingClick?: () => void
   officePaused?: boolean
   onToggleOffice?: () => void
+  autonomyLevel?: string
+  onAutonomyClick?: () => void
 }
 
-export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice }: TopBarProps) {
+const AUTONOMY_ICONS: Record<string, string> = { scout: "🔍", guided: "🤝", trusted: "✅", autonomous: "🚀" }
+
+export function TopBar({ progress, progressNote, cost, model, connected, theme, onToggleTheme, onOpenAccount, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -79,6 +83,17 @@ export function TopBar({ progress, progressNote, cost, model, connected, theme, 
         )}
         {!isMobile && understanding != null && (
           <UnderstandingBadge score={understanding.score} onClick={onUnderstandingClick} />
+        )}
+        {!isMobile && autonomyLevel && (
+          <button onClick={onAutonomyClick} title={`Уровень автономности: ${autonomyLevel}`}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
+              background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
+            <span style={{ fontSize: 13 }}>{AUTONOMY_ICONS[autonomyLevel] || "🔍"}</span>
+            <span className="mono" style={{ fontSize: 10, color: "var(--text-dim)" }}>{autonomyLevel}</span>
+          </button>
         )}
         <OfficeToggle paused={!!officePaused} onClick={onToggleOffice} isMobile={isMobile} />
         {!isMobile && <ModelPlaque model={model} onOpenAccount={onOpenAccount} />}

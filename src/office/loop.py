@@ -14,7 +14,7 @@ import asyncio
 import os
 import time
 
-from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge
+from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge, trust, decisions, autonomy, initiatives, board
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
@@ -289,6 +289,10 @@ async def _heal_stuck_agents(publish) -> None:
                                            f"принята и опубликована (без перезапуска)."})
                     continue
                 plan.revert(tid)  # иначе — вернуть зависшую задачу в очередь
+            # Trust Score: зависший агент снижает доверие к его отделу
+            rec_stuck = registry.get(aid)
+            if rec_stuck and rec_stuck.department:
+                trust.record_stuck(rec_stuck.department)
             await publish({"type": "system",
                            "text": f"🔧 {aid} завис (> {MAX_THINK_SECS}s) — сброшен, задача переназначится"})
 
@@ -333,6 +337,19 @@ async def _publish_site_auto(publish) -> bool:
     sdir = critic.site_dir()
     if sdir is None:
         return False
+
+    # Блок 2: Если уровень автономности требует разрешения перед публикацией — спрашиваем
+    if not autonomy.can_auto("publish_site"):
+        await publish({"type": "system",
+                       "text": "🔐 Сайт готов к публикации — ожидаю разрешения (уровень автономности: guided)."})
+        from src.office import questions as questions_mod
+        questions_mod.ask(
+            "orchestrator_1", "orchestrator",
+            "Сайт готов к публикации. Опубликовать сейчас?",
+            metadata={"action": "publish_site"},
+        )
+        return False
+
     tid = ctx.get_tenant()
     title = (brief.get().get("goal", "") or "Сайт")[:60]
     slug = sites.make_slug(title)
@@ -455,6 +472,31 @@ async def _apply_company_decision(decision: dict, publish) -> None:
     # Не шумим речью CEO, когда он просто ждёт — это плодило спам «CEO не принял решение».
     if thought and action != "wait":
         await publish({"type": "speech", "agent_id": "orchestrator_1", "text": f"🧭 {thought}"})
+
+    # Блок 3: Логируем структурированное решение CEO (для UI «Почему?»)
+    if action != "wait":
+        did = decisions.record(
+            action=action,
+            target=decision.get("department", decision.get("objective", ""))[:80],
+            thought=thought,
+            alternatives=decision.get("alternatives") or [],
+            confidence=decision.get("confidence", 60),
+            risks=decision.get("risks") or [],
+            expected_effect=decision.get("expected_effect", ""),
+            data_used=decision.get("data_used") or ["strategy", "milestones"],
+            made_by="orchestrator_1",
+        )
+        await publish({"type": "decision_record", "decision_id": did, "action": action,
+                       "thought": thought, "confidence": decision.get("confidence", 60)})
+
+    # Блок 6: Совет директоров при антицикле (3+ wait подряд или блокеры)
+    if action == "wait":
+        board.record_wait()
+        if board.needs_session():
+            conflict = f"CEO заблокирован: {thought or 'нет прогресса'}"
+            await board.run_session(conflict, publish)
+    else:
+        board.reset_wait_streak()
 
     # Бизнес-этапи (вехи) ведёт CEO
     cur = decision.get("current_milestone")
@@ -657,6 +699,16 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             if task_id and plan.is_generated():
                 plan.complete(task_id)
                 await publish({"type": "system", "text": f"✅ Задача {task_id} выполнена"})
+            # Trust Score: успешная задача повышает доверие к отделу
+            if department:
+                trust.record_success(department)
+                # Предложение повысить уровень автономности при высоком доверии
+                if trust.should_propose_upgrade():
+                    trust.mark_upgrade_proposed()
+                    proposal = trust.upgrade_proposal_text()
+                    if proposal:
+                        await publish({"type": "speech", "agent_id": "orchestrator_1",
+                                       "text": f"🤝 {proposal}"})
             # Живость: «сделал → отчитался» — короткий итог в ленту.
             summary = (result or "").strip().replace("\n", " ")[:120]
             if summary:
@@ -667,6 +719,9 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             registry.update_status(agent_id, "idle")
             if task_id and plan.is_generated():
                 plan.revert(task_id)  # упала — вернуть в очередь
+            # Trust Score: провал задачи снижает доверие
+            if department:
+                trust.record_failure(department)
             # Quota/billing 403 → ставим офис на паузу, чтобы не сжигать остаток
             if _is_quota_error(err_str):
                 reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."

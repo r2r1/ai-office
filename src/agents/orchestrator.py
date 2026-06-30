@@ -55,7 +55,12 @@ _COMPANY_SYSTEM = """Ты — CEO автономной AI-компании. Ты
   "done_reason": "почему отдел закрывается (для close_department), иначе null",
   "current_milestone": "id текущего этапа",
   "milestone_done": "id этапа, если ТОЛЬКО ЧТО завершён, иначе null",
-  "milestone_summary": "что достигнуто на завершённом этапе, иначе null"
+  "milestone_summary": "что достигнуто на завершённом этапе, иначе null",
+  "alternatives": [{"action": "...", "reason": "почему не выбрано"}],
+  "confidence": 75,
+  "risks": ["риск 1"],
+  "expected_effect": "что произойдёт после этого решения",
+  "data_used": ["strategy", "events", "user_directives"]
 }"""
 
 _MILESTONES_SYSTEM = """Ты — директор автономного AI-офиса. Раздели путь к ЦЕЛИ КЛИЕНТА на
@@ -110,7 +115,12 @@ _DECIDE_SYSTEM = """Ты — директор автономного AI-офис
   "skill": "специализация агента при найме (например: 'создание Telegram-ботов', 'разработка лендингов', 'настройка CRM'), null если assign",
   "current_milestone": "id текущего этапа",
   "milestone_done": "id этапа, если он ТОЛЬКО ЧТО завершён, иначе null",
-  "milestone_summary": "что достигнуто на завершённом этапе, иначе null"
+  "milestone_summary": "что достигнуто на завершённом этапе, иначе null",
+  "alternatives": [{"action": "...", "reason": "почему не выбрано"}],
+  "confidence": 70,
+  "risks": ["риск 1"],
+  "expected_effect": "ожидаемый результат этого решения",
+  "data_used": ["strategy", "milestones", "team"]
 }"""
 
 
@@ -526,3 +536,86 @@ async def decide(
                 decision["thought"] = f"{role} занят текущей задачей — жду результат, не дублирую"
 
     return decision
+
+
+_BOARD_SYSTEM = """Ты — CEO автономной AI-компании. Только что прошло заседание совета директоров.
+Ты выслушал позиции лидеров отделов. Прими итоговое решение по спорному вопросу.
+Ответь ТОЛЬКО валидным JSON без markdown:
+{
+  "conclusion": "финальное решение CEO (2-3 предложения, по-русски)",
+  "action_plan": ["шаг 1", "шаг 2"],
+  "confidence": 80,
+  "risks": ["остаточный риск"],
+  "expected_effect": "что изменится после выполнения плана"
+}"""
+
+
+async def board_decide(
+    conflict: str,
+    positions: dict[str, str],
+    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+) -> dict:
+    """Финальное решение CEO после выслушивания позиций отделов."""
+    if publish:
+        await publish({"type": "thinking", "agent_id": "orchestrator_1",
+                       "text": "Взвешиваю позиции отделов и принимаю решение..."})
+
+    pos_text = "\n".join(
+        f"- {dept}: {view[:250]}" for dept, view in positions.items()
+    ) or "(нет позиций)"
+    user = (
+        f"Спорный вопрос: {conflict}\n\n"
+        f"Позиции лидеров отделов:\n{pos_text}\n\n"
+        "Прими финальное решение совета директоров."
+    )
+    raw = await llm.run_agent(
+        system=_BOARD_SYSTEM,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=500,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    result = _parse_json(raw)
+    if not result:
+        result = {"conclusion": "Совет рекомендует продолжить работу в штатном режиме.",
+                  "confidence": 50, "risks": [], "expected_effect": ""}
+    return result
+
+
+_INITIATIVE_SYSTEM = """Ты — CEO автономной AI-компании. На основе текущей ситуации
+предложи одну конкретную инициативу с оценкой эффекта и готовыми задачами.
+Ответь ТОЛЬКО валидным JSON без markdown:
+{
+  "title": "Краткое название инициативы",
+  "rationale": "Почему сейчас это важно (1-2 предложения, конкретные данные)",
+  "expected_outcome": "Конкретный ожидаемый результат (например: +15% конверсии)",
+  "estimated_effort": "1-2 цикла",
+  "tasks": [
+    {"title": "Задача 1", "role": "designer", "done_criterion": "..."}
+  ]
+}"""
+
+
+async def generate_initiative(
+    goal: str,
+    strategy: str,
+    opportunity_summary: str,
+    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+) -> dict:
+    """CEO генерирует проактивную инициативу на основе наблюдаемой возможности."""
+    user = (
+        f"Цель компании: {goal}\n\n"
+        f"Стратегия (кратко):\n{strategy[:800]}\n\n"
+        f"Наблюдаемая возможность: {opportunity_summary}\n\n"
+        "Сформулируй инициативу с конкретными задачами."
+    )
+    raw = await llm.run_agent(
+        system=_INITIATIVE_SYSTEM,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=500,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    return _parse_json(raw) or {}

@@ -73,8 +73,21 @@ def note_result(department: str, role: str, summary: str) -> None:
 # ─────────────────────────── сбор кандидатов ───────────────────────────
 
 def _global_facts() -> list[dict]:
-    """GLOBAL-слой из источников истины (brief + ответы пользователя)."""
+    """GLOBAL-слой из источников истины (brief + ответы пользователя + философия/конституция)."""
     out: list[dict] = []
+
+    # Философия и Конституция — наивысший приоритет, выше стратегии и ТЗ
+    try:
+        from src.office import philosophy as phil_mod, constitution as const_mod
+        phil_block = phil_mod.context_block()
+        if phil_block:
+            out.append({"text": phil_block, "base": 0.95, "src": "global"})
+        const_block = const_mod.rule_block()
+        if const_block:
+            out.append({"text": const_block, "base": 0.90, "src": "global"})
+    except Exception:
+        pass
+
     b = brief.get()
     if b.get("goal"):
         out.append({"text": f"Цель клиента: {b['goal']}", "base": 0.35, "src": "global"})
