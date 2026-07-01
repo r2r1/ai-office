@@ -80,6 +80,12 @@ export const api = {
   logout: () => postJSON<any>("/auth/logout", {}, null),
   get: (url: string) => getJSON<any>(url, null),
   post: (url: string, body: unknown = {}) => postJSON<any>(url, body, null),
+  del: async (url: string) => {
+    try {
+      const r = await fetch(url, { method: "DELETE", credentials: "same-origin" })
+      return await r.json().catch(() => ({ ok: r.ok }))
+    } catch { return null }
+  },
 }
 
 export { getJSON, postJSON }

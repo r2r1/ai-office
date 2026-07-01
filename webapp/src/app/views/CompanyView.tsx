@@ -21,6 +21,7 @@ const TABS = [
   { id: "profile", label: "Профиль" },
   { id: "intellect", label: "Интеллект" },
   { id: "roles", label: "Роли" },
+  { id: "skills", label: "Скиллы" },
   { id: "limits", label: "Лимиты" },
   { id: "storage", label: "Хранилище" },
   { id: "access", label: "Доступы" },
@@ -32,11 +33,12 @@ export function CompanyView() {
   const { active, setActive } = useSubTab(TABS)
   return (
     <ViewShell>
-      <ViewHead title="Компания" sub="Характер, интеллект, лимиты и хранилище офиса" />
+      <ViewHead title="Компания" sub="Характер, интеллект, скиллы, лимиты и хранилище офиса" />
       <SubTabs tabs={TABS} active={active} onChange={setActive} />
       {active === "profile" && <ProfileTab />}
       {active === "intellect" && <IntellectTab />}
       {active === "roles" && <RolesTab />}
+      {active === "skills" && <SkillsTab />}
       {active === "limits" && <LimitsTab />}
       {active === "storage" && <StorageTab />}
       {active === "access" && <AccessTab />}
@@ -246,6 +248,150 @@ function RolesTab() {
         </div>
       )}
     </ViewBody>
+  )
+}
+
+// ── Скиллы: каталог + установка из любого источника (как npx skills) ──────────
+const ROLE_RU: Record<string, string> = {
+  cto: "CTO", cmo: "CMO", sales_lead: "Head of Sales", developer: "Разработчик",
+  designer: "Дизайнер", integrator: "Интегратор", marketer: "Маркетолог",
+  analyst: "Аналитик", salesman: "Продажник", researcher: "Ресёрчер",
+}
+const SKILL_EXAMPLE = `---
+title: Название скилла
+description: Что этот скилл делает
+keywords: ключ1, ключ2
+roles: developer, designer
+---
+Тело-плейбук: пошаговые инструкции, приёмы, чеклист.`
+
+function SkillsTab() {
+  const [skills, setSkills] = useState<any[]>([])
+  const [mode, setMode] = useState<"markdown" | "url" | "github">("markdown")
+  const [content, setContent] = useState("")
+  const [ref, setRef] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const load = () => api.get("/api/skills").then(d => d?.skills && setSkills(d.skills))
+  useEffect(() => { load() }, [])
+
+  async function install() {
+    setBusy(true); setMsg(null)
+    const body: any = { source: mode }
+    if (mode === "markdown") body.content = content
+    else if (mode === "url") body.url = ref
+    else body.ref = ref
+    // Прямой fetch: install отдаёт 400 с {message} при ошибке, а api.post глотает
+    // тело на non-2xx — нам нужно показать пользователю причину.
+    let res: any = null
+    try {
+      const r = await fetch("/api/skills/install", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })
+      res = await r.json().catch(() => ({ ok: false }))
+    } catch { res = { ok: false, message: "Сеть недоступна" } }
+    setBusy(false)
+    if (res?.ok) {
+      setMsg({ ok: true, text: `Установлен: ${res.title || res.id}` })
+      setContent(""); setRef(""); load()
+    } else {
+      setMsg({ ok: false, text: res?.message || "Не удалось установить" })
+    }
+  }
+
+  async function removeSkill(id: string) {
+    const res = await api.del(`/api/skills/${encodeURIComponent(id)}`)
+    if (res?.ok) load()
+    else setMsg({ ok: false, text: res?.message || "Не удалось удалить" })
+  }
+
+  const installed = skills.filter(s => s.source === "installed")
+  const builtin = skills.filter(s => s.source !== "installed")
+
+  return (
+    <ViewBody style={{ maxWidth: 720 }}>
+      <SectionLabel>Установить скилл (из любого источника)</SectionLabel>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>
+          Скилл — это готовый «как делать» для агентов. Формат как у Claude Code
+          (frontmatter + тело). Скилл — <b style={{ color: "var(--text-dim)" }}>инструкция,
+          которой агенты будут следовать</b>: ставьте из доверенных источников.
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          {([["markdown", "Вставить"], ["url", "По ссылке"], ["github", "GitHub"]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setMode(m)}
+              style={{ padding: "5px 12px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                border: `1px solid ${mode === m ? "var(--mercury-a)" : "var(--hairline)"}`,
+                background: mode === m ? "rgba(255,172,46,0.08)" : "transparent",
+                color: mode === m ? "var(--mercury-a)" : "var(--text-dim)" }}>{label}</button>
+          ))}
+        </div>
+        {mode === "markdown" ? (
+          <textarea value={content} onChange={e => setContent(e.target.value)}
+            placeholder={SKILL_EXAMPLE} rows={9}
+            style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+              borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 12,
+              outline: "none", fontFamily: "var(--font-mono)", resize: "vertical", lineHeight: 1.5 }} />
+        ) : (
+          <input value={ref} onChange={e => setRef(e.target.value)}
+            placeholder={mode === "url" ? "https://…/SKILL.md (сырой markdown)" : "owner/repo@skill"}
+            style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+              borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+          <button onClick={install} disabled={busy || (mode === "markdown" ? !content.trim() : !ref.trim())}
+            style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-pill)", padding: "9px 20px",
+              background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13,
+              opacity: busy ? 0.5 : 1 }}>{busy ? "Устанавливаю…" : "Установить"}</button>
+          {msg && <span style={{ fontSize: 12, color: msg.ok ? "#a0e0ab" : "#e05a5a" }}>{msg.text}</span>}
+        </div>
+      </Card>
+
+      {installed.length > 0 && (
+        <>
+          <SectionLabel>Установленные · {installed.length}</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+            {installed.map(s => <SkillCard key={s.id} s={s} onRemove={() => removeSkill(s.id)} />)}
+          </div>
+        </>
+      )}
+
+      <SectionLabel>Встроенные · {builtin.length}</SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {builtin.map(s => <SkillCard key={s.id} s={s} />)}
+      </div>
+    </ViewBody>
+  )
+}
+
+function SkillCard({ s, onRemove }: { s: any; onRemove?: () => void }) {
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 13.5, color: "var(--text)", fontWeight: 500 }}>{s.title}</span>
+            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 99,
+              background: onRemove ? "rgba(255,172,46,0.12)" : "var(--surface-soft)",
+              color: onRemove ? "var(--mercury-a)" : "var(--faint)", border: "1px solid var(--hairline)" }}>
+              {onRemove ? "установлен" : "встроенный"}
+            </span>
+          </div>
+          {s.description && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{s.description}</div>}
+          {(s.roles || []).length > 0 && (
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
+              роли: {(s.roles || []).map((r: string) => ROLE_RU[r] || r).join(", ")}
+            </div>
+          )}
+        </div>
+        {onRemove && (
+          <button onClick={onRemove} title="Удалить скилл"
+            style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>×</button>
+        )}
+      </div>
+    </Card>
   )
 }
 

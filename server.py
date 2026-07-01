@@ -1431,6 +1431,32 @@ async def get_skills(request: Request):
     return {"skills": skills_module.catalog_payload()}
 
 
+@app.post("/api/skills/install")
+async def install_skill(request: Request):
+    """Установка скилла-файла (аналог npx skills add) — ЯВНОЕ действие пользователя.
+    source: markdown | url | github. Скилл = инструкция агентам; ставь из доверенных источников."""
+    data = await request.json()
+    src = (data.get("source") or "markdown").strip()
+    res = skills_module.install(
+        src,
+        content=data.get("content", ""),
+        url=data.get("url", ""),
+        ref=data.get("ref", ""),
+    )
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=400)
+    return res
+
+
+@app.delete("/api/skills/{skill_id}")
+async def delete_skill(skill_id: str, request: Request):
+
+    res = skills_module.remove(skill_id)
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=400)
+    return res
+
+
 @app.get("/api/roles")
 async def get_roles(request: Request):
 

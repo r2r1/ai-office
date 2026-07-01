@@ -38,6 +38,8 @@ class Skill:
     kind: str = "builtin"
     # Опциональный детерминированный исполнитель (если скилл сам что-то делает).
     handler: Optional[Callable[[dict], Awaitable[str]]] = None
+    # Откуда скилл: "builtin" (в коде) или "installed" (файл, поставлен клиентом).
+    source: str = "builtin"
 
     def score(self, task: str) -> int:
         """Насколько Skill подходит задаче (число совпавших ключевых слов)."""
@@ -46,24 +48,42 @@ class Skill:
 
     def to_public(self) -> dict:
         return {"id": self.id, "title": self.title, "description": self.description,
-                "keywords": self.keywords, "roles": self.roles, "kind": self.kind}
+                "keywords": self.keywords, "roles": self.roles, "kind": self.kind,
+                "source": self.source}
 
 
 # ── Реестр ───────────────────────────────────────────────────────────────────
-_SKILLS: dict[str, Skill] = {}
+# _BUILTIN — скиллы из кода (общие для всех тенантов, регистрируются при импорте).
+# Установленные клиентом скиллы (файлы) вливаются в выдачу через _all_registered()
+# и потому автоматически видны use_skill/find_skills без правок agent_factory.
+_BUILTIN: dict[str, Skill] = {}
 
 
 def register(skill: Skill) -> None:
-    _SKILLS[skill.id] = skill
+    _BUILTIN[skill.id] = skill
+
+
+def _all_registered() -> dict[str, Skill]:
+    """Встроенные + установленные текущим тенантом (installed переопределяет по id)."""
+    from src.office import skill_store
+    merged: dict[str, Skill] = dict(_BUILTIN)
+    for d in skill_store.load_installed():
+        merged[d["id"]] = Skill(
+            id=d["id"], title=d["title"], description=d["description"],
+            keywords=d.get("keywords") or [], playbook=d.get("playbook", ""),
+            roles=d.get("roles") or [], kind=d.get("kind", "builtin"),
+            source="installed",
+        )
+    return merged
 
 
 def get(skill_id: str) -> Optional[Skill]:
-    return _SKILLS.get(skill_id)
+    return _all_registered().get(skill_id)
 
 
 def all_skills(role: str = "") -> list[Skill]:
     """Скиллы, доступные роли (или все). Скилл без привязки доступен любой роли."""
-    items = list(_SKILLS.values())
+    items = list(_all_registered().values())
     if not role:
         return items
     return [s for s in items if not s.roles or role in s.roles]
@@ -132,7 +152,29 @@ def prompt_block(role: str) -> str:
 
 
 def catalog_payload() -> list[dict]:
-    return [s.to_public() for s in _SKILLS.values()]
+    return [s.to_public() for s in _all_registered().values()]
+
+
+# ── Установка/удаление скиллов-файлов (аналог npx skills add/remove) ─────────
+# Тонкие обёртки над skill_store — единая точка входа для API. Установка — только
+# явное действие пользователя (см. server.py), НЕ инструмент агента.
+def install(source: str, content: str = "", url: str = "", ref: str = "") -> dict:
+    from src.office import skill_store
+    if source == "markdown":
+        return skill_store.install_markdown(content)
+    if source == "url":
+        return skill_store.install_url(url)
+    if source == "github":
+        return skill_store.install_github(ref)
+    return {"ok": False, "message": "source должен быть markdown | url | github"}
+
+
+def remove(skill_id: str) -> dict:
+    from src.office import skill_store
+    if skill_id in _BUILTIN:
+        return {"ok": False, "message": "Встроенный скилл нельзя удалить — можно переопределить, установив свой с тем же id."}
+    ok = skill_store.remove(skill_id)
+    return {"ok": ok, "message": "" if ok else "Скилл не найден среди установленных."}
 
 
 # ── Скилл: 3D-лендинг на Framer Motion ───────────────────────────────────────
