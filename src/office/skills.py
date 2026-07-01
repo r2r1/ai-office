@@ -92,6 +92,26 @@ def catalog_for(role: str) -> str:
     return "; ".join(f"«{s.title}»" for s in items) if items else ""
 
 
+def search(query: str, role: str = "", top: int = 6) -> list[Skill]:
+    """
+    Поиск по каталогу скиллов (внутренний аналог find-skills) — для ДИСКАВЕРИ,
+    когда воркер/лидер хочет ПОСМОТРЕТЬ, какие способы вообще есть под запрос,
+    а не сразу взять один плейбук (это делает match/use_skill).
+
+    Пустой запрос → весь каталог роли (просто «покажи что умеешь»). Иначе —
+    ранжирование по совпадению ключевых слов; если совпадений нет, возвращаем
+    топ каталога роли (лучше показать что есть, чем пусто).
+    """
+    pool = all_skills(role)
+    q = (query or "").strip().lower()
+    if not q:
+        return pool[:top]
+    scored = sorted(pool, key=lambda s: s.score(q), reverse=True)
+    if scored and scored[0].score(q) > 0:
+        return [s for s in scored if s.score(q) > 0][:top]
+    return pool[:top]
+
+
 def prompt_block(role: str) -> str:
     """
     Динамический блок скиллов для системного промпта роли (собирается Prompt Builder'ом).
@@ -107,7 +127,8 @@ def prompt_block(role: str) -> str:
     lines = "\n".join(f"• {s.title} — {s.description}" for s in items)
     return ("\n\nДОСТУПНЫЕ СКИЛЛЫ (готовые способы «как делать»). Когда сомневаешься, "
             "как именно выполнить — НЕ выдумывай: вызови use_skill с потребностью словами, "
-            "получи экспертный плейбук и выполни его своими инструментами.\n" + lines)
+            "получи экспертный плейбук и выполни его своими инструментами. Не уверен, "
+            "что есть под задачу — сначала find_skills (поиск по каталогу).\n" + lines)
 
 
 def catalog_payload() -> list[dict]:
@@ -362,3 +383,9 @@ register(Skill(
     keywords=["бот записи", "booking", "запись", "telegram бот", "запустить бот"],
     handler=_launch_booking_bot,
 ))
+
+
+# Библиотека экспертных скиллов (10 плейбунков из экосистемы skills.sh) —
+# импорт В КОНЦЕ, чтобы Skill/register были уже определены. Импорт этого модуля
+# (`from src.office import skills`) автоматически регистрирует всю библиотеку.
+from src.office import skill_library  # noqa: E402,F401

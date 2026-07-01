@@ -351,6 +351,27 @@ _USE_SKILL_TOOL = {
     },
 }
 
+# Инструмент: ПОСМОТРЕТЬ каталог скиллов (дискавери, внутренний find-skills).
+# В отличие от use_skill (сразу берёт один плейбук) — показывает СПИСОК доступных
+# способов под запрос, чтобы лидер/воркер понял, что вообще умеет офис, и выбрал.
+_FIND_SKILLS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "find_skills",
+        "description": "Ищет по каталогу готовых скиллов офиса и возвращает СПИСОК подходящих "
+                       "(название + что делает). Используй для разведки: понять, какие способы "
+                       "есть под задачу, прежде чем брать конкретный через use_skill. Пустой "
+                       "запрос → покажет все доступные тебе скиллы.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Что ищешь, своими словами (можно пусто — покажет весь каталог)"},
+            },
+            "required": [],
+        },
+    },
+}
+
 # Инструмент: выполнить реальное действие во внешнем сервисе
 _USE_INTEGRATION_TOOL = {
     "type": "function",
@@ -924,6 +945,18 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         lines = "\n".join(f"- {s.title}: {s.description}" for s in cands)
         return f"Уточни — подходят несколько скиллов:\n{lines}"
 
+    async def _handle_find_skills(args: dict) -> str:
+        """Дискавери каталога скиллов (внутренний find-skills): вернуть СПИСОК
+        подходящих способов, чтобы воркер/лидер выбрал и взял через use_skill."""
+        query = (args.get("query") or "").strip()
+        found = skills_module.search(query, role, top=6)
+        if not found:
+            return "В каталоге пока нет скиллов, доступных твоей роли — делай напрямую."
+        lines = "\n".join(f"• {s.title} — {s.description}" for s in found)
+        head = (f"Скиллы под «{query}»:" if query else "Доступные тебе скиллы:")
+        return (f"{head}\n{lines}\n\nЧтобы взять нужный — вызови use_skill с "
+                f"потребностью словами, получишь его экспертный плейбук.")
+
     async def _report_connection_error(platform: str, error: str) -> None:
         """Публикует событие ошибки подключения чтобы пользователь видел в интерфейсе."""
         await publish({"type": "connection_error", "agent_id": agent_id,
@@ -964,7 +997,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                          _RAISE_EVENT_TOOL, _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL,
                          _READ_OFFICE_CHAT_TOOL,
                          _LIST_INTEGRATIONS_TOOL, _USE_CAPABILITY_TOOL, _USE_INTEGRATION_TOOL,
-                         _USE_SKILL_TOOL,
+                         _USE_SKILL_TOOL, _FIND_SKILLS_TOOL,
                          _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
                          _EXECUTE_CODE_TOOL, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
             tool_handlers={
@@ -978,6 +1011,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "list_integrations": _handle_list_integrations,
                 "use_capability": _handle_use_capability,
                 "use_skill": _handle_use_skill,
+                "find_skills": _handle_find_skills,
                 "use_integration": _handle_use_integration,
                 "write_file": _handle_write_file,
                 "read_file": _handle_read_file,
