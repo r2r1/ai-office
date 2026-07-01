@@ -10,6 +10,19 @@ import uuid
 
 from src.saas import db
 
+# Короткий TTL-кеш списка воркспейсов: office/loop.py's менеджер опрашивает
+# all_workspaces() каждые MANAGER_POLL=5с для КАЖДОГО тенанта — полный скан
+# таблицы на каждый тик не нужен, список меняется редко (только при регистрации).
+# Инвалидируется явно в _ensure_workspace при создании нового воркспейса —
+# TTL здесь просто подстраховка (например прямые вставки в БД в обход store.py).
+_WORKSPACES_CACHE_TTL = 5.0
+_workspaces_cache: tuple[float, list[dict]] | None = None
+
+
+def _invalidate_workspaces_cache() -> None:
+    global _workspaces_cache
+    _workspaces_cache = None
+
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
@@ -43,6 +56,7 @@ def _ensure_workspace(user: dict) -> dict:
         llm_settings.provision_tenant_key(wid, name=f"office-{wid}")
     except Exception:
         pass
+    _invalidate_workspaces_cache()
     return workspace_for_user(user["id"])
 
 
@@ -90,7 +104,13 @@ def get_or_create_dev_user(email: str) -> dict:
 
 
 def all_workspaces() -> list[dict]:
-    return db.query_all("SELECT * FROM workspaces ORDER BY created_at")
+    global _workspaces_cache
+    now = time.time()
+    if _workspaces_cache is not None and now - _workspaces_cache[0] < _WORKSPACES_CACHE_TTL:
+        return _workspaces_cache[1]
+    rows = db.query_all("SELECT * FROM workspaces ORDER BY created_at")
+    _workspaces_cache = (now, rows)
+    return rows
 
 
 def public_user(user: dict) -> dict:

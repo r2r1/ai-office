@@ -10,12 +10,26 @@ HTTP-запрос и офис-задачей на каждый цикл). Все
 """
 
 import contextvars
+import copy
 import json
 from pathlib import Path
 
 _tenant: contextvars.ContextVar[str] = contextvars.ContextVar("tenant", default="default")
 
 ROOT = Path("data/tenants")
+
+# Процессный кеш прочитанных JSON-файлов: (tenant_id, filename) -> распарсенные данные.
+# Однопроцессный uvicorn (не multi-worker) — безопасно: нет другого процесса,
+# который менял бы файлы мимо write_json/delete_file. Каждое чтение с кеш-хитом
+# возвращает copy.deepcopy — вызывающий код сегодня получает от read_json НЕЗАВИСИМЫЙ
+# объект на каждый вызов (json.loads создаёт новый), и это поведение нельзя менять:
+# иначе два async-таска для одного тенанта могли бы держать ссылки на ОДИН и тот же
+# мутируемый dict и потерять правки друг друга между await-точками.
+_cache: dict[tuple[str, str], object] = {}
+
+
+def _cache_key(name: str) -> tuple[str, str]:
+    return (get_tenant(), name)
 
 
 def set_tenant(tid: str) -> None:
@@ -33,21 +47,31 @@ def tenant_dir() -> Path:
 
 
 def read_json(name: str, default):
+    key = _cache_key(name)
+    if key in _cache:
+        return copy.deepcopy(_cache[key])
     f = tenant_dir() / name
     if f.exists():
         try:
-            return json.loads(f.read_text(encoding="utf-8"))
+            data = json.loads(f.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return default
+        _cache[key] = data
+        return copy.deepcopy(data)
+    # Файла ещё нет — НЕ кешируем отсутствие: разные вызовы могут передавать
+    # разный default для одного имени файла, а после первой write_json кеш
+    # заполнится сам и дальнейшие read_json станут кеш-хитами.
     return default
 
 
 def write_json(name: str, obj) -> None:
     f = tenant_dir() / name
     f.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    _cache[_cache_key(name)] = copy.deepcopy(obj)
 
 
 def delete_file(name: str) -> None:
+    _cache.pop(_cache_key(name), None)
     f = tenant_dir() / name
     if f.exists():
         f.unlink()
@@ -56,6 +80,9 @@ def delete_file(name: str) -> None:
 def wipe() -> None:
     """Полностью удаляет данные текущего тенанта (reset «новый клиент»)."""
     import shutil
-    d = ROOT / get_tenant()
+    tid = get_tenant()
+    for k in [k for k in _cache if k[0] == tid]:
+        _cache.pop(k, None)
+    d = ROOT / tid
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
