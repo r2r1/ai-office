@@ -18,6 +18,7 @@ Prompt Builder — единая точка сборки системного п�
 """
 
 from src.office import roles
+from src.office import skills as skills_module
 from src.office import memory as memory_module
 
 
@@ -30,5 +31,9 @@ def build(role: str, task: str, agent_id: str, skill: str = "") -> str:
 
     base = roles.render(role)
     skill_line = f"\n\nТвоя специализация в этом проекте: {skill}" if skill else ""
-    return (base + skill_line + af._brief_context() + memory_module.context_block()
+    # Каталог скиллов подмешивается ДИНАМИЧЕСКИ из реестра под роль (skills.prompt_block),
+    # а не зашит в текст роли: добавили скилл с roles=[...] — он сам появился в промпте,
+    # и в промпт идут только релевантные роли скиллы, а не весь каталог.
+    skills_block = skills_module.prompt_block(role)
+    return (base + skill_line + skills_block + af._brief_context() + memory_module.context_block()
             + af._AUTONOMY_RULES + af._TEAM_PREAMBLE + af._INTER_AGENT_SUFFIX)

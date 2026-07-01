@@ -101,9 +101,30 @@ interface NavRailProps {
   active: Section
   onChange: (s: Section) => void
   orientation?: "vertical" | "horizontal"
+  badges?: Partial<Record<Section, number>>
 }
 
-export function NavRail({ active, onChange, orientation = "vertical" }: NavRailProps) {
+/** Бейдж-счётчик непрочитанного поверх иконки навигации. */
+function NavBadge({ count, compact }: { count: number; compact?: boolean }) {
+  if (count <= 0) return null
+  const label = count > 9 ? "9+" : String(count)
+  return (
+    <motion.span
+      initial={{ scale: 0 }} animate={{ scale: 1 }}
+      transition={{ type: "spring", stiffness: 500, damping: 24 }}
+      aria-hidden
+      style={{
+        position: "absolute", top: compact ? 0 : 4, right: compact ? 4 : 18,
+        minWidth: 16, height: 16, padding: "0 4px", borderRadius: 9,
+        background: AMBER, color: "#0a0a0a",
+        fontSize: 9.5, fontWeight: 700, lineHeight: "16px", textAlign: "center",
+        boxShadow: `0 0 0 2px var(--bg), 0 1px 3px rgba(${AMBER_RGB},0.5)`,
+        fontFamily: "var(--font-sans)", pointerEvents: "none",
+      }}>{label}</motion.span>
+  )
+}
+
+export function NavRail({ active, onChange, orientation = "vertical", badges }: NavRailProps) {
   if (orientation === "horizontal") {
     return (
       <div className="glass" style={{
@@ -112,15 +133,20 @@ export function NavRail({ active, onChange, orientation = "vertical" }: NavRailP
       }}>
         {NAV.map(item => {
           const isActive = item.id === active
+          const badge = badges?.[item.id] ?? 0
           return (
-            <button key={item.id} onClick={() => onChange(item.id)} style={{
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-              padding: "6px 12px", borderRadius: "var(--radius-pill)", border: "none",
-              cursor: "pointer", background: "transparent",
-              color: isActive ? AMBER : "var(--muted)",
-              transition: "color 0.2s", fontFamily: "var(--font-sans)", minWidth: 52,
-            }}>
+            <button key={item.id} onClick={() => onChange(item.id)}
+              aria-label={badge > 0 ? `${item.label}, непрочитанных: ${badge}` : item.label}
+              style={{
+                position: "relative",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                padding: "6px 12px", borderRadius: "var(--radius-pill)", border: "none",
+                cursor: "pointer", background: "transparent",
+                color: isActive ? AMBER : "var(--muted)",
+                transition: "color 0.2s", fontFamily: "var(--font-sans)", minWidth: 52,
+              }}>
               <Icon name={item.id} size={17} />
+              <NavBadge count={badge} compact />
               <span style={{
                 fontSize: 8.5, letterSpacing: "0.4px", textTransform: "uppercase",
                 fontWeight: isActive ? 500 : 400, color: isActive ? "var(--text)" : "inherit",
@@ -132,10 +158,10 @@ export function NavRail({ active, onChange, orientation = "vertical" }: NavRailP
     )
   }
 
-  return <NavRailVertical active={active} onChange={onChange} />
+  return <NavRailVertical active={active} onChange={onChange} badges={badges} />
 }
 
-function NavRailVertical({ active, onChange }: { active: Section; onChange: (s: Section) => void }) {
+function NavRailVertical({ active, onChange, badges }: { active: Section; onChange: (s: Section) => void; badges?: Partial<Record<Section, number>> }) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   /* Motion values */
@@ -243,18 +269,18 @@ function NavRailVertical({ active, onChange }: { active: Section; onChange: (s: 
         paddingRight: 8,
       }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {top.map(item => <NavItem key={item.id} item={item} active={active} onChange={onChange} />)}
+          {top.map(item => <NavItem key={item.id} item={item} active={active} onChange={onChange} badge={badges?.[item.id] ?? 0} />)}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {bottom.map(item => <NavItem key={item.id} item={item} active={active} onChange={onChange} />)}
+          {bottom.map(item => <NavItem key={item.id} item={item} active={active} onChange={onChange} badge={badges?.[item.id] ?? 0} />)}
         </div>
       </div>
     </div>
   )
 }
 
-function NavItem({ item, active, onChange }: {
-  item: typeof NAV[0]; active: Section; onChange: (s: Section) => void
+function NavItem({ item, active, onChange, badge = 0 }: {
+  item: typeof NAV[0]; active: Section; onChange: (s: Section) => void; badge?: number
 }) {
   const isActive = item.id === active
 
@@ -262,7 +288,9 @@ function NavItem({ item, active, onChange }: {
     <button
       onClick={() => onChange(item.id)}
       data-bridge-active={isActive ? "true" : undefined}
+      aria-label={badge > 0 ? `${item.label}, непрочитанных: ${badge}` : item.label}
       style={{
+        position: "relative",
         display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
         padding: "11px 4px",
         border: "none", cursor: "pointer",
@@ -279,7 +307,7 @@ function NavItem({ item, active, onChange }: {
     >
       {/* Анимированная иконка */}
       <motion.span
-        style={{ display: "flex", lineHeight: 0 }}
+        style={{ display: "flex", lineHeight: 0, position: "relative" }}
        animate={isActive
           ? { scale: 1.08 }
           : { scale: 1 }
@@ -292,6 +320,7 @@ function NavItem({ item, active, onChange }: {
           strokeWidth={isActive ? 2.2 : 1.8}
           color={isActive ? AMBER : undefined}
         />
+        <NavBadge count={badge} compact />
       </motion.span>
 
       <span style={{

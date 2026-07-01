@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, STATUS_COLOR } from "./ui"
+import { ViewShell, STATUS_COLOR } from "./ui"
 import { useThrottled } from "../hooks"
 import { motion } from "motion/react"
 import { roleName } from "../../data/roles"
@@ -34,7 +34,7 @@ const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 interface ChatsViewProps { initialAgent?: string }
 
 export function ChatsView({ initialAgent }: ChatsViewProps) {
-  const { state } = useOffice()
+  const { state, unread, markThreadSeen } = useOffice()
   const agents = Object.values(state.agents)
   const [active, setActive] = useState<string>(initialAgent || "office")
   const [messages, setMessages] = useState<any[]>([])
@@ -55,12 +55,17 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
     setMessages(server)
     // убираем из pending те, что сервер уже сохранил
     setPending(p => p.filter(pm => !server.some((sm: any) => sm.from === "user" && sm.text === pm.text)))
+    // отмечаем личный чат прочитанным по последнему сообщению, которое сейчас видно
+    if (active !== "office" && server.length) {
+      const lastTs = server[server.length - 1].ts || 0
+      markThreadSeen(active, lastTs)
+    }
   }
   const tick = useThrottled(state.feed.length, 2000)
   useEffect(() => { setPending([]); load() }, [active]) // eslint-disable-line — смена собеседника
   useEffect(() => { load() }, [tick])                   // eslint-disable-line — живой апдейт
   useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) },
-    [messages, pending, state.agents[active]?.lastMessage, state.agents[active]?.status]) // eslint-disable-line
+    [messages, pending, sending]) // eslint-disable-line
 
   async function send() {
     const text = input.trim()
@@ -80,16 +85,36 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   const allMessages = [...messages, ...pending]
 
   const activeAgent = active !== "office" ? state.agents[active] : null
+  const activeUnanswered = activeAgent ? (state.threads[active]?.unanswered || 0) : 0
   const headerName = active === "office" ? "Общий чат" : (activeAgent?.name ?? "Агент")
-  const headerSub  = active === "office"
+  // Подзаголовок — стабильный (роль / ожидание ответа). НИКАКОЙ внутренней активности
+  // агента: «кто что делает» живёт в журнале и на сцене офиса, а не в личной переписке.
+  const headerSub = active === "office"
     ? `Сообщение получат все ${agents.length} агентов`
-    : (activeAgent?.lastMessage ?? "Личный диалог")
+    : activeUnanswered > 0 ? "Ждёт вашего ответа" : (roleName(activeAgent?.role || "") || "Личный диалог")
 
-  // «печатает…» с реальной активностью агента (что делает прямо сейчас)
-  const showTyping = active !== "office" && !!activeAgent && (sending || activeAgent.status === "thinking")
-  const typingLabel = (activeAgent?.status === "thinking" && activeAgent?.lastMessage)
-    ? activeAgent.lastMessage.slice(0, 130)
-    : "печатает ответ…"
+  // Список агентов как в мессенджере: непрочитанные сверху, затем по свежести переписки.
+  const agentsSorted = useMemo(() => {
+    return [...agents].sort((a, b) => {
+      const ua = unread.byAgent[a.id] ? 1 : 0
+      const ub = unread.byAgent[b.id] ? 1 : 0
+      if (ua !== ub) return ub - ua
+      const ta = state.threads[a.id]?.last_ts || 0
+      const tb = state.threads[b.id]?.last_ts || 0
+      return tb - ta
+    })
+  }, [agents, unread.byAgent, state.threads])
+
+  // Превью последнего сообщения треда (а не служебной активности агента).
+  function rowSub(a: any): { text: string; accent: boolean } {
+    const t = state.threads[a.id]
+    if (t?.unanswered) return { text: "Ждёт вашего ответа", accent: true }
+    if (t?.last_text) return { text: (t.last_from === "user" ? "Вы: " : "") + t.last_text, accent: false }
+    return { text: roleName(a.role), accent: false }
+  }
+
+  // Печатает — только пока обрабатывается ВАШЕ сообщение в этом чате. Без текста активности.
+  const showTyping = active !== "office" && sending
 
   return (
     <ViewShell>
@@ -99,8 +124,10 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
           <div style={{ width: 260, flexShrink: 0, borderRight: "1px solid var(--hairline)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {/* заголовок sidebar */}
             <div style={{ padding: "18px 16px 12px", borderBottom: "1px solid var(--hairline-soft)", flexShrink: 0 }}>
-              <div className="display" style={{ fontSize: 22, color: "var(--text)" }}>Команда</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{agents.length} агентов</div>
+              <div className="display" style={{ fontSize: 22, color: "var(--text)" }}>Чаты</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                {agents.length} агентов{unread.total > 0 ? ` · ${unread.total} непрочитано` : ""}
+              </div>
             </div>
 
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
@@ -115,10 +142,14 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                 </div>
               )}
 
-              {agents.map(a => (
-                <Row key={a.id} active={active === a.id} onClick={() => setActive(a.id)}
-                  emoji={a.emoji} name={a.name} sub={a.lastMessage} dot={STATUS_COLOR[a.status]} />
-              ))}
+              {agentsSorted.map(a => {
+                const sub = rowSub(a)
+                return (
+                  <Row key={a.id} active={active === a.id} onClick={() => setActive(a.id)}
+                    emoji={a.emoji} name={a.name} sub={sub.text} subAccent={sub.accent}
+                    dot={STATUS_COLOR[a.status]} unread={unread.byAgent[a.id] ?? 0} />
+                )
+              })}
             </div>
           </div>
         )}
@@ -129,21 +160,24 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
           <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid var(--hairline)", flexShrink: 0,
             display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={() => setSidebarOpen(s => !s)}
+              aria-label={sidebarOpen ? "Скрыть список чатов" : "Показать список чатов"}
               style={{ width: 28, height: 28, border: "1px solid var(--hairline)", borderRadius: "var(--radius-xs)",
                 background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {sidebarOpen ? "◁" : "▷"}
             </button>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{headerName}</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{headerSub}</div>
+              <div style={{ fontSize: 11, color: activeUnanswered > 0 ? "var(--mercury-a)" : "var(--muted)",
+                marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{headerSub}</div>
             </div>
             {activeAgent && (
-              <span style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: STATUS_COLOR[activeAgent.status], flexShrink: 0 }} />
+              <span aria-hidden style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: STATUS_COLOR[activeAgent.status], flexShrink: 0 }} />
             )}
           </div>
 
           {/* сообщения */}
-          <div ref={feedRef} style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div ref={feedRef} role="log" aria-label="Сообщения чата"
+            style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
             {allMessages.length === 0 && (
               <div style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", paddingTop: 60 }}>
                 {active === "office" ? "Напишите что-нибудь — вся команда услышит" : "Начните разговор с агентом"}
@@ -179,7 +213,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
               )
             })}
 
-            {/* живой индикатор «печатает…» с реальной активностью агента */}
+            {/* «печатает…» — только пока обрабатывается ваше сообщение, без утечки активности */}
             {showTyping && (
               <div style={{ alignSelf: "flex-start", maxWidth: "82%" }}>
                 <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>{activeAgent?.name}</div>
@@ -187,9 +221,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                   borderRadius: "var(--radius-md) var(--radius-md) var(--radius-md) 4px",
                   background: "var(--surface-strong)", border: "1px solid rgba(255,172,46,0.25)" }}>
                   <TypingDots />
-                  <span style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45 }}>
-                    {typingLabel}
-                  </span>
+                  <span style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>печатает…</span>
                 </div>
               </div>
             )}
@@ -199,13 +231,14 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
           <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)", flexShrink: 0 }}>
             <input value={input} onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+              aria-label={active === "office" ? "Сообщение команде" : `Сообщение агенту ${activeAgent?.name ?? ""}`}
               placeholder={active === "office" ? "Сообщение команде…" : `Написать ${activeAgent?.name ?? "агенту"}…`}
               style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
                 borderRadius: "var(--radius-pill)", padding: "10px 18px", color: "var(--text)",
                 fontSize: 13, outline: "none", transition: "border-color 0.15s", fontFamily: "var(--font-sans)" }}
               onFocus={e => (e.currentTarget.style.borderColor = "rgba(255,172,46,0.4)")}
               onBlur={e => (e.currentTarget.style.borderColor = "")} />
-            <button onClick={send} disabled={sending || !input.trim()}
+            <button onClick={send} disabled={sending || !input.trim()} aria-label="Отправить сообщение"
               style={{ border: "none", borderRadius: "var(--radius-pill)", padding: "0 22px",
                 background: input.trim() && !sending ? MERCURY : "var(--ghost)",
                 color: input.trim() && !sending ? "#0a0a0a" : "var(--faint)",
@@ -220,11 +253,15 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   )
 }
 
-function Row({ active, onClick, emoji, name, sub, dot }: {
-  active: boolean; onClick: () => void; emoji: string; name: string; sub?: string; dot?: string
+function Row({ active, onClick, emoji, name, sub, subAccent, dot, unread = 0 }: {
+  active: boolean; onClick: () => void; emoji: string; name: string
+  sub?: string; subAccent?: boolean; dot?: string; unread?: number
 }) {
+  const hasUnread = unread > 0
   return (
-    <div onClick={onClick}
+    <div onClick={onClick} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } }}
+      aria-label={hasUnread ? `${name}, непрочитанных: ${unread}` : name}
       style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
         borderRadius: "var(--radius-sm)", cursor: "pointer",
         background: active ? "var(--hairline-soft)" : "transparent",
@@ -240,16 +277,25 @@ function Row({ active, onClick, emoji, name, sub, dot }: {
           borderRadius: "50%", background: dot, border: "2px solid var(--bg)" }} />}
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12.5, color: active ? "var(--text)" : "var(--text-dim)",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: active ? 500 : 400 }}>
+        <div style={{ fontSize: 12.5, color: active || hasUnread ? "var(--text)" : "var(--text-dim)",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: active || hasUnread ? 600 : 400 }}>
           {name}
         </div>
         {sub && (
-          <div style={{ fontSize: 10.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1 }}>
+          <div style={{ fontSize: 10.5, color: subAccent ? "var(--mercury-a)" : (hasUnread ? "var(--text-dim)" : "var(--muted)"),
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1,
+            fontWeight: hasUnread && !subAccent ? 500 : 400 }}>
             {sub}
           </div>
         )}
       </div>
+      {hasUnread && (
+        <span aria-hidden style={{ flexShrink: 0, minWidth: 18, height: 18, padding: "0 5px",
+          borderRadius: 9, background: "var(--mercury-a)", color: "#0a0a0a",
+          fontSize: 10, fontWeight: 700, lineHeight: "18px", textAlign: "center" }}>
+          {unread > 9 ? "9+" : unread}
+        </span>
+      )}
     </div>
   )
 }

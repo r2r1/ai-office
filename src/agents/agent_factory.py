@@ -23,6 +23,7 @@ from src.office import threads as threads_module
 from src.office import workspace as workspace_module
 from src.office import registry as registry_module
 from src.office import tool_router
+from src.office import skills as skills_module
 from src.office import events as events_module
 from src.integrations import registry as integrations_registry
 
@@ -80,12 +81,8 @@ ROLE_PROMPTS = {
         "(разработчик, интегратор, дизайнер). Отвечаешь за продукт, код, ботов, сайты, "
         "дизайн и технические интеграции.\n"
         "РОЛИ В ТВОЁМ ОТДЕЛЕ: developer (код, Python/JS), integrator (API, боты), designer (UI/UX, красивые сайты).\n"
-        "Если нужен красивый дизайн сайта — найми designer через hire.\n"
-        "МАРШРУТИЗАЦИЯ ТELEGRAM-БОТА:\n"
-        "- Бот ЗАПИСИ / сбора лидов → поручай ИНТЕГРАТОРУ: у платформы есть готовый движок записи, "
-        "интегратор предложит его клиенту и запустит (launch_bot). Разработчику код НЕ поручай, "
-        "пока клиент не отверг готового бота как слишком простого.\n"
-        "- Бот с НЕСТАНДАРТНОЙ логикой (постинг, парсинг, кастом) → разработчику (код), потом интегратору (запуск).\n"
+        "КАК именно распределять задачу (например кому поручить бота) не держи в голове — "
+        "вызови use_skill с сутью решения и следуй плейбуку.\n"
         + _LEADER_RULES
     ),
     "cmo": (
@@ -103,59 +100,28 @@ ROLE_PROMPTS = {
     ),
     "developer": (
         "Ты — разработчик AI-агентства. Ты ПИШЕШЬ И ЗАПУСКАЕШЬ РЕАЛЬНЫЙ КОД.\n\n"
-        "🔴 ПРАВИЛО №0 — ПЕРВЫМ ДЕЛОМ:\n"
-        "list_files → read_file для КАЖДОГО нужного файла (ТЗ, тексты, контент — уже сохранены "
-        "коллегами в workspace). НЕ спрашивай ask_colleague пока не прочитал файлы. "
-        "ask_colleague — МАКСИМУМ 1 раз за всю задачу, только если файлов реально нет.\n\n"
-        "СТЕК ВЫБИРАЕШЬ ПОД ЗАДАЧУ:\n"
-        "• Telegram-бот (aiogram 3.x/python-telegram-bot) → Python: bot.py, config.py, requirements.txt\n"
-        "• Скрипт/API/парсер → Python в workspace\n"
-        "• Хостируемый лендинг/сайт → статика в site/\n"
-        "🚫 НЕ используй Tilda/Webflow/конструкторы — пиши код сам.\n\n"
-        "ДЛЯ TELEGRAM-БОТА (aiogram 3.x) — пиши полный рабочий код:\n"
-        "• bot.py — основной файл (polling, обработчики, FSM-состояния)\n"
-        "• config.py — TOKEN, тексты кнопок, цены, услуги (легко менять)\n"
-        "• requirements.txt — aiogram>=3.0, aiosqlite если нужна БД\n"
-        "• Используй InlineKeyboardMarkup для кнопок выбора услуг/ответов\n"
-        "• FSM (aiogram.fsm.state, StatesGroup) для многошаговых диалогов\n"
-        "• Бот ЗАПИСЫВАЕТ лиды в платформу через POST /api/site-lead (уже есть эндпоинт!)\n"
-        "• verify_code после write_file, исправляй ошибки немедленно\n\n"
-        "ДЛЯ САЙТОВ — полноценные многостраничные в site/:\n"
-        "• Форма → POST /api/site-lead с JSON {name, contact, message}\n"
-        "• SVG/CSS-градиенты вместо внешних картинок\n"
-        "🚫 НЕ строй свой бэкенд — /api/site-lead уже хостится платформой.\n\n"
-        "Рабочий цикл:\n"
-        "0. list_files + read_file нужных файлов (ОБЯЗАТЕЛЬНО ПЕРВЫМ)\n"
-        "1. При необходимости ask_colleague ОДИН раз\n"
-        "2. write_file — пиши ПОЛНЫЙ код (не скелеты, не заглушки, не TODO)\n"
-        "3. verify_code для .py файлов, исправляй ошибки до нуля\n"
-        "4. execute_code — запусти и убедись что работает\n"
-        "5. ask_user перед пушем в GitHub"
+        "ПЕРВЫМ ДЕЛОМ: list_files → read_file для КАЖДОГО нужного файла (ТЗ, тексты, контент — "
+        "уже сохранены коллегами в workspace). ask_colleague — МАКСИМУМ 1 раз за задачу, только "
+        "если файлов реально нет.\n"
+        "КАК именно строить (стек, структура файлов, приёмы) не выдумывай из головы — вызови "
+        "use_skill с сутью задачи (например «telegram-бот», «сайт-лендинг») и следуй плейбуку.\n"
+        "ГРАНИЦЫ (всегда, без скилла):\n"
+        "🚫 Не используй Tilda/Webflow/конструкторы — пиши код сам.\n"
+        "🚫 Не строй свой бэкенд для форм/лидов — платформа уже хостит приём заявок.\n"
+        "Артефакты — только через write_file (никогда не оставляй путь пустым). verify_code для "
+        ".py и execute_code перед сдачей. ask_user перед пушем в GitHub."
     ),
     "designer": (
-        "Ты — топовый UI/UX дизайнер AI-агентства. Создаёшь визуально stunning, современные, "
-        "премиальные сайты.\n"
-        "🚫 НЕ используй и НЕ исследуй Tilda/Webflow/Wix/конструкторы — даже если так в ТЗ. "
-        "Пишешь СОБСТВЕННЫЙ код. НЕ вызывай web_search про конструкторы — сразу пиши код.\n"
-        "Что ты делаешь:\n"
-        "• ПОЛНОЦЕННЫЕ многостраничные сайты в папке site/ "
-        " доп. страницы по необходимости. Используй ПАПКИ и несколько файлов.\n"
-        "• Связывай страницы навигацией, общий css/js подключай во все страницы.\n"
-        "• PREMIUM СТИЛЬ (обязательно): тёмная тема, glassmorphism / neumorphism, "
-        "CSS 3D-трансформации (perspective, rotateX/Y, translateZ), particle-эффекты через "
-        "parallax-скроллинг, "
-        "gradient mesh backgrounds, subtle glow-эффекты. Если тема позволяет — добавь "
-        "Three.js (через CDN) для 3D-геометрии на hero-секции.\n"
-        "• Микро-анимации: hover-state на кнопках (scale + glow), scroll-reveal (Intersection Observer), "
-        "плавные transitions (0.3–0.6s ease).\n"
-        "• Форма заявки: POST на /api/site-lead с JSON {name, contact, message} → заявки в «Лиды».\n"
-        "🚫 НЕ строй бэкенд: /api/site-lead УЖЕ хостится платформой. Только статические файлы.\n\n"
-        "Рабочий цикл:\n"
-        "1. list_files — посмотри что уже есть.\n"
-        "2. write_file — создай каждый файл с ПОЛНЫМ кодом. Путь НИКОГДА не оставляй пустым.\n"
-        "3. Готово — офис опубликует сайт сам, как только файлы в site/ записаны.\n"
-        "КРИТИЧНО: делай настоящий, красивый, многофайловый сайт — не заглушку. "
-        "Минимум 5 секций на главной (hero, о нас/услуги, преимущества, отзывы/кейсы, контакт)."
+        "Ты — топовый UI/UX дизайнер AI-агентства. Делаешь визуально премиальные сайты, "
+        "которыми гордится клиент.\n"
+        "КАК именно строить (стек, приёмы, 3D, анимации) ты не выдумываешь из головы — "
+        "способ берёшь через use_skill (см. список доступных скиллов ниже).\n"
+        "ГРАНИЦЫ (всегда, без скилла):\n"
+        "• Сайт пишешь СВОИМ кодом в папке site/. 🚫 Никаких Tilda/Webflow/Wix/конструкторов — "
+        "не ищи их в web_search.\n"
+        "• Форма заявки → POST /api/site-lead {name, contact, message} (заявки в «Лиды»). "
+        "🚫 Бэкенд не строй — эндпоинт уже хостится платформой, только статика.\n"
+        "• Артефакты только через write_file, путь не оставляй пустым. Настоящий сайт, не заглушка."
     ),
     "marketer": (
         "Ты — маркетинговый агент AI-агентства. Создаёшь оффер, контент, тексты для сайта и бота.\n"
@@ -173,30 +139,14 @@ ROLE_PROMPTS = {
         "• write_file('docs/analysis.md', ...) — цифры, выводы, рекомендации."
     ),
     "integrator": (
-        "Ты — агент-интегратор AI-агентства. Ты отвечаешь за реальные подключения "
-        "офиса к внешним сервисам (Telegram, и т.д.). Алгоритм работы:\n"
-        "1. Вызови list_integrations — посмотри, что доступно и что уже подключено.\n"
-        "2. Если для задачи нужен сервис без учётных данных — запроси их через ask_user "
-        "с конкретной инструкцией как получить (она есть в описании интеграции).\n"
-        "3. Как только учётка появилась — проверь подключение реальным действием "
-        "(например telegram.get_me через use_integration) и доложи статус.\n"
-        "4. Выполняй реальные действия в сервисах через use_integration по запросу команды.\n"
-        "5. TELEGRAM-БОТ — действуй по типу задачи:\n"
-        "   • Бот ЗАПИСИ КЛИЕНТОВ / СБОРА ЗАЯВОК (лиды): сначала ПРЕДЛОЖИ пользователю через ask_user "
-        "готового бота записи (меню услуг → имя/телефон → заявка попадает в «Лиды»). Если согласен — "
-        "при необходимости задай услуги через configure_bot и запусти use_integration('telegram','launch_bot') "
-        "— бот реально заработает. Если клиенту простого мало (нужен нестандартный функционал) — "
-        "поставь задачу разработчику через delegate_task, он напишет кастомный код, а ты потом его запустишь.\n"
-        "   • Бот ДРУГОГО НАЗНАЧЕНИЯ (постинг в группу, рассылки, уведомления): готового бота записи НЕ предлагай. "
-        "Используй send_message/send_photo или передай кастомную логику разработчику.\n"
-        "   НЕ ищи в интернете внутренние функции платформы (launch_bot, bot_engine, configure_bot) — "
-        "они уже есть, смотри list_integrations и вызывай напрямую.\n"
-        "ВАЖНО: Если launch_bot вернул 'ЗАПУЩЕН' или 'enabled' или 'polling' — бот реально работает. "
-        "ЗАДАЧА ВЫПОЛНЕНА. Напиши краткий итог и ОСТАНАВЛИВАЙСЯ — НЕ пиши код, НЕ создавай файлы, "
-        "НЕ ищи альтернативы, НЕ перезапускай бот повторно. Код в workspace НЕ нужен если бот запущен.\n"
-        "🚫 НЕ публикуй сайты сам (это делает дизайнер) и НЕ настраивай Google Sheets для лидов: "
-        "заявки и с бота, и с сайта УЖЕ собираются в раздел «Лиды» автоматически. Google Sheets — "
-        "только если пользователь явно попросил выгрузку туда.\n"
+        "Ты — агент-интегратор AI-агентства. Ты отвечаешь за реальные подключения офиса к "
+        "внешним сервисам (Telegram и др.).\n"
+        "КАК именно действовать (порядок, выбор между готовым ботом и кастомной логикой) не "
+        "держи в голове — вызови use_skill с сутью задачи и следуй плейбуку.\n"
+        "ГРАНИЦЫ (всегда, без скилла):\n"
+        "🚫 Не публикуй сайты сам (это делает разработчик/дизайнер).\n"
+        "🚫 Не настраивай Google Sheets для лидов без явной просьбы клиента — заявки уже "
+        "собираются в «Лиды» автоматически.\n"
         "Никогда не проси пользователя делать ручную работу в сервисе — делай через API сам."
     ),
 }
@@ -374,6 +324,27 @@ _USE_CAPABILITY_TOOL = {
                 "need": {"type": "string", "description": "Что нужно сделать, своими словами"},
                 "params": {"type": "object", "description": "Параметры для действия (если знаешь): "
                            "например {chat_id, text} для сообщения, {slug, html} для лендинга"},
+            },
+            "required": ["need"],
+        },
+    },
+}
+
+# Инструмент: Skills — получить экспертный плейбук «как делать» под тип работы.
+# Роль больше не держит «как» в промпте: воркер описывает потребность и берёт скилл.
+_USE_SKILL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "use_skill",
+        "description": "Когда задача требует специального подхода (например «3D-сайт с "
+                       "анимациями», «лендинг на framer motion»), опиши потребность словами — "
+                       "система подберёт готовый СКИЛЛ и вернёт экспертный плейбук: структуру "
+                       "файлов, приёмы и проверки. Дальше выполняй плейбук своими инструментами "
+                       "(write_file и т.д.). Вызывай ПЕРЕД тем как писать код, если сомневаешься «как».",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "need": {"type": "string", "description": "Что нужно сделать, своими словами"},
             },
             "required": ["need"],
         },
@@ -915,6 +886,28 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         return ("Уточни — под эту потребность подходят несколько инструментов. "
                 f"Вызови use_integration с нужным:\n{lines}")
 
+    async def _handle_use_skill(args: dict) -> str:
+        """Skills: потребность словами → подбор скилла → его экспертный плейбук."""
+        need = (args.get("need") or "").strip()
+        if not need:
+            return "Опиши потребность словами (например «3D-лендинг с анимациями»)."
+        skill = skills_module.match(need, role)
+        if skill:
+            await _publish_and_log({"type": "speech", "agent_id": agent_id,
+                                    "text": f"🧩 Беру скилл «{skill.title}»"})
+            await publish({"type": "skill_used", "agent_id": agent_id,
+                           "skill": skill.id, "text": f"🧩 Скилл «{skill.title}»"})
+            if skill.handler:
+                return await skill.handler({"need": need})
+            return skill.playbook or f"Скилл «{skill.title}»: {skill.description}"
+        cands = skills_module.suggestions(need, role, top=3)
+        if not cands:
+            avail = skills_module.catalog_for(role) or "пока нет подходящих"
+            return (f"Под потребность «{need}» готового скилла нет — делай напрямую "
+                    f"своими инструментами. Доступные скиллы: {avail}.")
+        lines = "\n".join(f"- {s.title}: {s.description}" for s in cands)
+        return f"Уточни — подходят несколько скиллов:\n{lines}"
+
     async def _report_connection_error(platform: str, error: str) -> None:
         """Публикует событие ошибки подключения чтобы пользователь видел в интерфейсе."""
         await publish({"type": "connection_error", "agent_id": agent_id,
@@ -955,6 +948,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                          _RAISE_EVENT_TOOL, _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL,
                          _READ_OFFICE_CHAT_TOOL,
                          _LIST_INTEGRATIONS_TOOL, _USE_CAPABILITY_TOOL, _USE_INTEGRATION_TOOL,
+                         _USE_SKILL_TOOL,
                          _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
                          _EXECUTE_CODE_TOOL, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
             tool_handlers={
@@ -967,6 +961,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "get_connection": _handle_get_connection,
                 "list_integrations": _handle_list_integrations,
                 "use_capability": _handle_use_capability,
+                "use_skill": _handle_use_skill,
                 "use_integration": _handle_use_integration,
                 "write_file": _handle_write_file,
                 "read_file": _handle_read_file,
@@ -979,13 +974,9 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         )
 
         state.save_deliverable(agent_id, role, task, result)
-        # Уведомление в личный чат агента — БЕЗ обрезки (агенты пишут коротко по правилу
-        # в преамбле; код/артефакты идут в файлы через инструменты, а не в текст).
-        note = (result or "").strip()
-        if note:
-            threads_module.post(agent_id, "agent", note, kind="msg")
-            await publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
-                           "kind": "msg", "text": note})
+        # Результат задачи НЕ дублируем в личный чат: артефакты лежат в файлах,
+        # сводка — во вкладке «Итоги», ход работы — в журнале. Личный чат остаётся
+        # местом для диалога и блокирующих вопросов агента, а не свалкой результатов.
         await publish({"type": "task_done", "agent_id": agent_id, "summary": result[:300]})
         return result
 

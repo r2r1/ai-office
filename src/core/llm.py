@@ -104,6 +104,30 @@ def _client() -> AsyncOpenAI:
     return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
 
+def _is_model_unavailable(err: Exception) -> bool:
+    """503/недоступная модель у провайдера (нет канала, модель не найдена)."""
+    s = str(err).lower()
+    return ("model_not_found" in s or "no available channel" in s
+            or "does not exist" in s or "no such model" in s)
+
+
+def _fallback_model(failed: str) -> str:
+    """
+    Безопасная замена недоступной модели: базовая модель офиса, иначе модель из .env,
+    иначе почти бесплатная glm. Никогда не возвращаем ту же модель, что упала.
+    """
+    try:
+        from src.office import models as _models
+        d = _models.get_default()
+        if d and d != failed:
+            return d
+    except Exception:
+        pass
+    if DEFAULT_MODEL and DEFAULT_MODEL != failed:
+        return DEFAULT_MODEL
+    return "glm-4.5-flash" if failed != "glm-4.5-flash" else ""
+
+
 async def run_agent(
     system: str,
     user: str,
@@ -139,6 +163,7 @@ async def run_agent(
     system = system + "\n\nПиши только на русском языке. Будь краток и по делу, без воды."
 
     searches_done = 0
+    fellback = False  # фолбэк на доступную модель делаем максимум один раз за запуск
     seen_queries: set[str] = set()  # анти-цикл: не искать одно и то же дважды
     in_tokens = 0
     out_tokens = 0
@@ -156,12 +181,25 @@ async def run_agent(
         # в логах — 197k входных токенов на агента). Последние KEEP держим полными.
         if _it > 0:
             _mask_old_observations(messages, keep_last=3)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools or None,
-            max_tokens=max_tokens,
-        )
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools or None,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            # Недоступная модель (503/нет канала) НЕ должна зацикливать офис: один раз
+            # переключаемся на базовую доступную модель и повторяем этот же шаг.
+            fb = _fallback_model(model) if (not fellback and _is_model_unavailable(e)) else ""
+            if not fb:
+                raise
+            fellback = True
+            if publish:
+                await publish({"type": "system",
+                               "text": f"⚠️ Модель «{model}» недоступна — переключаюсь на «{fb}»"})
+            model = fb
+            continue  # повтор той же итерации с рабочей моделью
         usage = getattr(resp, "usage", None)
         if usage:
             pin = getattr(usage, "prompt_tokens", 0) or 0

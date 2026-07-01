@@ -14,7 +14,7 @@ _FILE = "costs.json"
 # суммы, списанной с баланса apinet. При смене дефолтной модели сверяйся с /api/pricing.
 PRICES: dict[str, tuple[float, float]] = {
     "glm-4.5-flash": (0.01, 0.01), "glm-4-flash": (0.01, 0.01),
-    "gpt-5-nano": (0.05, 0.40), "gpt-5.3-codex": (0.08, 0.64),
+    "gpt-5-nano": (0.05, 0.40), "gpt-5-codex": (1.25, 10.0),
     "gpt-4.1-nano": (0.10, 0.40), "gpt-4o-mini": (0.15, 0.60),
     "qwen3-vl-flash": (0.15, 1.50), "gemini-2.5-flash": (0.30, 2.50),
     "kimi-k2": (0.60, 1.50), "qwen3-vl-plus": (1.0, 10.0),

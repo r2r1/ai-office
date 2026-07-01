@@ -36,8 +36,9 @@ export default function App() {
   const [isMobile, setIsMobile]     = useState(
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   )
-  const { state } = useOffice()
+  const { state, unread } = useOffice()
   const rowRef = useRef<HTMLDivElement>(null)
+  const navBadges = { chats: unread.total }
 
   // Morning Digest
   const [digest, setDigest] = useState<any>(null)
@@ -256,7 +257,7 @@ export default function App() {
         <div ref={rowRef} style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, gap, position: "relative" }}>
 
           {!isMobile && <TabBridge active={view} enabled={!isMobile} containerRef={rowRef} />}
-          {!isMobile && <NavRail active={view} onChange={changeView} />}
+          {!isMobile && <NavRail active={view} onChange={changeView} badges={navBadges} />}
 
           {/* Основная область: glass-островок */}
           <div id="main-panel" className="glass" style={{ flex: 1, minWidth: 0, position: "relative", 
@@ -286,7 +287,7 @@ export default function App() {
 
           {isMobile && (
             <div style={{ display: "flex", justifyContent: "center", paddingBottom: 4 }}>
-              <NavRail active={view} onChange={changeView} orientation="horizontal" />
+              <NavRail active={view} onChange={changeView} orientation="horizontal" badges={navBadges} />
             </div>
           )}
         </div>
