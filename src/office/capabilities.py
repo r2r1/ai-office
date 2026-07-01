@@ -58,23 +58,6 @@ _MATRIX: dict[str, dict[str, str]] = {
     },
 }
 
-# Роль → какой capability ей нужен (для роутинга в models.for_agent).
-_ROLE_CAPABILITY: dict[str, str] = {
-    "developer": "coding",
-    "integrator": "coding",
-    "designer": "coding",       # верстает HTML/CSS — это код
-    "researcher": "search",
-    "analyst": "search",
-    "strategist": "reasoning",
-    "architect": "reasoning",
-    "orchestrator": "reasoning",
-    "cto": "reasoning", "cmo": "reasoning", "sales_lead": "reasoning",
-    "marketer": "text",
-    "salesman": "text",
-    "hr": "text",
-}
-
-
 def _load() -> dict:
     return ctx.read_json(_FILE, None) or {}
 
@@ -112,7 +95,10 @@ def set_expert(capability: str, model: str) -> None:
 
 
 def role_capability(role: str) -> str:
-    return _ROLE_CAPABILITY.get(role, "reasoning")
+    """Тип задачи роли — единственный источник данных: roles.capability_of
+    (было независимым hardcoded-словарём здесь, дублировавшим roles.py)."""
+    from src.office import roles as roles_module
+    return roles_module.capability_of(role)
 
 
 def model_for(capability: str) -> str:

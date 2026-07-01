@@ -17,21 +17,21 @@ from src.office import registry, state
 
 _FILE = "departments.json"
 
-# Каталог отделов (статический). Лидер открывается вместе с отделом.
+# Каталог отделов (статический метаданные). Лидер открывается вместе с отделом.
+# Состав отдела (кто-рабочие роли) НЕ хранится здесь списком — вычисляется из
+# roles.ROLE_META (там у каждой роли уже есть "department"), иначе принадлежность
+# роли к отделу задавалась бы в двух местах и могла разойтись (см. member_roles()).
 DEPARTMENTS = {
     "tech": {
         "name": "Технический отдел", "lead_role": "cto", "lead_title": "CTO",
-        "members": ["developer", "integrator", "designer"],
         "hint": "продукт, код, боты, сайты, дизайн, автоматизации, технические интеграции",
     },
     "marketing": {
         "name": "Отдел маркетинга", "lead_role": "cmo", "lead_title": "CMO",
-        "members": ["marketer"],
         "hint": "контент, соцсети, реклама, бренд, привлечение аудитории",
     },
     "sales": {
         "name": "Отдел продаж", "lead_role": "sales_lead", "lead_title": "Head of Sales",
-        "members": ["salesman"],
         "hint": "поиск клиентов, переговоры, конверсия лидов, CRM",
     },
 }
@@ -98,11 +98,10 @@ def state_of(dept_id: str) -> dict:
 
 
 def department_of_role(role: str) -> str:
-    """К какому отделу относится рабочая роль (или '' для штаба CEO)."""
-    for did, info in DEPARTMENTS.items():
-        if role in info["members"] or role == info["lead_role"]:
-            return did
-    return ""
+    """К какому отделу относится роль (рабочая или лидер), или '' для штаба CEO.
+    Источник данных один — roles.department_of (было продублировано здесь)."""
+    from src.office import roles as roles_module
+    return roles_module.department_of(role)
 
 
 def lead_role(dept_id: str) -> str:
@@ -114,7 +113,10 @@ def lead_title(dept_id: str) -> str:
 
 
 def member_roles(dept_id: str) -> list[str]:
-    return list(DEPARTMENTS.get(dept_id, {}).get("members", []))
+    """Рабочие роли отдела (БЕЗ лидера) — вычисляется из roles.ROLE_META."""
+    from src.office import roles as roles_module
+    lead = lead_role(dept_id)
+    return [r for r in roles_module.roles_in_department(dept_id) if r != lead]
 
 
 def lead_id(dept_id: str) -> str:
@@ -131,10 +133,9 @@ def department_digest(dept_id: str) -> str:
     Дайджест всего, что сделали члены отдела — «видимость лидера».
     Строки вида: «- developer_1 [🟢свободен/🔴думает]: <последний результат>».
     """
-    info = DEPARTMENTS.get(dept_id)
-    if not info:
+    if dept_id not in DEPARTMENTS:
         return ""
-    members = set(info["members"])
+    members = set(member_roles(dept_id))
     lines = []
     for a in registry.all_agents():
         if a.role not in members:

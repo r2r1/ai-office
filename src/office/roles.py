@@ -20,7 +20,7 @@ _FILE = "roles.json"
 # его источник один: agent_factory.ROLE_PROMPTS (берётся лениво, без дублирования).
 ROLE_META: dict[str, dict] = {
     "cto": {
-        "department": "tech", "title": "CTO",
+        "department": "tech", "title": "CTO", "capability": "reasoning",
         "mission": "Вести технический отдел к продукту, который решает задачу клиента.",
         "responsibilities": ["продукт", "код", "боты", "сайты", "технические интеграции"],
         "tools": ["delegate_task", "hire", "ask_colleague"],
@@ -28,7 +28,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["работающий продукт", "закрытые задачи отдела"],
     },
     "cmo": {
-        "department": "marketing", "title": "CMO",
+        "department": "marketing", "title": "CMO", "capability": "reasoning",
         "mission": "Растить узнаваемость и привлечение аудитории.",
         "responsibilities": ["контент", "соцсети", "реклама", "бренд"],
         "tools": ["delegate_task", "hire", "ask_colleague"],
@@ -36,7 +36,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["охват", "лиды"],
     },
     "sales_lead": {
-        "department": "sales", "title": "Head of Sales",
+        "department": "sales", "title": "Head of Sales", "capability": "reasoning",
         "mission": "Превращать интерес в платящих клиентов.",
         "responsibilities": ["поиск клиентов", "переговоры", "конверсия лидов", "CRM"],
         "tools": ["delegate_task", "hire", "ask_colleague"],
@@ -44,7 +44,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["сделки", "конверсия"],
     },
     "developer": {
-        "department": "tech", "title": "Разработчик",
+        "department": "tech", "title": "Разработчик", "capability": "coding",
         "mission": "Писать и запускать реальный рабочий код.",
         "responsibilities": ["боты", "скрипты/API", "сайты"],
         "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file"],
@@ -52,7 +52,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["код компилируется и работает"],
     },
     "designer": {
-        "department": "tech", "title": "Дизайнер",
+        "department": "tech", "title": "Дизайнер", "capability": "coding",
         "mission": "Создавать визуально премиальные многостраничные сайты.",
         "responsibilities": ["UI/UX", "вёрстка site/", "анимации"],
         "tools": ["write_file", "list_files"],
@@ -60,7 +60,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["красивый рабочий многофайловый сайт"],
     },
     "integrator": {
-        "department": "tech", "title": "Интегратор",
+        "department": "tech", "title": "Интегратор", "capability": "coding",
         "mission": "Подключать офис к внешним сервисам и запускать ботов.",
         "responsibilities": ["интеграции", "запуск ботов", "проверка подключений"],
         "tools": ["list_integrations", "use_integration", "configure_bot", "ask_user"],
@@ -68,7 +68,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["работающие подключения и боты"],
     },
     "marketer": {
-        "department": "marketing", "title": "Маркетолог",
+        "department": "marketing", "title": "Маркетолог", "capability": "text",
         "mission": "Создавать оффер, контент и тексты для сайта и бота.",
         "responsibilities": ["оффер/УТП", "контент сайта", "тексты бота"],
         "tools": ["write_file", "request_research"],
@@ -76,7 +76,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["готовые тексты, которыми пользуются коллеги"],
     },
     "analyst": {
-        "department": "marketing", "title": "Аналитик",
+        "department": "marketing", "title": "Аналитик", "capability": "search",
         "mission": "Собирать данные и давать выводы с цифрами.",
         "responsibilities": ["анализ рынка/конкурентов/клиентов"],
         "tools": ["web_search", "write_file"],
@@ -84,7 +84,7 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["выводы с цифрами и рекомендациями"],
     },
     "salesman": {
-        "department": "sales", "title": "Продажник",
+        "department": "sales", "title": "Продажник", "capability": "text",
         "mission": "Находить клиентов и писать цепляющие холодные сообщения.",
         "responsibilities": ["поиск лидов", "оффер", "холодные сообщения"],
         "tools": ["web_search"],
@@ -97,12 +97,41 @@ ROLE_META: dict[str, dict] = {
 # Штаб-роли CEO — не отдел, но реальные, часто адресуемые роли (см. CLAUDE.md §3.2).
 SERVICE_ROLES = ["researcher", "strategist", "architect", "hr"]
 
+# capability для штаб-ролей — не входят в ROLE_META (нет отдела), но должны
+# роутиться на подходящую модель через capabilities.role_capability.
+_SERVICE_CAPABILITY: dict[str, str] = {
+    "researcher": "search", "strategist": "reasoning",
+    "architect": "reasoning", "hr": "text",
+    "orchestrator": "reasoning",
+}
+
 
 def known_roles() -> set[str]:
     """Все существующие в офисе роли: отдельческие (ROLE_META) + штаб CEO.
     Источник правды для валидации delegate_task/send_message — чтобы агент не
     мог поставить задачу или написать сообщение несуществующей роли/коллеге."""
     return set(ROLE_META.keys()) | set(SERVICE_ROLES)
+
+
+def department_of(role: str) -> str:
+    """К какому отделу относится роль ('' для штаба CEO/неизвестной роли).
+    Единственный источник правды роль→отдел (было продублировано в org.py и
+    plan.py — теперь оба читают отсюда)."""
+    return ROLE_META.get(role, {}).get("department", "")
+
+
+def roles_in_department(dept_id: str) -> list[str]:
+    """Роли, относящиеся к отделу — вычисляется из ROLE_META, а не хранится
+    отдельным ручным списком (было org.DEPARTMENTS[dept]['members'])."""
+    return [r for r, m in ROLE_META.items() if m.get("department") == dept_id]
+
+
+def capability_of(role: str) -> str:
+    """Тип задачи роли для capability-роутинга моделей (было отдельным
+    hardcoded-словарём в capabilities.py — теперь одно поле здесь)."""
+    if role in ROLE_META:
+        return ROLE_META[role].get("capability", "reasoning")
+    return _SERVICE_CAPABILITY.get(role, "reasoning")
 
 
 def _overrides() -> dict:

@@ -16,12 +16,6 @@ from src.office import org
 
 _FILE = "plan.json"
 
-# Роль → отдел (для маршрутизации задач лидерам)
-_ROLE_DEPT = {
-    "developer": "tech", "designer": "tech", "integrator": "tech", "architect": "tech",
-    "marketer": "marketing", "salesman": "sales",
-}
-
 
 def _data() -> dict:
     return ctx.read_json(_FILE, {"tasks": [], "generated": False})
@@ -45,7 +39,7 @@ def set_tasks(tasks: list[dict]) -> None:
             "id": tid,
             "title": (t.get("title") or "").strip()[:200],
             "role": role,
-            "department": _ROLE_DEPT.get(role, ""),
+            "department": org.department_of_role(role),
             "deps": [d for d in (t.get("deps") or []) if d],
             "done_criterion": (t.get("done_criterion") or "").strip()[:200],
             "status": "pending",
@@ -66,7 +60,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
     tid = f"t{len(tasks) + 1}_{int(time.time()) % 10000}"
     task = {
         "id": tid, "title": (title or "").strip()[:200], "role": (role or "").strip(),
-        "department": _ROLE_DEPT.get((role or "").strip(), ""),
+        "department": org.department_of_role((role or "").strip()),
         "deps": [x for x in (deps or []) if x],
         "done_criterion": (done_criterion or "").strip()[:200],
         "status": "pending", "assignee": "", "requested_by": requested_by,
