@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useOffice } from "../../data/OfficeProvider"
+import { useOfficeSelector, useUnread, markThreadSeen } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, STATUS_COLOR } from "./ui"
 import { useThrottled } from "../hooks"
@@ -34,8 +34,13 @@ const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 interface ChatsViewProps { initialAgent?: string }
 
 export function ChatsView({ initialAgent }: ChatsViewProps) {
-  const { state, unread, markThreadSeen } = useOffice()
-  const agents = Object.values(state.agents)
+  // Селекторы вместо useOffice() (весь state) — раньше чат перерисовывался на
+  // события, никак не связанные с агентами/тредами (прогресс, стоимость и т.д.).
+  const agentsMap = useOfficeSelector(s => s.agents)
+  const threads = useOfficeSelector(s => s.threads)
+  const feedLength = useOfficeSelector(s => s.feed.length)
+  const unread = useUnread()
+  const agents = Object.values(agentsMap)
   const [active, setActive] = useState<string>(initialAgent || "office")
   const [messages, setMessages] = useState<any[]>([])
   const [input, setInput] = useState("")
@@ -61,7 +66,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
       markThreadSeen(active, lastTs)
     }
   }
-  const tick = useThrottled(state.feed.length, 2000)
+  const tick = useThrottled(feedLength, 2000)
   useEffect(() => { setPending([]); load() }, [active]) // eslint-disable-line — смена собеседника
   useEffect(() => { load() }, [tick])                   // eslint-disable-line — живой апдейт
   useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) },
@@ -84,8 +89,8 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
 
   const allMessages = [...messages, ...pending]
 
-  const activeAgent = active !== "office" ? state.agents[active] : null
-  const activeUnanswered = activeAgent ? (state.threads[active]?.unanswered || 0) : 0
+  const activeAgent = active !== "office" ? agentsMap[active] : null
+  const activeUnanswered = activeAgent ? (threads[active]?.unanswered || 0) : 0
   const headerName = active === "office" ? "Общий чат" : (activeAgent?.name ?? "Агент")
   // Подзаголовок — стабильный (роль / ожидание ответа). НИКАКОЙ внутренней активности
   // агента: «кто что делает» живёт в журнале и на сцене офиса, а не в личной переписке.
@@ -99,15 +104,15 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
       const ua = unread.byAgent[a.id] ? 1 : 0
       const ub = unread.byAgent[b.id] ? 1 : 0
       if (ua !== ub) return ub - ua
-      const ta = state.threads[a.id]?.last_ts || 0
-      const tb = state.threads[b.id]?.last_ts || 0
+      const ta = threads[a.id]?.last_ts || 0
+      const tb = threads[b.id]?.last_ts || 0
       return tb - ta
     })
-  }, [agents, unread.byAgent, state.threads])
+  }, [agents, unread.byAgent, threads])
 
   // Превью последнего сообщения треда (а не служебной активности агента).
   function rowSub(a: any): { text: string; accent: boolean } {
-    const t = state.threads[a.id]
+    const t = threads[a.id]
     if (t?.unanswered) return { text: "Ждёт вашего ответа", accent: true }
     if (t?.last_text) return { text: (t.last_from === "user" ? "Вы: " : "") + t.last_text, accent: false }
     return { text: roleName(a.role), accent: false }

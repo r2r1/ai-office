@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react"
-import { useOffice } from "../../data/OfficeProvider"
+import { useOfficeSelector } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
@@ -27,11 +27,14 @@ const STATUS_BG: Record<string, string> = {
 }
 
 export function TeamView({ onOpenChat }: TeamViewProps) {
-  const { state } = useOffice()
-  const agents = Object.values(state.agents)
+  // Селектор вместо useOffice() (весь state) — карточки перерисовывались на
+  // КАЖДОЕ SSE-событие (в т.ч. не относящееся к команде — прогресс, стоимость),
+  // из-за чего аватары агентов на каждый тик заново запускали пульс-анимацию.
+  const agentsMap = useOfficeSelector(s => s.agents)
+  const agents = Object.values(agentsMap)
   const active = agents.filter(a => a.status === "active" || a.status === "thinking").length
   const [detailId, setDetailId] = useState<string | null>(null)
-  const detailEmoji = detailId ? state.agents[detailId]?.emoji : undefined
+  const detailEmoji = detailId ? agentsMap[detailId]?.emoji : undefined
 
   // collapsing header (через MotionValue — без ре-рендеров на скролл)
   const scrollY     = useMotionValue(0)
@@ -100,6 +103,31 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
   )
 }
 
+// ── Пульсирующий аватар (memo — не перерисовывается при неизменном статусе) ──
+const PulsingAvatar = memo(function PulsingAvatar({ emoji, status }: { emoji: string; status: string }) {
+  const isActive = status === "active"
+  const isThinking = status === "thinking"
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <motion.div
+        animate={(isActive || isThinking) ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+        transition={{ repeat: Infinity, duration: isActive ? 2.4 : 3.5, ease: "easeInOut" }}
+        style={{
+          width: 54, height: 54, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 26, border: `1.5px solid ${isActive ? "rgba(160,224,171,0.4)" : isThinking ? "rgba(255,172,46,0.35)" : "var(--hairline-strong)"}`,
+          background: isActive ? "rgba(160,224,171,0.08)" : isThinking ? "rgba(255,172,46,0.08)" : "var(--surface-strong)",
+        }}>
+        {emoji}
+      </motion.div>
+      {/* Статус-точка */}
+      <span style={{
+        position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%",
+        background: STATUS_COLOR[status] || "var(--whisper)", border: "2px solid var(--bg)",
+      }} />
+    </div>
+  )
+})
+
 // ── Карточка агента ──────────────────────────────────────────────────────────
 function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDetail }: { agent: Agent; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[]; onOpenDetail?: () => void }) {
   const [model, setModel]       = useState(initialModel)
@@ -139,24 +167,10 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
       {/* Верхняя строка: аватар + имя + статус (клик → подробности) */}
       <div onClick={onOpenDetail} title="Подробнее об агенте"
         style={{ display: "flex", alignItems: "flex-start", gap: 14, cursor: onOpenDetail ? "pointer" : "default" }}>
-        {/* Аватар с анимацией */}
-        <div style={{ position: "relative", flexShrink: 0 }}>
-          <motion.div
-            animate={(isActive || isThinking) ? { scale: [1, 1.08, 1] } : { scale: 1 }}
-            transition={{ repeat: Infinity, duration: isActive ? 2.4 : 3.5, ease: "easeInOut" }}
-            style={{
-              width: 54, height: 54, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 26, border: `1.5px solid ${isActive ? "rgba(160,224,171,0.4)" : isThinking ? "rgba(255,172,46,0.35)" : "var(--hairline-strong)"}`,
-              background: isActive ? "rgba(160,224,171,0.08)" : isThinking ? "rgba(255,172,46,0.08)" : "var(--surface-strong)",
-            }}>
-            {agent.emoji}
-          </motion.div>
-          {/* Статус-точка */}
-          <span style={{
-            position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%",
-            background: STATUS_COLOR[agent.status] || "var(--whisper)", border: "2px solid var(--bg)",
-          }} />
-        </div>
+        {/* Аватар с анимацией — вынесен в memo(), чтобы обновление lastMessage
+            (родитель AgentCard всё равно перерисовывается) не перезапускало
+            пульс-анимацию: React.memo пропускает ре-рендер, если status не менялся. */}
+        <PulsingAvatar emoji={agent.emoji} status={agent.status} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{agent.name}</div>

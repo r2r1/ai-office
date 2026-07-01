@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { useOffice } from "../../data/OfficeProvider"
+import { useOfficeSelector } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { useThrottled } from "../hooks"
 import { roleName } from "../../data/roles"
@@ -33,7 +33,9 @@ interface RightPanelProps {
 
 export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
   const [tab, setTab] = useState<"feed" | "chat">("chat")
-  const { state } = useOffice()
+  // Раньше useOffice() (весь state) — панель всегда смонтирована рядом с офисом
+  // и перерисовывалась на КАЖДОЕ SSE-событие только ради счётчика длины ленты.
+  const feedLength = useOfficeSelector(s => s.feed.length)
 
   return (
     <motion.div
@@ -91,13 +93,13 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
                       fontFamily: "var(--font-sans)", transition: "color 0.15s",
                     }}>
                     {label}
-                    {t === "feed" && state.feed.length > 0 && (
+                    {t === "feed" && feedLength > 0 && (
                       <span style={{
                         marginLeft: 6, fontSize: 9, padding: "1px 5px", borderRadius: 99,
                         background: isActive ? "rgba(255,172,46,0.15)" : "var(--hairline-soft)",
                         color: isActive ? "var(--mercury-a)" : "var(--muted)",
                         border: `1px solid ${isActive ? "rgba(255,172,46,0.3)" : "var(--hairline)"}`,
-                      }}>{state.feed.length}</span>
+                      }}>{feedLength}</span>
                     )}
                   </button>
                 )
@@ -115,14 +117,14 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
 
 // ── Чат офиса ────────────────────────────────────────────────────────────────
 function ChatTab() {
-  const { state } = useOffice()
+  const feedLength = useOfficeSelector(s => s.feed.length)
   const [messages, setMessages] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const tick = useThrottled(state.feed.length, 2000)
+  const tick = useThrottled(feedLength, 2000)
   async function load() {
     const server = (await api.chatGet()).messages || []
     setMessages(server)
@@ -214,11 +216,22 @@ function ChatTab() {
 }
 
 // ── Журнал событий ───────────────────────────────────────────────────────────
+const FEED_PAGE = 60
+
 function FeedTab() {
-  const { state } = useOffice()
-  const feed = [...state.feed].reverse()
+  // Селектор вместо всего state — журнал не перерисовывается на события,
+  // не трогающие ленту (например смену статуса агента без speech/thinking).
+  const fullFeed = useOfficeSelector(s => s.feed)
+  // Простое окно рендера вместо виртуализации сторонней библиотекой (аудит:
+  // 400 элементов без окна — лишняя нагрузка на DOM/скролл). Лента рендерится
+  // старые→новые (автоскролл вниз к новым), поэтому окно — это ХВОСТ массива
+  // (последние visible записей), а «показать ещё» раскрывает более старые.
+  const [visible, setVisible] = useState(FEED_PAGE)
+  const feedAll = [...fullFeed].reverse()
+  const feed = feedAll.slice(Math.max(0, feedAll.length - visible))
   const bottomRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }) }, [state.feed.length])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }) }, [fullFeed.length])
+  useEffect(() => { setVisible(FEED_PAGE) }, [])  // сброс окна при повторном открытии вкладки
 
   // Блок 3: подгружаем последние решения CEO для UI «Почему?»
   const [decisions, setDecisions] = useState<any[]>([])
@@ -240,6 +253,14 @@ function FeedTab() {
         <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", paddingTop: 40 }}>
           События появятся после старта
         </div>
+      )}
+      {visible < feedAll.length && (
+        <button onClick={() => setVisible(v => v + FEED_PAGE)}
+          style={{ display: "block", margin: "4px auto 8px", padding: "6px 16px",
+            borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
+            background: "transparent", color: "var(--muted)", fontSize: 11, cursor: "pointer" }}>
+          Показать более старые ({feedAll.length - visible})
+        </button>
       )}
       {feed.map(f => (
         <div key={f.id} style={{

@@ -12,7 +12,7 @@ import { ChatsView } from "./views/ChatsView"
 import { TeamView } from "./views/TeamView"
 import { ResultsView } from "./views/ResultsView"
 import { AccountView } from "./views/AccountView"
-import { useOffice } from "../data/OfficeProvider"
+import { useOfficeSelector, useUnread } from "../data/OfficeProvider"
 import { OnboardingFlow } from "./onboarding/OnboardingFlow"
 import { api } from "../data/api"
 import type { Section, Theme } from "./types"
@@ -36,7 +36,16 @@ export default function App() {
   const [isMobile, setIsMobile]     = useState(
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   )
-  const { state, unread } = useOffice()
+  // Только нужные срезы — App.tsx всегда смонтирован, и раньше useOffice() (весь
+  // state) заставлял перерисовываться ВСЁ дерево на каждое SSE-событие (аудит
+  // фронтенда: подтормаживание ввода при активном офисе). Теперь ре-рендер только
+  // когда конкретно эти поля реально меняются.
+  const progressPercent = useOfficeSelector(s => s.progress.percent)
+  const progressNote = useOfficeSelector(s => s.progress.note)
+  const cost = useOfficeSelector(s => s.cost)
+  const connected = useOfficeSelector(s => s.connected)
+  const ready = useOfficeSelector(s => s.ready)
+  const unread = useUnread()
   const rowRef = useRef<HTMLDivElement>(null)
   const navBadges = { chats: unread.total }
 
@@ -82,15 +91,6 @@ export default function App() {
     })
   }, [])
 
-  // Статус офиса (пауза)
-  useEffect(() => {
-    api.officeStatus().then(s => { if (s) setOfficePaused(s.paused) })
-    const t = setInterval(() => {
-      api.officeStatus().then(s => { if (s) setOfficePaused(s.paused) })
-    }, 15000)
-    return () => clearInterval(t)
-  }, [])
-
   async function handleToggleOffice() {
     if (officePaused) {
       await api.officeResume()
@@ -101,9 +101,12 @@ export default function App() {
     }
   }
 
-  // Загружаем понимание компании + память офиса
+  // Единый поллинг вместо двух независимых таймеров (аудит фронтенда: были
+  // отдельные интервалы на паузу-офиса и на understanding/knowledge/autonomy/
+  // health/trust/capabilities — теперь один цикл, один набор запросов на тик).
   useEffect(() => {
     const load = () => {
+      api.officeStatus().then(s => { if (s) setOfficePaused(s.paused) })
       api.understanding().then(u => { if (u) setUnderstanding(u) })
       api.knowledge().then(m => { if (m) setMemory(m) })
       api.get("/api/autonomy").then(a => { if (a?.level) setAutonomyLevel(a.level) }).catch(() => {})
@@ -115,7 +118,7 @@ export default function App() {
       }).catch(() => {})
     }
     load()
-    const t = setInterval(load, 30000)
+    const t = setInterval(load, 15000)
     return () => clearInterval(t)
   }, [])
 
@@ -123,7 +126,7 @@ export default function App() {
   const gap = isMobile ? 8 : 12
 
   // Онбординг: офис ещё не получил бриф → ведём клиента через CEO-интервью.
-  if (state.ready === false && !onboarded) {
+  if (ready === false && !onboarded) {
     return <OnboardingFlow onDone={() => { setOnboarded(true); setView("office") }} />
   }
 
@@ -148,8 +151,8 @@ export default function App() {
         position: "relative", zIndex: 2, display: "flex", flexDirection: "column",
         width: "100%", height: "100%", padding: isMobile ? 8 : 14, gap,
       }}>
-        <TopBar progress={state.progress.percent} progressNote={state.progress.note}
-          cost={state.cost} connected={state.connected}
+        <TopBar progress={progressPercent} progressNote={progressNote}
+          cost={cost} connected={connected}
           theme={theme} onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
           isMobile={isMobile}
           understanding={understanding}
