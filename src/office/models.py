@@ -136,6 +136,45 @@ def load() -> None:
     pass
 
 
+def clear_broken_model(agent_id: str, role: str) -> str:
+    """
+    Самолечение: провайдер вернул model_not_found/no available channel для модели,
+    которую сейчас резолвит for_agent(agent_id). Снимает ЭТУ модель со ВСЕХ слоёв,
+    где она назначена (per_agent, per_role, capability эксперт-режим) — не только
+    с первого найденного, иначе при двойном назначении (например и per_agent, и
+    Company→Интеллект→Эксперт указывают на один и тот же битый id) следующий вызов
+    падал бы той же ошибкой ещё раз. Возвращает снятый id или "" если точечных
+    назначений нет вовсе (тогда битый — сам дефолт офиса; вызывающий код должен
+    сообщить об этом отдельно). Вызывается из loop.py после повторной ошибки.
+    """
+    broken = for_agent(agent_id)
+    if not broken:
+        return ""
+    cfg = _cfg()
+    changed = False
+    pa = cfg.setdefault("per_agent", {})
+    if pa.get(agent_id) == broken:
+        pa.pop(agent_id)
+        changed = True
+    role_key = _role_of(agent_id) or role
+    pr = cfg.setdefault("per_role", {})
+    if pr.get(role_key) == broken:
+        pr.pop(role_key)
+        changed = True
+    if changed:
+        ctx.write_json(_FILE, cfg)
+    try:
+        from src.office import capabilities
+        if capabilities.get_mode() == "expert":
+            cap = capabilities.role_capability(role_key)
+            if capabilities.expert_overrides().get(cap) == broken:
+                capabilities.set_expert(cap, "")
+                changed = True
+    except Exception:
+        pass
+    return broken if changed else ""
+
+
 def reset() -> None:
     """Сбрасывает индивидуальные модели, глобальную оставляет."""
     cfg = _cfg()

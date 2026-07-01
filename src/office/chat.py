@@ -114,7 +114,14 @@ def _build_system(agent_id: str, rec) -> str:
         if parts:
             system += "\n\n=== БРИФ КЛИЕНТА ===\n" + "\n".join(parts)
 
-    system += "\n\nТы можешь общаться с коллегами: send_message — отправить сообщение агенту, read_messages — прочитать входящие."
+    real_agents = ", ".join(a.agent_id for a in registry.all_agents()) or "пока никто не нанят"
+    system += (
+        "\n\nТы можешь общаться с коллегами: send_message — отправить сообщение агенту, "
+        "read_messages — прочитать входящие. У send_message ЕСТЬ ОГРАНИЧЕНИЕ: писать можно "
+        f"ТОЛЬКО реально нанятым коллегам. Сейчас в офисе реально работают: {real_agents}. "
+        "Не придумывай других сотрудников (например «devops», «инженер моделей») — их не "
+        "существует, и сообщение им никуда не уйдёт."
+    )
     system += (
         "\n\n=== КАК ОТВЕЧАТЬ В ЧАТЕ ===\n"
         "Пиши КОРОТКО и по делу — 2–5 предложений, живым языком. Это чат, а не отчёт. "
@@ -142,8 +149,11 @@ async def ask(
                        "text": "печатает ответ..."})
 
     async def _handle_send_message(args: dict) -> str:
-        to_id = args.get("to_agent_id", "")
+        to_id = (args.get("to_agent_id") or "").strip()
         msg = args.get("message", "")
+        if not registry.get(to_id):
+            real = ", ".join(a.agent_id for a in registry.all_agents()) or "пока никто не нанят"
+            return f"Агента «{to_id}» не существует — сообщение НЕ отправлено. Реальные коллеги: {real}."
         agent_inbox.send(to_id, agent_id, msg)
         if publish:
             await publish({"type": "speech", "agent_id": agent_id,

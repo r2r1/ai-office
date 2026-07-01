@@ -696,12 +696,17 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
 
     async def _handle_delegate_task(args: dict) -> str:
         from src.office import plan as plan_module
+        from src.office import roles as roles_module
         col_role = (args.get("role") or "").strip()
         title = (args.get("title") or "").strip()
         if not col_role or not title:
             return "Укажи роль исполнителя и что нужно сделать."
         if col_role == role:
             return "Это твоя зона — сделай сам, не делегируй себе."
+        if col_role not in roles_module.known_roles():
+            valid = ", ".join(sorted(roles_module.known_roles()))
+            return (f"Роли «{col_role}» не существует в офисе — задача НЕ поставлена. "
+                    f"Реальные роли: {valid}.")
         t = plan_module.add_task(title, col_role, args.get("done_criterion", ""),
                                  requested_by=agent_id)
         await publish({"type": "speech", "agent_id": agent_id,
@@ -713,8 +718,11 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 f"его лидер назначит исполнителя. Можешь продолжать своё.")
 
     async def _handle_send_message(args: dict) -> str:
-        to_agent_id = args.get("to_agent_id", "")
+        to_agent_id = (args.get("to_agent_id") or "").strip()
         message = args.get("message", "")
+        if not registry_module.get(to_agent_id):
+            real = ", ".join(a.agent_id for a in registry_module.all_agents()) or "пока никто не нанят"
+            return f"Агента «{to_agent_id}» не существует — сообщение НЕ отправлено. Реальные коллеги: {real}."
         agent_inbox.send(to_agent_id, agent_id, message)
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"→ {to_agent_id}: {message[:60]}"})

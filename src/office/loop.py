@@ -14,7 +14,7 @@ import asyncio
 import os
 import time
 
-from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge, trust, decisions, autonomy, initiatives, board, costs
+from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge, trust, decisions, autonomy, initiatives, board, costs, models as models_module
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
@@ -36,6 +36,7 @@ _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый 
 _office_tasks: dict[str, asyncio.Task] = {}
 _thinking_since: dict[str, float] = {}  # agent_id -> когда начал «думать» (watchdog)
 _agent_task: dict[str, str] = {}        # agent_id -> id задачи плана, которую он сейчас делает
+_model_fail_count: dict[str, int] = {}  # agent_id -> подряд ошибок "модель недоступна"
 _completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
 
 
@@ -727,6 +728,14 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                 await _assign(agent_id, rec.role, task, publish, department=dept_id, objective=objective)
 
 
+def _is_model_unavailable_error(err: str) -> bool:
+    """Модель/канал недоступен у провайдера (не транзиентная ошибка сети/таймаута) —
+    например ручное или expert-назначение указывает на несуществующий на шлюзе id.
+    Отличается от quota-ошибки: тут нужно сменить модель, а не остановить офис."""
+    low = err.lower()
+    return "model_not_found" in low or "no available channel" in low
+
+
 def _is_quota_error(err: str) -> bool:
     """Определяет ошибку нехватки баланса у LLM-провайдера."""
     low = err.lower()
@@ -761,6 +770,7 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                                                 objective, publish)
             registry.update_status(agent_id, "done")
             state.save_last_run(agent_id)
+            _model_fail_count.pop(agent_id, None)  # успех — счётчик сбитой модели сбрасываем
             _attribute_result(agent_id, role, result)
             # Память отдела: фиксируем, что отдел сделал — пригодится коллегам в след. циклах
             knowledge.note_result(department, role, result or "")
@@ -796,6 +806,28 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
                 control.pause(reason)
                 await publish({"type": "system", "text": reason})
+            elif _is_model_unavailable_error(err_str):
+                # Самолечение: назначенная модель недоступна у провайдера. Одной ошибки
+                # не трогаем (может быть временный глюк шлюза) — но повтор той же ошибки
+                # для того же агента означает, что это НЕ пройдёт само, и без вмешательства
+                # офис повторял бы один и тот же провальный вызов бесконечно (было в проде).
+                n = _model_fail_count.get(agent_id, 0) + 1
+                _model_fail_count[agent_id] = n
+                if n >= 2:
+                    cleared = models_module.clear_broken_model(agent_id, role)
+                    _model_fail_count.pop(agent_id, None)
+                    if cleared:
+                        await publish({"type": "system",
+                                       "text": f"⚙️ Модель «{cleared}» для {agent_id} недоступна у "
+                                               f"провайдера — сброшена на модель офиса по умолчанию, "
+                                               f"задача будет повторена."})
+                    else:
+                        await publish({"type": "system",
+                                       "text": f"⚠️ {agent_id} не может получить ответ модели — "
+                                               f"похоже, недоступна сама модель офиса по умолчанию. "
+                                               f"Проверьте «Компания → Интеллект»."})
+            else:
+                _model_fail_count.pop(agent_id, None)
         finally:
             _thinking_since.pop(agent_id, None)
             _agent_task.pop(agent_id, None)

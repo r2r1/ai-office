@@ -94,6 +94,17 @@ ROLE_META: dict[str, dict] = {
 }
 
 
+# Штаб-роли CEO — не отдел, но реальные, часто адресуемые роли (см. CLAUDE.md §3.2).
+SERVICE_ROLES = ["researcher", "strategist", "architect", "hr"]
+
+
+def known_roles() -> set[str]:
+    """Все существующие в офисе роли: отдельческие (ROLE_META) + штаб CEO.
+    Источник правды для валидации delegate_task/send_message — чтобы агент не
+    мог поставить задачу или написать сообщение несуществующей роли/коллеге."""
+    return set(ROLE_META.keys()) | set(SERVICE_ROLES)
+
+
 def _overrides() -> dict:
     return ctx.read_json(_FILE, None) or {}
 
