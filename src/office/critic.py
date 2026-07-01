@@ -13,10 +13,17 @@ from src.office import workspace
 
 
 def _find_site_dir() -> str | None:
-    """Папка с index.html в рабочей директории (или None)."""
-    files = workspace.list_files()
-    for f in files:
-        p = f["path"]
+    """
+    Папка с index.html в рабочей директории (или None). Канонический сайт всегда
+    живёт в site/ — проверяем её ПЕРВОЙ явным приоритетом. Иначе случайно созданный
+    index.html в корне (агент забыл префикс site/ при write_file) хайджекает
+    авто-публикацию и приёмку: они начинают читать/публиковать не ту версию сайта,
+    а реальный собранный сайт в site/ остаётся невидимым клиенту.
+    """
+    paths = {f["path"] for f in workspace.list_files()}
+    if "site/index.html" in paths:
+        return "site"
+    for p in sorted(paths):
         if p == "index.html":
             return ""
         if p.endswith("/index.html"):
