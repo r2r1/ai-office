@@ -349,8 +349,12 @@ async def _publish_site_auto(publish) -> bool:
 
     # Блок 2: Если уровень автономности требует разрешения перед публикацией — спрашиваем
     # БЛОКИРУЮЩЕ через personal-thread CEO (как делает agent_factory.ask_user).
+    # Но только ПЕРВЫЙ раз за офис: видели в проде 5+ повторных «опубликовать?» за один
+    # прогон, когда критик несколько раз подряд просил мелкие правки одного и того же
+    # сайта — это шум, не новое решение. Разрешение один раз — action одобрен на весь
+    # офис (сбрасывается вместе с ним/паузой).
     tid = ctx.get_tenant()
-    if not autonomy.can_auto("publish_site"):
+    if not autonomy.can_auto("publish_site") and not autonomy.was_approved_once("publish_site"):
         from src.office import questions as questions_mod, threads as threads_mod
         question_text = "Сайт готов к публикации. Опубликовать сейчас? (да/нет)"
         # Дедуп: если такой вопрос уже висит — не плодим повторно
@@ -376,7 +380,9 @@ async def _publish_site_auto(publish) -> bool:
         await publish({"type": "question_answered", "question_id": qid, "agent_id": "orchestrator_1"})
         ok = (answer or "").strip().lower()
         if ok and not any(no in ok for no in ("нет", "no", "стоп", "поз")):
-            # Положительный ответ → повышаем доверие (клиент дал OK)
+            # Положительный ответ → больше не спрашиваем повторно за этот офис,
+            # и повышаем доверие (клиент дал OK)
+            autonomy.mark_action_approved("publish_site")
             from src.office import decisions as decisions_mod
             decisions_mod.record(
                 action="publish_site", target=f"site (после OK клиента)",

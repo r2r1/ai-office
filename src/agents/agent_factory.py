@@ -754,8 +754,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                           ensure_ascii=False)
 
     async def _handle_write_file(args: dict) -> str:
-        path = args.get("path", "")
+        path = (args.get("path") or "").strip()
         content = args.get("content", "")
+        # Самолечение: developer/designer/integrator иногда забывают префикс site/ у
+        # веб-файла (видели в проде: 9 html-страниц подряд ушли в корень workspace
+        # вместо site/) — тогда авто-публикация начинает читать/показывать клиенту
+        # РАСХОДЯЩУЮСЯ копию, а правки в реальном site/ становятся невидимы. Нормализуем
+        # путь ДО записи, а не патчим последствия на стороне чтения.
+        if (role in ("developer", "designer", "integrator") and path
+                and "/" not in path and path.lower().endswith((".html", ".css", ".js"))):
+            path = f"site/{path}"
         res = workspace_module.write_file(path, content)
         await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📝 {res}"})
         if res.startswith("Файл сохранён:"):

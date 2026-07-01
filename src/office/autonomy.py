@@ -81,6 +81,26 @@ def can_auto(action_type: str) -> bool:
     return _idx(current) >= _idx(required)
 
 
+def mark_action_approved(action_type: str) -> None:
+    """
+    Пользователь один раз явно одобрил действие этого типа в рамках текущего офиса —
+    больше не переспрашиваем на итеративных повторах (например повторная публикация
+    того же сайта после серии мелких правок критика). Видели в проде: guided-режим
+    спрашивал «опубликовать?» 5+ раз за один прогон для одного и того же сайта —
+    для пользователя это шум, не новое решение. Сбрасывается вместе с офисом/паузой.
+    """
+    d = ctx.read_json("autonomy", None) or {}
+    approved = d.setdefault("approved_once", [])
+    if action_type not in approved:
+        approved.append(action_type)
+    ctx.write_json("autonomy", d)
+
+
+def was_approved_once(action_type: str) -> bool:
+    d = ctx.read_json("autonomy", None) or {}
+    return action_type in (d.get("approved_once") or [])
+
+
 def payload() -> dict:
     level = get_level()
     info = LEVEL_INFO[level]
