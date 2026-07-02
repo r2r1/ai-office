@@ -225,6 +225,19 @@ async def _run_office(tid: str) -> None:
                                    f"пунктов, {len(spec.get('success_criteria', []))} критериев "
                                    f"успеха — см. «Проект»"})
 
+    # Capability-гейт (Execution Policy, BOS §6): каких способностей не хватает под
+    # план — владелец узнаёт о недостающих доступах СРАЗУ, а не когда исполнитель
+    # упрётся в середине задачи. Не блокирует: событие CEO + сообщение в ленту.
+    from src.office import execution_policy, events as events_mod2
+    for miss in execution_policy.missing_for_plan():
+        events_mod2.raise_event(
+            "problem",
+            f"Для задачи «{miss['title'][:60]}» нет доступа: {miss['capability']}",
+            detail=f"Нужно: {miss['hint']}", from_role="orchestrator")
+        await publish({"type": "system",
+                       "text": f"🔌 Для «{miss['title'][:60]}» понадобится {miss['hint']} — "
+                               f"подключите заранее в «Доступы», чтобы команда не ждала"})
+
     # ---- ЦИКЛЫ ----
     cycle = 0
     while True:
@@ -868,8 +881,14 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
         registry.update_status(agent_id, "thinking")
         _thinking_since[_tk(agent_id)] = time.time()
         _job_t0 = time.time()
+        # Execution Policy (BOS §6): модель выбирается ПО ЗАДАЧЕ (рутина → дешёвая),
+        # оценка стоимости пишется в trace ДО исполнения. Оверрайды владельца главнее.
+        from src.office import execution_policy
+        t_rec_policy = (plan.get_task(task_id) if task_id and plan.is_generated() else None) or {"title": task}
+        policy = execution_policy.decide(t_rec_policy, agent_id, role)
         trace.log("agent_start", agent=agent_id, role=role,
-                  model=models_module.for_agent(agent_id), skill=skill or "")
+                  model=policy["model"], tier=policy["tier"],
+                  est_usd=policy["estimated_usd"], skill=skill or "")
         try:
             if role == "researcher":
                 result = await researcher.run_async(task, depth="quick", publish=publish, agent_id=agent_id)
@@ -878,7 +897,8 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 result = await strategist.run_async(task, publish=publish, agent_id=agent_id, save=False)
             else:
                 ctx_task = _task_with_context(role, task, skill, department=department, objective=objective)
-                fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+                fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill,
+                                          model=policy["model"])
                 result = await fn()
                 # ---- Приёмка качества (критик) для сайтов: дизайнер/разработчик ----
                 if role in ("designer", "developer"):

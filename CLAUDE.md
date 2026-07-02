@@ -279,6 +279,7 @@ framer-motion через esm.sh, без шага сборки; доступен 
 | `office/tool_router.py` | `use_capability` → подбор интеграции |
 | `office/acceptance.py` | **Acceptance Layer** (BOS §8): задача закрывается ТОЛЬКО приёмкой — build (компиляция py/js), functional (критик сайта/бота), базовый уровень; вердикт пишется в задачу |
 | `office/specification.py` | Specification — контракт приёмки из брифа + плана (функции, критерии успеха); подтверждение владельцем опционально |
+| `office/execution_policy.py` | **Execution Policy** (BOS §6): модель по ЗАДАЧЕ (рутина → дешёвая, оверрайды владельца главнее), `estimate_cost` до исполнения, capability-гейт плана (недостающие доступы — сразу) |
 | `office/projects.py` | **Project** (BOS §1): единица работы крупнее задачи; задачи плана принадлежат проекту, закрытие фиксирует «что оставил после себя» + срез мира |
 | `office/world.py` | **World Model v1** (BOS §4): SSOT-агрегатор — `snapshot()` (единый срез мира), `diff()`, журнал срезов, `context_block()` «где компания сейчас» для CEO |
 | `office/objectives.py` | Objectives — измеримые цели (desired state); `measured_by` пуст → цель не в gap-анализе, а источник работы «обеспечить измеримость» |

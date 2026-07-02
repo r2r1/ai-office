@@ -66,6 +66,8 @@ def set_tasks(tasks: list[dict]) -> None:
             "assignee": "",        # agent_id исполнителя (когда взята в работу)
             "requested_by": "",    # кто поставил (CEO/план или коллега-агент)
             "project": project_id,
+            # Подсказка Execution Policy: routine → дешёвая модель (опционально)
+            "tier": (t.get("tier") or "").strip().lower(),
         })
     # Чистим deps от ссылок на НЕсуществующие id: LLM иногда генерит зависимость на
     # опечатанный/выдуманный id, и такая задача (и всё, что от неё зависит) НИКОГДА не

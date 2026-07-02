@@ -457,8 +457,10 @@ def _try_extract_connection(question: str, answer: str) -> dict | None:
             "note": "Автосохранено агентом при ответе на вопрос"}
 
 
-def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]], skill: str = ""):
-    """Возвращает async-функцию, запускающую агента."""
+def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]],
+           skill: str = "", model: str = ""):
+    """Возвращает async-функцию, запускающую агента. `model` — решение Execution
+    Policy для конкретной задачи (пусто → обычный путь models.for_agent)."""
     # Системный промпт собирает Prompt Builder (роли/политики — .md-файлы,
     # сборка централизована, см. docs/bos-architecture.md §7). Полный промпт
     # логируется в prompts.jsonl тенанта — отладка мышления зрячая.
@@ -850,7 +852,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             office_channel.post(agent_id, role, event.get("text", ""))
 
     async def run() -> str:
-        model = models_module.for_agent(agent_id)
+        run_model = model or models_module.for_agent(agent_id)
         await _publish_and_log({"type": "thinking", "agent_id": agent_id,
                                  "text": f"Начинаю работу: {task[:80]}..."})
 
@@ -868,7 +870,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         result = await llm.run_agent(
             system=system,
             user=task,
-            model=model,
+            model=run_model,
             max_tokens=max_tok,
             max_iterations=max_iter,
             max_searches=4,
