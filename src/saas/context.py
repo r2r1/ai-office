@@ -12,6 +12,8 @@ HTTP-запрос и офис-задачей на каждый цикл). Все
 import contextvars
 import copy
 import json
+import os
+import time
 from pathlib import Path
 
 _tenant: contextvars.ContextVar[str] = contextvars.ContextVar("tenant", default="default")
@@ -54,7 +56,18 @@ def read_json(name: str, default):
     if f.exists():
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError:
+            # Битый JSON НЕ подменяем дефолтом молча (раньше офис «забывал всё» и
+            # тихо генерировал план заново): файл уходит в карантин рядом, а в лог —
+            # громкое предупреждение. Данные можно восстановить руками из карантина.
+            try:
+                q = f.with_name(f"{name}.broken-{int(time.time())}")
+                f.rename(q)
+                print(f"[context] ПОВРЕЖДЁН {f} — перемещён в карантин: {q.name}")
+            except OSError:
+                pass
+            return default
+        except OSError:
             return default
         _cache[key] = data
         return copy.deepcopy(data)
@@ -65,8 +78,12 @@ def read_json(name: str, default):
 
 
 def write_json(name: str, obj) -> None:
+    # Атомарная запись: tmp + os.replace. Прямой write_text оставлял битый файл,
+    # если процесс убивали посреди записи, — и офис тенанта молча терял состояние.
     f = tenant_dir() / name
-    f.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp = f.with_name(f"{name}.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, f)
     _cache[_cache_key(name)] = copy.deepcopy(obj)
 
 
