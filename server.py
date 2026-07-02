@@ -1353,7 +1353,10 @@ async def _steer_from_chat(text: str) -> None:
         return
 
     try:
-        goal = brief.get().get("goal", "") or brief.summary()
+        b = brief.get()
+        goal = b.get("goal", "") or brief.summary()
+        niche = b.get("niche", "")
+        audience = b.get("audience", "")
         strategy = office_loop._strategy_text()
         ms = milestones.all_stages()
         try:
@@ -1363,7 +1366,8 @@ async def _steer_from_chat(text: str) -> None:
             depts_text = ""
         board = plan_module.board_summary() if plan_module.is_generated() else ""
         res = await orchestrator.interpret_directive(
-            goal, strategy, ms, depts_text, board, text, publish=bus.publish)
+            goal, strategy, ms, depts_text, board, text, publish=bus.publish,
+            niche=niche, audience=audience)
     except Exception:
         memory.remember("Указание пользователя офису", text)  # фолбэк — прежнее поведение
         return
