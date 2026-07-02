@@ -1344,10 +1344,17 @@ async def _steer_from_chat(text: str) -> None:
     discovery (уточняющие вопросы → бриф → старт). Если офис работает — CEO-триаж: понять
     и органично вписать в работу. В фоне, чтобы POST отвечал мгновенно.
     """
+    # Intent: единый вход намерений владельца (BOS §1) — каждое сообщение фиксируется
+    # в журнале ДО интерпретации, с результатом триажа после.
+    from src.office import intent as intent_module
+    _intent = intent_module.capture(text, source="owner" if brief.is_ready() else "onboarding")
+
     # ── DISCOVERY: офис ещё не запущен — сначала уточняем, потом строим бриф ──
     if not brief.is_ready():
         try:
             await _intake_from_chat(text)
+            if _intent:
+                intent_module.set_interpretation(_intent["id"], scope="discovery")
         except Exception:
             memory.remember("Указание пользователя офису", text)  # не теряем сообщение
         return
@@ -1378,6 +1385,9 @@ async def _steer_from_chat(text: str) -> None:
     ops = res.get("milestone_ops") or []
     new_tasks = res.get("new_tasks") or []
     changes: list[str] = []
+    if _intent:
+        intent_module.set_interpretation(_intent["id"], scope=scope, directive=directive,
+                                         tasks_added=len(new_tasks))
 
     if scope == "steer":
         # приоритетная директива — её чтят CEO и лидеры в своих решениях
@@ -1415,6 +1425,45 @@ async def _steer_from_chat(text: str) -> None:
                            "text": reply, "id": cmsg["id"]})
     if changes:
         await bus.publish({"type": "system", "text": "📌 План обновлён: " + "; ".join(changes[:6])})
+
+
+@app.get("/api/world")
+async def get_world():
+    """World Model: единый срез мира компании (Business State + Objectives + DNA)."""
+    from src.office import world as world_module
+    return world_module.snapshot()
+
+
+@app.get("/api/objectives")
+async def get_objectives():
+    """Objectives — измеримые цели компании (desired state)."""
+    from src.office import objectives as objectives_module
+    return {"objectives": objectives_module.all_objectives()}
+
+
+@app.post("/api/objectives")
+async def post_objective(request: Request):
+    """Создать/обновить Objective. Body: {title, desired?, measured_by?, priority?}
+    или {id, ...patch} для обновления."""
+    from src.office import objectives as objectives_module
+    data = await request.json()
+    if data.get("id"):
+        obj = objectives_module.update(data["id"], **data)
+        return {"ok": bool(obj), "objective": obj}
+    if not (data.get("title") or "").strip():
+        return {"ok": False, "message": "Нужен title"}
+    obj = objectives_module.add(
+        data["title"], desired=data.get("desired", ""),
+        measured_by=data.get("measured_by", ""),
+        priority=int(data.get("priority", 50)), source="owner")
+    return {"ok": True, "objective": obj}
+
+
+@app.get("/api/intents")
+async def get_intents():
+    """Журнал намерений владельца и их интерпретаций (Intent Layer)."""
+    from src.office import intent as intent_module
+    return {"intents": intent_module.recent(50)}
 
 
 @app.get("/api/philosophy")

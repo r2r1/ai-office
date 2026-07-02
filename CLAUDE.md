@@ -277,6 +277,9 @@ framer-motion через esm.sh, без шага сборки; доступен 
 | `office/knowledge.py` | 3-слойная память с retrieval |
 | `office/events.py` | Event Layer (доменные события для CEO) |
 | `office/tool_router.py` | `use_capability` → подбор интеграции |
+| `office/world.py` | **World Model v1** (BOS §4): SSOT-агрегатор — `snapshot()` (единый срез мира), `diff()`, журнал срезов, `context_block()` «где компания сейчас» для CEO |
+| `office/objectives.py` | Objectives — измеримые цели (desired state); `measured_by` пуст → цель не в gap-анализе, а источник работы «обеспечить измеримость» |
+| `office/intent.py` | Intent Layer — единый вход намерений владельца: `capture()` до интерпретации + результат CEO-триажа в журнале |
 | `office/prompt_builder.py` | **Единая сборка промптов**: system (`build`) + контекст задачи (`task_context`), загрузчик политик, полный лог промптов в `prompts.jsonl` |
 | `office/builtin_roles/*.md` | Тексты ролей («кто/что нельзя»), по файлу на роль; `leader: true` подмешивает политику лидера |
 | `office/policies/*.md` | Командные политики: автономность, «артефакты только через инструменты», межагентность, правила лидера |
@@ -387,6 +390,7 @@ React + Vite + TypeScript + motion/react. Старый ванильный canvas
 - `GET /api/costs` — расход (топбар 💸).
 - `GET /api/files`, `/api/file?path=`, `/api/raw?path=` — код проекта; `/api/terminal` — выполнение команд.
 - `GET /api/knowledge` — 3-слойная память (диагностика).
+- `GET /api/world` — снапшот World Model; `GET/POST /api/objectives` — цели; `GET /api/intents` — журнал намерений.
 - `GET /api/office/status`, `POST /api/office/pause`, `/api/office/resume` — пауза/старт.
 - `GET/POST /api/model`, `/api/models`, `/api/agent/{id}/model` — модели.
 - `GET /api/digest` — Morning Digest.

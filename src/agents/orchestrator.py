@@ -380,11 +380,15 @@ async def decide_company(
     dept_text = "\n\n".join(dept_lines)
 
     from src.office import memory as memory_module, lessons as lessons_module
+    from src.office import world as world_module
     user_directives = memory_module.context_block() or ""
     directives_section = (
         f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ) ===\n{user_directives}\n"
         if user_directives.strip() else ""
     )
+    # World Model: CEO смотрит на единый срез «где компания сейчас» (Business State +
+    # Objectives), а не восстанавливает картину из кусков — BOS §4, SSOT.
+    directives_section += world_module.context_block()
 
     # Нерешённые замечания от критика — CEO видит незакрытые проблемы результатов
     all_lessons = lessons_module.all_lessons()

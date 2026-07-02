@@ -312,7 +312,7 @@ Developer #14) и **не подлежит удалению** — но не мо�
 
 1. **Prompt Builder** — инфраструктура для всего остального; роли/политики в .md;
    лог промпта. *(+ вне очереди: атомарный write_json — 5 строк, страхует данные)*
-2. **World Model v1** — типизированные Brief/State/DNA/Objectives; snapshot+diff;
+2. **World Model v1** — типизированные Brief/S  tate/DNA/Objectives; snapshot+diff;
    правило «новых знаний вне мира не заводим»; интерфейс `interpret() → Intent`
    (реализация v1 примитивна — важен вход).
 3. **Acceptance Layer** — Specification + 5 уровней; done только через приёмку;
