@@ -49,20 +49,29 @@ def _build(last_seen: float) -> dict:
     from src.office import state, workspace, milestones as ms_module, plan as plan_module
 
     items: list[dict] = []
+    # last_seen=0 значит «первый визит» — тогда показываем всё как есть (нечего
+    # «с прошлого раза» показывать). Иначе фильтруем каждый источник по своей
+    # временной метке: раньше этот параметр принимался, но НИГДЕ не использовался
+    # для фильтрации — дайджест «что было пока вас не было» на самом деле каждый
+    # раз показывал вообще всё, что офис сделал с начала работы.
 
     # --- Выполненные задачи плана ---
     for t in plan_module.all_tasks():
-        if t.get("status") == "done":
+        if t.get("status") == "done" and t.get("updated_ts", 0) > last_seen:
             items.append({"kind": "task", "icon": "✅",
                           "text": t.get("title", "Задача выполнена")[:120]})
 
     # --- Новые результаты агентов (deliverables) ---
-    for d in state.deliverables()[:10]:
+    for d in state.deliverables():
+        if d.get("ts", 0) <= last_seen:
+            continue
         items.append({"kind": "deliverable", "icon": "📄",
                       "text": f"{d.get('role','?')}: {d.get('task','')[:80]}"})
+        if len(items) >= 10:
+            break
 
     # --- Файлы в workspace ---
-    files = workspace.list_files()
+    files = [f for f in workspace.list_files() if f.get("mtime", 0) > last_seen]
     code_files = [f for f in files if not f["path"].startswith("docs/")]
     if code_files:
         names = ", ".join(f["path"] for f in code_files[:4])
@@ -77,7 +86,7 @@ def _build(last_seen: float) -> dict:
 
     # --- Завершённые этапы ---
     for s in ms_module.all_stages():
-        if s.get("status") == "done":
+        if s.get("status") == "done" and s.get("updated_ts", 0) > last_seen:
             items.append({"kind": "milestone", "icon": "🎯",
                           "text": f"Этап завершён: {s.get('title','')[:80]}"})
 

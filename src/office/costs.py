@@ -23,11 +23,27 @@ PRICES: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.5, 10.0), "gpt-5.4": (2.5, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0), "claude-opus-4-8": (5.0, 25.0),
 }
-DEFAULT_PRICE = (0.0, 0.0)
+# Опечатка/новая модель без прайса раньше молча возвращала (0.0, 0.0) — реальный
+# расход у apinet идёт, а индикатор показывал $0 (то же семейство бага, что уже
+# было с 21x-занижением цены gpt-5.4 выше). Лучше переоценить, чем спрятать
+# реальные траты: неизвестная модель получает консервативную оценку (медиану
+# известных цен), а не ноль.
+DEFAULT_PRICE = (
+    sorted(p[0] for p in PRICES.values())[len(PRICES) // 2],
+    sorted(p[1] for p in PRICES.values())[len(PRICES) // 2],
+)
+_warned_models: set[str] = set()
 
 
 def price_for(model: str) -> tuple[float, float]:
-    return PRICES.get((model or "").strip(), DEFAULT_PRICE)
+    m = (model or "").strip()
+    price = PRICES.get(m)
+    if price is None and m and m not in _warned_models:
+        _warned_models.add(m)
+        print(f"⚠️ costs.py: нет цены для модели «{m}» в PRICES — использую "
+              f"консервативную оценку {DEFAULT_PRICE} вместо $0. Добавь реальную "
+              f"цену из GET /api/pricing apinet.")
+    return price or DEFAULT_PRICE
 
 
 def _all() -> dict:

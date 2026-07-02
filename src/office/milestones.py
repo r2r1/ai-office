@@ -2,6 +2,8 @@
 Этапы (вехи) пути офиса к цели — динамический прогресс-бар. По тенанту.
 """
 
+import time
+
 from src.saas import context as ctx
 
 _FILE = "milestones.json"
@@ -42,6 +44,7 @@ def set_status(stage_id: str, status: str) -> None:
     for s in st:
         if s["id"] == stage_id:
             s["status"] = status
+            s["updated_ts"] = time.time()
             break
     _save(st)
 
@@ -51,12 +54,14 @@ def mark_active(stage_id: str) -> None:
     for s in st:
         if s["id"] == stage_id:
             s["status"] = "active"
+            s["updated_ts"] = time.time()
         elif s["status"] == "active":
             # Закрываем только РАНЕЕ активный этап. Раньше здесь принудительно ставились
             # done ВСЕ предыдущие не-done этапы — перескок «задним числом» отмечал
             # пропущенные как выполненные (ложный прогресс). Теперь пропущенный этап
             # остаётся pending, а не выдаётся за сделанный.
             s["status"] = "done"
+            s["updated_ts"] = time.time()
     _save(st)
 
 

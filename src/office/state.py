@@ -53,7 +53,7 @@ def save_deliverable(agent_id: str, role: str, task: str, content: str) -> None:
         return
     d = _load()
     d["deliverables"].append({"agent_id": agent_id, "role": role, "task": task,
-                              "content": content.strip(),
+                              "content": content.strip(), "ts": time.time(),
                               "time": datetime.now().strftime("%d.%m %H:%M")})
     if len(d["deliverables"]) > 200:
         del d["deliverables"][: len(d["deliverables"]) - 200]

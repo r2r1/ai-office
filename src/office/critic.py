@@ -7,6 +7,7 @@
 список проблем; если он непуст — задача возвращается исполнителю с конкретикой.
 """
 
+import posixpath
 import re
 
 from src.office import workspace
@@ -109,10 +110,21 @@ def check_site() -> list[str]:
             problems.append(f"{_basename(p)}: форма-заглушка (фраза «подключаем/готово»), реальной отправки нет.")
 
     # 5. ЦЕЛОСТНОСТЬ ССЫЛОК: каждая внутренняя ссылка ведёт на существующий файл.
+    # Сначала пробуем путь ПОЛНОСТЬЮ (разрешённый относительно директории страницы) —
+    # раньше сравнивали только basename, и href="./pages/x.html" считался рабочим,
+    # если ЛЮБОЙ файл x.html есть где угодно в site/, даже не по этому пути. Basename
+    # оставлен как менее строгий fallback — большинство наших сайтов плоские
+    # (index.html + несколько страниц в корне site/, без вложенных папок).
+    existing_paths = set(in_dir)
     broken = set()
     for p in html_pages:
+        page_dir = p.rsplit("/", 1)[0] if "/" in p else ""
         for href in re.findall(r'href=["\']([^"\'#?]+\.html)[^"\']*["\']', _read(p), re.IGNORECASE):
+            href = href.strip()
+            resolved = posixpath.normpath(posixpath.join(page_dir, href)) if page_dir else posixpath.normpath(href)
             target = _basename(href.strip("/"))
+            if resolved in existing_paths:
+                continue
             if target and target not in existing_names:
                 broken.add(f"{_basename(p)} → {target}")
     if broken:
@@ -288,14 +300,30 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
         )
     except Exception:
         return []
-    m = re.search(r"\{.*\}", raw or "", re.DOTALL)
-    if not m:
-        return []
-    try:
-        fixes = json.loads(m.group(0)).get("fixes", [])
-        return [str(f)[:200] for f in fixes if f][:4]
-    except Exception:
-        return []
+    # Раньше здесь был жадный re.search(r"\{.*\}", raw, re.DOTALL) — захватывал от
+    # ПЕРВОЙ { до ПОСЛЕДНЕЙ } во всём ответе. Если модель добавляла хоть один лишний
+    # {...} до/после нужного JSON (рассуждение, пример), кусок склеивался в невалидный
+    # JSON, json.loads падал, исключение тихо проглатывалось — ревью сайта молча не
+    # выполнялось. Теперь пробуем КАЖДУЮ { по очереди через JSONDecoder.raw_decode
+    # (останавливается на первом сбалансированном объекте, игнорируя хвост) и берём
+    # первый объект, у которого реально есть ключ "fixes" — устойчиво и к лишнему
+    # тексту вокруг, и к декоративному JSON перед нужным объектом.
+    raw = raw or ""
+    decoder = json.JSONDecoder()
+    pos = 0
+    while True:
+        idx = raw.find("{", pos)
+        if idx == -1:
+            return []
+        try:
+            obj, end = decoder.raw_decode(raw[idx:])
+        except Exception:
+            pos = idx + 1
+            continue
+        if isinstance(obj, dict) and "fixes" in obj:
+            fixes = obj.get("fixes", [])
+            return [str(f)[:200] for f in fixes if f][:4]
+        pos = idx + max(end, 1)
 
 
 async def review_site_visual() -> list[str]:

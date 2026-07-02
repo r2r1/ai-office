@@ -114,7 +114,9 @@ def list_files() -> list[dict]:
     out = []
     for p in sorted(base.rglob("*")):
         if p.is_file():
-            out.append({"path": p.relative_to(base).as_posix(), "size": p.stat().st_size})
+            st = p.stat()
+            out.append({"path": p.relative_to(base).as_posix(), "size": st.st_size,
+                        "mtime": st.st_mtime})
     return out
 
 
