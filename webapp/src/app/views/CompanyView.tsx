@@ -19,6 +19,7 @@ const RISK = [
 
 const TABS = [
   { id: "profile", label: "Профиль" },
+  { id: "goals", label: "Цели" },
   { id: "intellect", label: "Интеллект" },
   { id: "roles", label: "Роли" },
   { id: "skills", label: "Скиллы" },
@@ -36,6 +37,7 @@ export function CompanyView() {
       <ViewHead title="Компания" sub="Характер, интеллект, скиллы, лимиты и хранилище офиса" />
       <SubTabs tabs={TABS} active={active} onChange={setActive} />
       {active === "profile" && <ProfileTab />}
+      {active === "goals" && <GoalsTab />}
       {active === "intellect" && <IntellectTab />}
       {active === "roles" && <RolesTab />}
       {active === "skills" && <SkillsTab />}
@@ -43,6 +45,120 @@ export function CompanyView() {
       {active === "storage" && <StorageTab />}
       {active === "access" && <AccessTab />}
     </ViewShell>
+  )
+}
+
+// ── Цели: Objectives (desired state) + срез Business State (World Model) ──────
+function GoalsTab() {
+  const [objectives, setObjectives] = useState<any[]>([])
+  const [world, setWorld] = useState<any>(null)
+  const [title, setTitle] = useState("")
+  const [desired, setDesired] = useState("")
+  const [measuredBy, setMeasuredBy] = useState("")
+
+  const load = () => {
+    api.objectives().then(d => setObjectives(d.objectives || []))
+    api.world().then(w => w && setWorld(w))
+  }
+  useEffect(load, [])
+
+  async function addObjective() {
+    const t = title.trim(); if (!t) return
+    await api.addObjective(t, desired.trim(), measuredBy.trim())
+    setTitle(""); setDesired(""); setMeasuredBy("")
+    load()
+  }
+  async function archive(id: string) {
+    await api.updateObjective(id, { status: "archived" })
+    load()
+  }
+
+  const bs = world?.business_state
+  const active = objectives.filter((o: any) => o.status === "active")
+
+  return (
+    <ViewBody style={{ maxWidth: 680 }}>
+      {bs && (
+        <>
+          <SectionLabel>Где компания сейчас</SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 20 }}>
+            <StatCard label="План" value={`${bs.plan?.done ?? 0}/${bs.plan?.total ?? 0}`} sub={`${bs.plan?.percent ?? 0}%`} />
+            <StatCard label="Лиды" value={String(bs.leads_count ?? 0)} sub={`сайтов: ${(bs.sites || []).length}`} />
+            <StatCard label="Расход" value={`$${(bs.spend_usd ?? 0).toFixed(2)}`}
+              sub={bs.budget_limit_usd ? `лимит $${bs.budget_limit_usd}` : "без лимита"} />
+            <StatCard label="Команда" value={String(bs.team_size ?? 0)}
+              sub={(bs.open_departments || []).join(", ") || "отделы закрыты"} />
+          </div>
+          {(bs.blockers || []).length > 0 && (
+            <Card style={{ marginBottom: 20, borderColor: "rgba(224,138,138,0.35)" }}>
+              <div style={{ fontSize: 12, color: "#e08a8a", lineHeight: 1.5 }}>
+                ⛔ {(bs.blockers || []).map((b: any) => b.summary).join(" · ")}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
+      <SectionLabel>Цели компании — к чему движемся</SectionLabel>
+      <Card style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+        {active.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            Целей пока нет. Добавьте измеримую цель — офис будет сверять с ней работу.
+          </div>
+        )}
+        {active.map((o: any) => (
+          <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 12.5,
+            color: "var(--text-dim)", paddingBottom: 10, borderBottom: "1px solid var(--hairline)" }}>
+            <span style={{ color: "var(--mercury-a)", marginTop: 1 }}>◎</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: "var(--text)", marginBottom: 3 }}>
+                {o.title}{o.desired ? <span style={{ color: "var(--mercury-a)" }}> → {o.desired}</span> : null}
+              </div>
+              <div style={{ fontSize: 11, color: o.measured_by ? "#6f8a6a" : "#e0b06a" }}>
+                {o.measured_by ? `📏 ${o.measured_by}` : "⚠ пока не измерима — офис сначала создаст измеримость"}
+              </div>
+            </div>
+            <button onClick={() => archive(o.id)} title="Архивировать"
+              style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 14 }}>×</button>
+          </div>
+        ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="Цель — например: заявки с сайта каждую неделю"
+            style={inputStyle} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={desired} onChange={e => setDesired(e.target.value)}
+              placeholder="Целевое значение (10/нед)" style={{ ...inputStyle, flex: 1 }} />
+            <input value={measuredBy} onChange={e => setMeasuredBy(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addObjective()}
+              placeholder="Как измеряем (лиды за 7 дней)" style={{ ...inputStyle, flex: 1 }} />
+            <button onClick={addObjective}
+              style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "0 16px",
+                background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13 }}>Добавить</button>
+          </div>
+        </div>
+      </Card>
+      <div style={{ fontSize: 11, color: "var(--faint)", lineHeight: 1.5 }}>
+        Цель с метрикой участвует в оценке прогресса; без метрики — офис сперва
+        обеспечит измеримость (например, поставит счётчик заявок).
+      </div>
+    </ViewBody>
+  )
+}
+
+const inputStyle = {
+  background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+  borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)",
+  fontSize: 12, outline: "none",
+} as const
+
+function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <Card style={{ padding: "12px 14px" }}>
+      <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 18, color: "var(--text)", marginBottom: 2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 10.5, color: "var(--faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>}
+    </Card>
   )
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useOffice } from "../../data/OfficeProvider"
+import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import type { ReactNode } from "react"
@@ -12,24 +12,29 @@ type ModalContent = { title: ReactNode; subtitle?: ReactNode; body: ReactNode } 
 const TABS = [
   { id: "milestones", label: "Этапы" },
   { id: "tasks",      label: "Задачи" },
+  { id: "projects",   label: "Проекты" },
+  { id: "spec",       label: "Спецификация" },
 ]
 
 export function ProjectView() {
   const { state } = useOffice()
   const [tab, setTab] = useState("milestones")
   const [milestones, setMilestones] = useState<any[]>([])
+  const [projects, setProjects] = useState<any[]>([])
   const tasks = state.plan.tasks || []
   const tick = useThrottled(state.feed.length, 2500)
   const [modal, setModal] = useState<ModalContent>(null)
 
   useEffect(() => {
     api.milestones().then(d => setMilestones(d.stages || []))
+    api.projects().then(d => setProjects(d.projects || []))
   }, [tick])
 
   const tabsWithBadges = TABS.map(t => ({
     ...t,
     badge: t.id === "tasks" ? tasks.filter((x: any) => x.status === "in_progress").length
       : t.id === "milestones" ? milestones.length
+      : t.id === "projects" ? (projects.length || undefined)
       : undefined,
   }))
 
@@ -40,6 +45,8 @@ export function ProjectView() {
 
       {tab === "milestones" && <MilestonesTab milestones={milestones} progress={state.progress} onOpen={setModal} />}
       {tab === "tasks"      && <TasksTab tasks={tasks} />}
+      {tab === "projects"   && <ProjectsTab projects={projects} />}
+      {tab === "spec"       && <SpecTab tick={tick} />}
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.title} subtitle={modal?.subtitle}>
         {modal?.body}
@@ -142,9 +149,22 @@ const COLS = [
   { key: "pending",     label: "В очереди",  dot: "var(--whisper)" },
   { key: "in_progress", label: "В работе",   dot: "var(--mercury-a)" },
   { key: "done",        label: "Готово",      dot: "#a0e0ab" },
+  { key: "blocked",     label: "Заблокированы", dot: "#e08a8a" },
 ]
 
 function TasksTab({ tasks }: { tasks: any[] }) {
+  const [unblocking, setUnblocking] = useState<string>("")
+  const hasBlocked = tasks.some((t: any) => t.status === "blocked")
+  // Колонку «Заблокированы» показываем только когда в ней есть задачи — не пугаем зря.
+  const cols = hasBlocked ? COLS : COLS.filter(c => c.key !== "blocked")
+
+  const unblock = async (id: string) => {
+    setUnblocking(id)
+    await api.unblockTask(id)
+    await refreshData(["plan"])  // сразу показать задачу в очереди, не ждать SSE
+    setUnblocking("")
+  }
+
   return (
     <ViewBody>
       {tasks.length === 0 ? (
@@ -152,7 +172,7 @@ function TasksTab({ tasks }: { tasks: any[] }) {
           hint="Директор сформирует доску после получения стратегии" />
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          {COLS.map(col => {
+          {cols.map(col => {
             const items = tasks.filter((t: any) => t.status === col.key)
             return (
               <div key={col.key} style={{ background: "var(--surface-soft)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)", padding: 12 }}>
@@ -172,10 +192,28 @@ function TasksTab({ tasks }: { tasks: any[] }) {
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                         <Pill accent={col.key === "in_progress"}>{roleName(t.role)}</Pill>
-                        {t.done_criterion && col.key !== "done" && (
+                        {(t.attempts || 0) > 0 && col.key !== "done" && (
+                          <Pill color="#e0b06a">попытка {t.attempts}</Pill>
+                        )}
+                        {t.done_criterion && col.key !== "done" && col.key !== "blocked" && (
                           <span style={{ fontSize: 10, color: "#6f8a6a", lineHeight: 1.3 }}>✓ {t.done_criterion}</span>
                         )}
                       </div>
+                      {col.key === "blocked" && (
+                        <div style={{ marginTop: 8 }}>
+                          {t.blocked_reason && (
+                            <div style={{ fontSize: 10.5, color: "#e08a8a", lineHeight: 1.4, marginBottom: 8 }}>
+                              ⛔ {t.blocked_reason}
+                            </div>
+                          )}
+                          <button onClick={() => unblock(t.id)} disabled={unblocking === t.id}
+                            style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, cursor: "pointer",
+                              background: "var(--surface-soft)", border: "1px solid var(--hairline-strong)",
+                              color: "var(--text-dim)" }}>
+                            {unblocking === t.id ? "…" : "↩ Вернуть в работу"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {items.length === 0 && <div style={{ fontSize: 11, color: "var(--faint)", textAlign: "center", padding: "16px 0" }}>—</div>}
@@ -187,5 +225,130 @@ function TasksTab({ tasks }: { tasks: any[] }) {
       )}
     </ViewBody>
   )
+}
+
+// ── Проекты ───────────────────────────────────────────────────────────────────
+function ProjectsTab({ projects }: { projects: any[] }) {
+  if (projects.length === 0) return (
+    <ViewBody>
+      <Empty icon="📁" text="Проектов пока нет"
+        hint="Первый проект появится вместе с планом задач" />
+    </ViewBody>
+  )
+  return (
+    <ViewBody>
+      <div style={{ display: "grid", gap: 12 }}>
+        {[...projects].reverse().map((p: any) => {
+          const lb = p.left_behind || {}
+          const isActive = p.status === "active"
+          return (
+            <Card key={p.id} style={{ borderColor: isActive ? "rgba(255,172,46,0.3)" : undefined }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                    {isActive ? <Pill accent>Активный</Pill> : <Pill color="#a0e0ab">Закрыт</Pill>}
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
+                  {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
+                  {p.status === "done" && (
+                    <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                      <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
+                      <span>🌐 сайтов: {(lb.sites || []).length}</span>
+                      <span>👤 лидов: {lb.leads_count ?? 0}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="mono" style={{ fontSize: 22, color: isActive ? "var(--mercury-a)" : "#a0e0ab", flexShrink: 0 }}>
+                  {isActive ? "▶" : "✓"}
+                </div>
+              </div>
+            </Card>
+          )
+        })}
+      </div>
+    </ViewBody>
+  )
+}
+
+// ── Спецификация (контракт приёмки) ──────────────────────────────────────────
+function SpecTab({ tick }: { tick: number }) {
+  const [spec, setSpec] = useState<any>(null)
+  const [confirming, setConfirming] = useState(false)
+
+  useEffect(() => { api.specification().then(setSpec) }, [tick])
+
+  const confirm = async () => {
+    setConfirming(true)
+    const r = await api.confirmSpecification()
+    if (r?.specification) setSpec(r.specification)
+    setConfirming(false)
+  }
+
+  if (!spec || !(spec.functions || []).length) return (
+    <ViewBody>
+      <Empty icon="📜" text="Спецификация ещё не сформирована"
+        hint="Появится вместе с планом задач: что делаем и когда это успех" />
+    </ViewBody>
+  )
+
+  const confirmed = spec.status === "confirmed"
+  return (
+    <ViewBody>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)", marginBottom: 4 }}>
+              Контракт приёмки {confirmed ? "— подтверждён вами" : "— черновик"}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>
+              Что офис собирается сделать и по каким критериям работа считается выполненной.
+            </div>
+          </div>
+          {confirmed ? <Pill color="#a0e0ab">✓ Подтверждена</Pill> : (
+            <button onClick={confirm} disabled={confirming}
+              style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+                background: "var(--mercury-a)", border: "none", color: "#1a1408", fontWeight: 600 }}>
+              {confirming ? "…" : "Подтвердить спецификацию"}
+            </button>
+          )}
+        </div>
+      </Card>
+      {spec.goal && (
+        <Card style={{ marginBottom: 14 }}>
+          <SectionMini>Цель</SectionMini>
+          <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>{spec.goal}</div>
+          {spec.niche && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Бизнес: {spec.niche}{spec.audience ? ` · Аудитория: ${spec.audience}` : ""}</div>}
+        </Card>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+        <Card>
+          <SectionMini>Что делаем · {(spec.functions || []).length}</SectionMini>
+          <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 7 }}>
+            {(spec.functions || []).map((f: string, i: number) => (
+              <li key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45 }}>{f}</li>
+            ))}
+          </ol>
+        </Card>
+        <Card>
+          <SectionMini>Когда это успех · {(spec.success_criteria || []).length}</SectionMini>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {(spec.success_criteria || []).map((c: string, i: number) => (
+              <div key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45 }}>
+                <span style={{ color: "#6f8a6a", marginRight: 6 }}>✓</span>{c}
+              </div>
+            ))}
+            {(spec.success_criteria || []).length === 0 && (
+              <div style={{ fontSize: 12, color: "var(--faint)" }}>Критерии появятся вместе с задачами плана</div>
+            )}
+          </div>
+        </Card>
+      </div>
+    </ViewBody>
+  )
+}
+
+function SectionMini({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.6, textTransform: "uppercase",
+    color: "var(--muted)", marginBottom: 10 }}>{children}</div>
 }
 

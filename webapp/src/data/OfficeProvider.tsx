@@ -198,6 +198,10 @@ async function loadThreads() {
   dispatch({ t: "threads", summaries: t.threads || {} })
 }
 
+// Экспорт для view-слоя: точечно подтянуть данные после действия пользователя
+// (например, разблокировка задачи), не дожидаясь SSE-события.
+export async function refreshData(what: RefreshKey[]) { return refresh(what) }
+
 async function refresh(what: RefreshKey[] = ["progress", "costs", "leads", "sites", "plan"]) {
   const partial: Partial<OfficeState> = {}
   await Promise.all(what.map(async k => {

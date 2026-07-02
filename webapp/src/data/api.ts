@@ -68,6 +68,18 @@ export const api = {
   understanding: () => getJSON<any>("/api/understanding", { score: 0, items: [], missing: [] }),
   knowledge: () => getJSON<any>("/api/knowledge", { facts: [], count: 0, layers: { global: 0, user: 0, department: 0 } }),
   departmentEvents: () => getJSON<any>("/api/department-events", { events: [], pending: 0 }),
+  // ── BOS-ядро: World Model, цели, проекты, спецификация, намерения ──
+  world: () => getJSON<any>("/api/world", null),
+  objectives: () => getJSON<{ objectives: any[] }>("/api/objectives", { objectives: [] }),
+  addObjective: (title: string, desired = "", measured_by = "") =>
+    postJSON<any>("/api/objectives", { title, desired, measured_by }, null),
+  updateObjective: (id: string, patch: Record<string, unknown>) =>
+    postJSON<any>("/api/objectives", { id, ...patch }, null),
+  projects: () => getJSON<{ projects: any[]; active: any }>("/api/projects", { projects: [], active: null }),
+  specification: () => getJSON<any>("/api/specification", { status: "none" }),
+  confirmSpecification: (note = "") => postJSON<any>("/api/specification/confirm", { note }, null),
+  intents: () => getJSON<{ intents: any[] }>("/api/intents", { intents: [] }),
+  unblockTask: (id: string) => postJSON<any>(`/api/task/${id}/unblock`, {}, null),
   onboardingModes: () => getJSON<any>("/api/onboarding/modes", { modes: [] }),
   onboardingFinish: (mode: string, answers: any[]) => postJSON<any>("/api/onboarding/finish", { mode, answers }, null),
   officeStatus: () => getJSON<any>("/api/office/status", { paused: false, reason: "" }),
