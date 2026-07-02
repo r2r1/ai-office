@@ -150,16 +150,26 @@ def next_for_department(dept_id: str) -> dict | None:
 # Две задачи, пишущие в site/, НЕЛЬЗЯ выполнять параллельно: агенты переписывают
 # index.html целиком и затирают работу друг друга (реальный кейс: designer затёр
 # 3D-версию developer через 9 секунд — «последний победил»).
-_SITE_WORDS = ("сайт", "лендинг", "landing", "site", "страниц", "3d", "3д",
-               "квиз", "верст", "html")
+#
+# Раньше считали «трогает сайт» по словам в ЗАГОЛОВКЕ задачи — и словили тот же
+# баг снова: задача developer «Собрать сценарий проверки и протестировать путь
+# обращения» не содержит ни одного site-слова в заголовке, но по факту это QA
+# по site/ (использует qa_site_selfcheck, читает и правит site/index.html) —
+# мьютекс её не увидел, и designer с developer 4 минуты параллельно переписывали
+# один и тот же site/index.html (ai-office-log-20260702_134612). Инвертируем
+# логику: designer/developer в tech-отделе по умолчанию считаются «трогают
+# сайт», кроме явно НЕ-сайтовых задач (телеграм-бот и т.п.) — так безопаснее,
+# чем угадывать по формулировке заголовка.
+_NON_SITE_WORDS = ("telegram", "телеграм", " бот", "-бот", "бот)", "боту", "бота",
+                    "aiogram", "чат-бот", "chatbot")
 
 
 def touches_site(task: dict) -> bool:
-    """Задача пишет в site/ (по роли и словам заголовка)."""
+    """Задача, скорее всего, пишет в site/ (по роли; НЕ-сайтовые задачи — исключение)."""
     if task.get("role") not in ("designer", "developer"):
         return False
     t = (task.get("title") or "").lower()
-    return any(w in t for w in _SITE_WORDS)
+    return not any(w in t for w in _NON_SITE_WORDS)
 
 
 def site_task_in_progress() -> str:

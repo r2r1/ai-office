@@ -159,24 +159,31 @@ def check_site() -> list[str]:
         problems.append(f"Картинки без alt ({imgs_no_alt} шт.) — добавь alt для доступности/SEO.")
 
     # 10. ФЕЙКОВОЕ 3D: страница заявляет «3D», но это статичная CSS-плашка без движения.
-    fake_3d = _fake_3d_problem(low, js_blob)
+    text_only_full = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html,
+                             flags=re.IGNORECASE | re.DOTALL))
+    fake_3d = _fake_3d_problem(text_only_full, low, js_blob)
     if fake_3d:
         problems.append(fake_3d)
 
     return problems
 
 
-def _fake_3d_problem(low_html: str, js_blob: str) -> str | None:
+_CLAIMS_3D_RE = re.compile(r"(?<![a-zа-я0-9])3d(?:[-\s]|$)", re.IGNORECASE)
+
+
+def _fake_3d_problem(text_only: str, low_html: str, js_blob: str) -> str | None:
     """
     Скилл framer_motion_3d_site требует минимум 2 живых эффекта (mousemove-tilt,
     scroll-параллакс) — статичный `transform: rotateX(...)` без обработчиков
     считается «плашкой», а не 3D (см. playbook в skills.py). Реальный кейс: агент
-    писал "3D-концепт"/"3D-эффекты" в тексте страницы, но кроме неподвижного CSS
-    transform там ничего не было — критик это пропускал, публикация не менялась
-    по сути от цикла к циклу.
+    писал "3D-концепт"/"3D-сайт"/"3D-эффекты"/"3D-подача" в тексте страницы, но
+    кроме слова "3D" в копирайте ничего не было — критик это пропускал.
+    Матчим по регэксу (любое "3D" как отдельное слово в ВИДИМОМ тексте, не в CSS/
+    JS/атрибутах — иначе ловим случайные "3d5a80" из hex-цветов), а не по списку
+    фиксированных фраз: список фраз не поймал "3D-сайт"/"3D-подача" (реальный
+    кейс — публикация ai-office-log-20260702_134612).
     """
-    claims_3d = any(m in low_html for m in ("3d-концепт", "3d-эффект", "3d-лендинг", "премиальный 3d"))
-    if not claims_3d:
+    if not _CLAIMS_3D_RE.search(text_only):
         return None
 
     blob = low_html + "\n" + js_blob

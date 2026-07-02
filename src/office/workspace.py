@@ -3,6 +3,7 @@
 data/tenants/<tid>/workspace/. Защита от выхода за пределы каталога.
 """
 
+import re
 from pathlib import Path
 
 from src.saas import context as ctx
@@ -200,6 +201,24 @@ def execute_code(path: str, stdin_input: str = "") -> str:
     if ext == ".py":
         cmd = [sys.executable, str(full)]
     elif ext in (".js", ".mjs", ".ts"):
+        # Клиентский JS сайта (site/*.js) выполняется в браузере, а не в Node — там нет
+        # document/window/navigator. Реальный кейс: developer гонял site/script.js через
+        # execute_code, ловил "document is not defined", решал что скрипт сломан и дважды
+        # переписывал его всё короче (3081 → 1550 → 637 символов), теряя функциональность
+        # в погоне за несуществующей ошибкой. Раньше запрещали только .html/.css — теперь
+        # явно предупреждаем и здесь, до запуска Node.
+        try:
+            js_code = full.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            js_code = ""
+        rel = full.relative_to(_base().resolve()).as_posix()
+        is_site_js = rel.startswith("site/") or "/site/" in rel
+        uses_browser_globals = bool(re.search(r"\b(document|window|navigator|localStorage)\b", js_code))
+        if is_site_js and uses_browser_globals:
+            return ("⏭ Пропущен запуск: это браузерный скрипт (использует document/window), "
+                    "а execute_code запускает через Node, где их нет — «document is not defined» "
+                    "здесь НЕ означает, что код сломан. Проверяй такой JS через verify_code "
+                    "(синтаксис) или глазами при открытии сайта, не через execute_code.")
         cmd = ["node", str(full)]
     elif ext == ".sh":
         cmd = ["bash", str(full)]
