@@ -280,6 +280,16 @@ async def _run_office(tid: str) -> None:
             if reset:
                 await publish({"type": "system",
                                "text": f"Сброшены зависшие статусы: {', '.join(reset)}"})
+                # Задача этих агентов осталась in_progress в плане — агент сброшен в idle,
+                # но плановая задача НИКОГДА не вернётся в очередь сама (ready_for_department
+                # берёт только status=="pending"). Реальный кейс: рестарт сервера оставил
+                # t3(designer) навечно in_progress → site_task_in_progress() видел её вечно
+                # «занятой» и блокировал ВСЮ дальнейшую работу designer/developer по сайту
+                # (мьютекс на site/ считает их всегда «трогающими сайт» по умолчанию).
+                if plan.is_generated():
+                    for t in plan.all_tasks():
+                        if t.get("status") == "in_progress" and t.get("assignee") in reset:
+                            plan.revert(t["id"])
             await publish({"type": "system",
                            "text": "Офис восстановлен. Директор продолжит управление в следующем цикле."})
             await asyncio.sleep(LOOP_INTERVAL)

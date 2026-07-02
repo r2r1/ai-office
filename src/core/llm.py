@@ -312,6 +312,41 @@ async def run_agent(
                 "content": result[:2500],
             })
 
+    # Модель уложилась в max_iterations, ни разу не написав текст — только tool-calls
+    # (реальный кейс: marketer/developer/integrator на нескольких прогонах сдавали
+    # out_len=0 после реальных write_file, задачу считали пустой и перезапускали с нуля,
+    # теряя уже сделанную работу и раздувая расход). Просим ОДНИМ доп. вызовом без
+    # инструментов подвести итог — история с результатами tool-calls уже в messages.
+    if not final_text.strip():
+        messages.append({"role": "user", "content":
+                          "Ты не написал итоговый текст, только вызывал инструменты. "
+                          "Подведи итог 1-2 предложениями: что именно сделал (какие файлы "
+                          "записал, что решил). Без вызова инструментов."})
+        try:
+            import asyncio as _asyncio
+            resp = await _asyncio.wait_for(
+                client.chat.completions.create(model=model, messages=messages, max_tokens=300),
+                timeout=CALL_TIMEOUT,
+            )
+            usage = getattr(resp, "usage", None)
+            if usage:
+                pin = getattr(usage, "prompt_tokens", 0) or 0
+                pout = getattr(usage, "completion_tokens", 0) or 0
+                if pin or pout:
+                    try:
+                        from src.office import costs
+                        costs.record(agent_id, model, pin, pout)
+                    except Exception:
+                        pass
+            msg = resp.choices[0].message
+            if msg.content and msg.content.strip():
+                final_text = msg.content
+                if publish:
+                    snippet = msg.content[:150].replace("\n", " ").strip()
+                    await publish({"type": "speech", "agent_id": agent_id, "text": snippet})
+        except Exception:
+            pass  # не удалось — вернём как есть, вызывающий код обработает пустой результат
+
     # Учёт расхода теперь инкрементальный — пишется внутри цикла после каждого
     # ответа API (см. выше), чтобы расход был виден в реальном времени и не терялся
     # при зависании/сбросе агента. Здесь больше ничего записывать не нужно.

@@ -997,7 +997,11 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         max_tok = 16000 if role in ("developer", "designer", "integrator") else 2000
         # Разработчику и дизайнеру нужно больше итераций: читать файлы + писать
         # несколько файлов (bot.py, config.py, requirements.txt и т.д.)
-        max_iter = 15 if role in ("developer", "designer") else 8
+        # marketer/integrator тоже часто упираются в лимит: list_integrations + 2-3
+        # read_file + web_search + 3 write_file (offer/site_content/bot_content) — это
+        # уже 7-8 tool-calls, и модель не успевает написать итоговый текст (реальный
+        # кейс: marketer сдавал out_len=0 на 8 итерациях, задача перезапускалась с нуля).
+        max_iter = 15 if role in ("developer", "designer") else 10
 
         result = await llm.run_agent(
             system=system,
