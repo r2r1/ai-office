@@ -1080,6 +1080,21 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
 def _task_with_context(role: str, task: str, skill: str = "",
                        department: str = "", objective: str = "") -> str:
     goal = _goal()
+    # «Цель» из брифа — это ответ клиента на «какой результат вы хотите ОТ ОФИСА» (см.
+    # onboarding.py), а не описание того, ЧТО продаёт бизнес клиента. Раньше в промпт шло
+    # только "Цель компании: {goal}" — и когда goal был буквально «упаковка бизнеса»,
+    # marketer/designer собрали сайт, который ПРОДАЁТ «упаковку бизнеса» владельцам квартир
+    # (реальный кейс: клиент делает натяжные потолки, просил упаковать СВОЙ бизнес, а не
+    # продавать услугу упаковки конечным клиентам). Явно разводим: что продаёт компания
+    # (niche/audience из брифа) — отдельно от цели ЭТОГО прогона офиса.
+    b = brief.get()
+    niche = (b.get("niche") or "").strip()
+    audience = (b.get("audience") or "").strip()
+    biz_line = ""
+    if niche:
+        biz_line += f"Бизнес клиента — ЧТО он продаёт конечным покупателям: {niche}\n"
+    if audience:
+        biz_line += f"Аудитория бизнеса — КОМУ он продаёт: {audience}\n"
     cur = milestones.get(_cur_ms())
     stage = f"Текущий этап: {cur['title']}\n" if cur else ""
     skill_line = f"Твоя специализация: {skill}\n" if skill else ""
@@ -1097,7 +1112,8 @@ def _task_with_context(role: str, task: str, skill: str = "",
     # (ограничения клиента, его ответы, что отдел уже сделал).
     knowledge_section = knowledge.context_block(task, department=department)
     return (
-        f"Цель компании: {goal}\n{stage}{dept_line}{skill_line}"
+        f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
+        f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}"
         f"Твоя задача от руководителя: {task}\n"
         f"{tdd_section}{knowledge_section}{lessons_section}\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
