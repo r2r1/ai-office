@@ -21,6 +21,23 @@ def _data() -> dict:
     return ctx.read_json(_FILE, {"tasks": [], "generated": False})
 
 
+# Роли, у которых есть отдел-исполнитель. Задача с ролью вне этого набора не
+# маршрутизируется (department=='' → её никто не берёт), и офис тихо стопорился.
+_ROLE_REMAP = {
+    "researcher": "analyst", "architect": "developer", "strategist": "marketer",
+    "hr": "developer", "cto": "developer", "cmo": "marketer", "sales_lead": "salesman",
+    "seo": "marketer", "qa": "developer", "copywriter": "marketer", "ux": "designer",
+}
+
+
+def _valid_role(role: str) -> str:
+    """Приводит роль задачи к исполнимой (с реальным отделом). Неизвестную → developer."""
+    role = (role or "").strip()
+    if org.department_of_role(role):
+        return role
+    return _ROLE_REMAP.get(role, "developer")
+
+
 def _save(d: dict) -> None:
     ctx.write_json(_FILE, d)
 
@@ -33,7 +50,7 @@ def set_tasks(tasks: list[dict]) -> None:
     """Сохраняет сгенерированный граф задач (нормализует поля)."""
     norm = []
     for i, t in enumerate(tasks):
-        role = (t.get("role") or "").strip()
+        role = _valid_role(t.get("role") or "")  # роль без отдела → исполнимая (A1)
         tid = (t.get("id") or f"t{i+1}").strip()
         norm.append({
             "id": tid,
@@ -46,6 +63,14 @@ def set_tasks(tasks: list[dict]) -> None:
             "assignee": "",        # agent_id исполнителя (когда взята в работу)
             "requested_by": "",    # кто поставил (CEO/план или коллега-агент)
         })
+    # Чистим deps от ссылок на НЕсуществующие id: LLM иногда генерит зависимость на
+    # опечатанный/выдуманный id, и такая задача (и всё, что от неё зависит) НИКОГДА не
+    # становится готовой — офис тихо застревал без единой ошибки в логе. Неизвестные deps
+    # просто отбрасываем (лучше выполнить раньше, чем не выполнить вообще).
+    valid_ids = {t["id"] for t in norm}
+    for t in norm:
+        cleaned = [d for d in t["deps"] if d in valid_ids and d != t["id"]]
+        t["deps"] = cleaned
     _save({"tasks": norm, "generated": True})
 
 
@@ -57,6 +82,17 @@ def add_task(title: str, role: str, done_criterion: str = "",
     """
     d = _data()
     tasks = d.get("tasks", [])
+    role = _valid_role(role)  # роль без отдела → исполнимая (A1)
+    # Дедуп: если такая же незакрытая задача той же роли уже есть — не плодим дубль
+    # (циклы делегирования иначе ставили один и тот же таск несколько раз). Инвариант
+    # проекта — дедупликация.
+    norm_title = " ".join((title or "").lower().split())
+    norm_role = (role or "").strip()
+    for t in tasks:
+        if (t.get("status") in ("pending", "in_progress")
+                and t.get("role") == norm_role
+                and " ".join((t.get("title", "")).lower().split()) == norm_title):
+            return t  # уже стоит в очереди/в работе — возвращаем существующую
     tid = f"t{len(tasks) + 1}_{int(time.time()) % 10000}"
     task = {
         "id": tid, "title": (title or "").strip()[:200], "role": (role or "").strip(),
@@ -82,10 +118,9 @@ def _done_ids() -> set:
 
 def departments_needed() -> list[str]:
     """Какие отделы нужны для невыполненных задач (для CEO — открыть параллельно)."""
-    done = _done_ids()
     deps = set()
     for t in all_tasks():
-        if t.get("status") != "done" and t.get("department") and t["id"] not in done:
+        if t.get("status") != "done" and t.get("department"):
             deps.add(t["department"])
     return sorted(deps)
 
@@ -109,6 +144,30 @@ def next_for_department(dept_id: str) -> dict | None:
     """Первая готовая к работе задача отдела (или None)."""
     ready = ready_for_department(dept_id)
     return ready[0] if ready else None
+
+
+# ── Мьютекс артефакта «сайт» ─────────────────────────────────────────────────
+# Две задачи, пишущие в site/, НЕЛЬЗЯ выполнять параллельно: агенты переписывают
+# index.html целиком и затирают работу друг друга (реальный кейс: designer затёр
+# 3D-версию developer через 9 секунд — «последний победил»).
+_SITE_WORDS = ("сайт", "лендинг", "landing", "site", "страниц", "3d", "3д",
+               "квиз", "верст", "html")
+
+
+def touches_site(task: dict) -> bool:
+    """Задача пишет в site/ (по роли и словам заголовка)."""
+    if task.get("role") not in ("designer", "developer"):
+        return False
+    t = (task.get("title") or "").lower()
+    return any(w in t for w in _SITE_WORDS)
+
+
+def site_task_in_progress() -> str:
+    """id сайт-задачи, которая сейчас в работе (или ''). Для мьютекса артефакта."""
+    for t in all_tasks():
+        if t.get("status") == "in_progress" and touches_site(t):
+            return t["id"]
+    return ""
 
 
 def mark(task_id: str, status: str) -> None:

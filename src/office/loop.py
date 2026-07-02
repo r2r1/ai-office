@@ -34,9 +34,17 @@ MAX_THINK_SECS = int(os.getenv("AGENT_MAX_THINK_SECS", "240"))  # дольше �
 _current_ms: dict[str, str] = {}        # tid -> id текущего этапа
 _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый цикл
 _office_tasks: dict[str, asyncio.Task] = {}
-_thinking_since: dict[str, float] = {}  # agent_id -> когда начал «думать» (watchdog)
-_agent_task: dict[str, str] = {}        # agent_id -> id задачи плана, которую он сейчас делает
-_model_fail_count: dict[str, int] = {}  # agent_id -> подряд ошибок "модель недоступна"
+# ⚠️ Ключ этих словарей — «tenant:agent_id», НЕ голый agent_id: agent_id одинаковы у
+# всех тенантов («developer_1»), и без префикса тенанта параллельные офисы затирали бы
+# состояние друг друга (watchdog/задача/счётчик модели). См. _tk() и _heal_stuck_agents.
+_thinking_since: dict[str, float] = {}  # tenant:agent_id -> когда начал «думать» (watchdog)
+_agent_task: dict[str, str] = {}        # tenant:agent_id -> id задачи плана, которую он делает
+_model_fail_count: dict[str, int] = {}  # tenant:agent_id -> подряд ошибок "модель недоступна"
+
+
+def _tk(agent_id: str) -> str:
+    """Ключ per-tenant для словарей живости: изолирует одноимённых агентов разных тенантов."""
+    return f"{ctx.get_tenant()}:{agent_id}"
 _completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
 
 
@@ -114,6 +122,26 @@ def _strategy_text() -> str:
     return f.read_text(encoding="utf-8") if f.exists() else ""
 
 
+_JUNK_GOALS = {"не знаю", "незнаю", "не знаю.", "-", "—", "нет", "хз", "?", ""}
+
+
+def _goal() -> str:
+    """
+    Осмысленная цель компании для промптов. Клиент в онбординге может ответить
+    «не знаю» — тогда «Цель компании: не знаю» замусоривала КАЖДЫЙ промпт, хотя
+    стратег уже сформулировал реальную цель. Мусорная цель → берём её из стратегии.
+    """
+    g = (brief.get().get("goal") or "").strip()
+    if g.lower() not in _JUNK_GOALS:
+        return g
+    # Первая содержательная строка стратегии обычно и есть сформулированная цель.
+    for line in _strategy_text().splitlines():
+        line = line.strip().lstrip("#*-1234567890. ").strip()
+        if line.lower().startswith("цель"):
+            return line[:200]
+    return brief.summary() or "разобраться в нише и предложить первый результат"
+
+
 def _save_strategy(strategy: str) -> None:
     (ctx.tenant_dir() / "strategy.md").write_text(strategy, encoding="utf-8")
 
@@ -146,7 +174,7 @@ async def _run_office(tid: str) -> None:
     ctx.set_tenant(tid)
     publish = bus.publish
 
-    _hire_initial(publish)
+    await _hire_initial(publish)
     _first_cycle_done[tid] = not bool(state.saved_agents())
 
     # ---- BOOTSTRAP ----
@@ -159,7 +187,7 @@ async def _run_office(tid: str) -> None:
 
     tech_design = architect.load()
     if not tech_design:
-        goal = brief.get().get("goal", "") or brief.summary()
+        goal = _goal()
         await publish({"type": "system", "text": "Архитектор проектирует техническое решение..."})
         try:
             tech_design = await architect.run_async(strategy, goal, publish)
@@ -167,7 +195,7 @@ async def _run_office(tid: str) -> None:
             await publish({"type": "error", "agent_id": "architect_1", "text": str(e)[:100]})
 
     if not milestones.has_business_stages():
-        goal = brief.get().get("goal", "") or brief.summary()
+        goal = _goal()
         stages = await orchestrator.plan_milestones(strategy, goal, publish)
         milestones.set_business_stages(stages)
         await publish({"type": "system", "text": f"Директор разбил путь к цели на {len(stages)} этапов"})
@@ -177,7 +205,7 @@ async def _run_office(tid: str) -> None:
     # (слабая модель, 429-rate-limit, битый JSON) — берём детерминированный фолбэк-план,
     # иначе автономный слой (доска/завершение/маршрутизация) обходится и офис ходит кругами.
     if not plan.is_generated():
-        goal = brief.get().get("goal", "") or brief.summary()
+        goal = _goal()
         tasks = []
         try:
             tasks = await orchestrator.plan_tasks(strategy, goal, tech_design, publish)
@@ -235,7 +263,12 @@ async def _run_office(tid: str) -> None:
                                        "прогон нельзя, поэтому двигаемся итерациями."})
             await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
             continue
-        if milestones.all_business_done():
+        # Этапы (вехи) — производный ИНДИКАТОР, а не отдельный критерий готовности.
+        # Единственный источник правды о завершении — доска задач (_engagement_complete).
+        # Раньше этот блок мог объявить «все этапы пройдены» и усыпить офис, пока в плане
+        # оставались невыполненные задачи (эвристика mark_active расходилась с доской, A3).
+        # Терминальным этапы считаем ТОЛЬКО когда плана-графа нет (редкий фолбэк).
+        if not plan.is_generated() and milestones.all_business_done():
             await _set_progress_note("🎉 Все этапы пройдены — офис в режиме ожидания", publish)
             await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
             continue
@@ -279,18 +312,33 @@ async def _heal_stuck_agents(publish) -> None:
     (модель не ответила/застряла). Сбрасываем в idle, чтобы лидер переназначил.
     """
     now = time.time()
-    for aid, since in list(_thinking_since.items()):
+    prefix = f"{ctx.get_tenant()}:"  # только агенты ТЕКУЩЕГО тенанта, не чужие
+    for key, since in list(_thinking_since.items()):
+        if not key.startswith(prefix):
+            continue
+        aid = key[len(prefix):]
         if now - since > MAX_THINK_SECS:
-            _thinking_since.pop(aid, None)
+            _thinking_since.pop(key, None)
             registry.update_status(aid, "idle")
             state.save_last_run(aid)  # короткий cooldown перед повтором
-            tid = _agent_task.pop(aid, None)
+            tid = _agent_task.pop(key, None)
             if tid and plan.is_generated():
                 # АНТИЦИКЛ: если завис дизайнер/разработчик, но сайт УЖЕ написан —
                 # не гоняем задачу по кругу заново. Публикуем что есть и принимаем задачу.
+                # ВАЖНО: принимаем ТОЛЬКО если index.html менялся ПОСЛЕ старта ЭТОЙ задачи —
+                # иначе watchdog закрывал чужой работой задачи, которых агент даже не начал
+                # делать (index.html существовал с ранних задач), а реальный результат агента
+                # приходил позже и создавал двойные правки (реальный кейс из прода).
                 rec = registry.get(aid)
-                site_ready = any(f["path"].endswith("index.html") for f in workspace.list_files())
-                if rec and rec.role in ("designer", "developer") and site_ready:
+                site_touched = False
+                sdir = critic.site_dir()
+                if sdir is not None:
+                    idx = workspace.resolve(f"{sdir}/index.html" if sdir else "index.html")
+                    try:
+                        site_touched = idx is not None and idx.is_file() and idx.stat().st_mtime >= since
+                    except OSError:
+                        site_touched = False
+                if rec and rec.role in ("designer", "developer") and site_touched:
                     await _publish_site_auto(publish)
                     plan.complete(tid)
                     await publish({"type": "system",
@@ -311,9 +359,8 @@ async def _verify_and_fix_if_needed(strategy: str, publish) -> bool:
     добавляем fix-задачу на доску вместо того чтобы объявить работу готовой.
     Возвращает True если задача добавлена (офис продолжит работу)."""
     problems = critic.check_site()
-    # Критические (не косметические) проблемы — только те, что ломают работу сайта
-    critical = [p for p in problems if any(w in p.lower() for w in
-                ("не отправляет", "нет формы", "не найден index", "пустой или не читается"))]
+    # Критические (не косметические) проблемы — единый критерий с приёмкой задачи.
+    critical = [p for p in problems if critic.is_critical(p)]
     if not critical:
         return False
     # Смотрим, не добавляли ли уже аналогичную fix-задачу
@@ -337,11 +384,14 @@ async def _verify_and_fix_if_needed(strategy: str, publish) -> bool:
     return True
 
 
-async def _publish_site_auto(publish) -> bool:
+async def _publish_site_auto(publish, note: str = "") -> bool:
     """
     Авто-публикация сайта офисом: как только в site/ есть index.html — публикуем сами,
     не дожидаясь, пока агент вызовет publish_site (он часто забывает/обрывается на
     длинном выводе). «Написал HTML → сайт сразу живой».
+
+    `note` — краткое «что изменилось» в этой правке (из отчёта агента). Идёт в журнал
+    ревизий сайта и в сообщение, чтобы каждая публикация читалась как понятная правка.
     """
     sdir = critic.site_dir()
     if sdir is None:
@@ -354,7 +404,7 @@ async def _publish_site_auto(publish) -> bool:
     # сайта — это шум, не новое решение. Разрешение один раз — action одобрен на весь
     # офис (сбрасывается вместе с ним/паузой).
     tid = ctx.get_tenant()
-    if not autonomy.can_auto("publish_site") and not autonomy.was_approved_once("publish_site"):
+    if autonomy.needs_approval("publish_site"):
         from src.office import questions as questions_mod, threads as threads_mod
         question_text = "Сайт готов к публикации. Опубликовать сейчас? (да/нет)"
         # Дедуп: если такой вопрос уже висит — не плодим повторно
@@ -398,10 +448,17 @@ async def _publish_site_auto(publish) -> bool:
 
     tid = ctx.get_tenant()
     title = (brief.get().get("goal", "") or "Сайт")[:60]
-    slug = sites.make_slug(title)
-    sites.save_dir(title, sdir, slug)
-    await publish({"type": "system",
-                   "text": f"🌐 Сайт опубликован: /site/{tid}/{slug} — форма собирает заявки в «Лиды»"})
+    slug = sites.main_slug()  # СТАБИЛЬНЫЙ адрес: одна ссылка на весь прогон, не плодим сайты
+    site = sites.save_dir(title, sdir, slug, note=note)
+    rev = site.get("revision", 1)
+    from src.office import trace
+    trace.log("publish", slug=slug, rev=rev, dir=sdir, note=(note or "")[:120])
+    if rev <= 1:
+        msg = f"🌐 Сайт опубликован: /site/{tid}/{slug} — форма собирает заявки в «Лиды»"
+    else:
+        tail = f" — {note[:90]}" if note else ""
+        msg = f"🌐 Сайт обновлён (правка {rev}): /site/{tid}/{slug}{tail}"
+    await publish({"type": "system", "text": msg})
     return True
 
 
@@ -464,7 +521,7 @@ async def _orchestrate(strategy: str, publish, tech_design: str = "", cycle: int
       1) CEO-тир — управляет ОТДЕЛАМИ (открыть/закрыть/цель). Вызывается по необходимости.
       2) Лидер-тир — каждый открытый отдел сам распределяет работу между подчинёнными.
     """
-    goal = brief.get().get("goal", "") or brief.summary()
+    goal = _goal()
     ms = milestones.all_stages()
 
     # ---- Висячие задачи: роль без отдела (analyst/researcher/неизвестная) не обслуживается
@@ -651,6 +708,12 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
         if ready:
             member_roles = org.member_roles(dept_id)
             handled = False
+            # Мьютекс артефакта: пока одна сайт-задача в работе, вторую НЕ назначаем —
+            # параллельные designer/developer переписывали site/index.html целиком и
+            # затирали друг друга («последний победил», 3D-версия исчезала).
+            site_busy = plan.site_task_in_progress()
+            if site_busy:
+                ready = [t for t in ready if not plan.touches_site(t)]
             # 1) Назначаем первую готовую задачу, под которую есть свободный работник.
             for t in ready:
                 free = _free_worker_of_role(dept_id, t.get("role", ""), now)
@@ -659,7 +722,7 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                     if t.get("done_criterion"):
                         task_txt += f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}"
                     plan.assign(t["id"], free.agent_id)  # доска: взято в работу
-                    _agent_task[free.agent_id] = t["id"]
+                    _agent_task[_tk(free.agent_id)] = t["id"]
                     await _assign(free.agent_id, free.role, task_txt, publish,
                                   department=dept_id, objective=objective, task_id=t["id"])
                     handled = True
@@ -756,10 +819,21 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                   department: str = "", objective: str = "", task_id: str = "") -> None:
     await publish({"type": "speech", "agent_id": "orchestrator_1",
                    "text": f"→ Поручаю {agent_id}: {task[:70]}"})
+    from src.office import trace
+    trace.log("assign", to=agent_id, role=role, dept=department,
+              task_id=task_id, task=task[:160])
+    # СИНХРОННО помечаем занятость ДО планирования _job: иначе между _assign и реальным
+    # стартом корутины (create_task выполняется позже) следующий проход цикла видел
+    # работника ещё idle и мог назначить ему вторую задачу той же роли (двойной ассайн).
+    registry.update_status(agent_id, "thinking")
+    _thinking_since[_tk(agent_id)] = time.time()
 
     async def _job():
         registry.update_status(agent_id, "thinking")
-        _thinking_since[agent_id] = time.time()
+        _thinking_since[_tk(agent_id)] = time.time()
+        _job_t0 = time.time()
+        trace.log("agent_start", agent=agent_id, role=role,
+                  model=models_module.for_agent(agent_id), skill=skill or "")
         try:
             if role == "researcher":
                 result = await researcher.run_async(task, depth="quick", publish=publish, agent_id=agent_id)
@@ -773,17 +847,29 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 # ---- Приёмка качества (критик) для сайтов: дизайнер/разработчик ----
                 if role in ("designer", "developer"):
                     await _review_and_maybe_fix(role, agent_id, task, skill, department,
-                                                objective, publish)
+                                                objective, publish, result=result or "")
             registry.update_status(agent_id, "done")
             state.save_last_run(agent_id)
-            _model_fail_count.pop(agent_id, None)  # успех — счётчик сбитой модели сбрасываем
+            trace.log("agent_done", agent=agent_id, role=role,
+                      sec=round(time.time() - _job_t0, 1), out_len=len(result or ""),
+                      task_id=task_id)
+            _model_fail_count.pop(_tk(agent_id), None)  # успех — счётчик сбитой модели сбрасываем
             _attribute_result(agent_id, role, result)
             # Память отдела: фиксируем, что отдел сделал — пригодится коллегам в след. циклах
             knowledge.note_result(department, role, result or "")
             # Доска: закрываем ИМЕННО эту задачу (а не «первую по роли»).
+            # ПУСТАЯ сдача задачу НЕ закрывает: агент вернул пустой результат (обрыв/
+            # только tool-calls) — возвращаем в очередь, иначе фиктивное «выполнено»
+            # (реальный кейс: integrator сдал пустоту, t3 закрылась).
             if task_id and plan.is_generated():
-                plan.complete(task_id)
-                await publish({"type": "system", "text": f"✅ Задача {task_id} выполнена"})
+                if (result or "").strip():
+                    plan.complete(task_id)
+                    await publish({"type": "system", "text": f"✅ Задача {task_id} выполнена"})
+                else:
+                    plan.revert(task_id)
+                    await publish({"type": "system",
+                                   "text": f"↩️ {agent_id} вернул пустой результат — "
+                                           f"задача {task_id} возвращена в очередь"})
             # Trust Score: успешная задача повышает доверие к отделу
             if department:
                 trust.record_success(department)
@@ -792,14 +878,19 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                     trust.mark_upgrade_proposed()
                     proposal = trust.upgrade_proposal_text()
                     if proposal:
-                        await publish({"type": "speech", "agent_id": "orchestrator_1",
-                                       "text": f"🤝 {proposal}"})
+                        # Actionable-предложение: событие несёт next_level, чтобы UI показал
+                        # кнопку «Повысить» (POST /api/autonomy/upgrade), а не просто текст (B3).
+                        nl = autonomy.next_level()
+                        await publish({"type": "autonomy_upgrade_offer", "agent_id": "orchestrator_1",
+                                       "next_level": nl, "text": f"🤝 {proposal}"})
             # Живость: «сделал → отчитался» — короткий итог в ленту.
             summary = (result or "").strip().replace("\n", " ")[:120]
             if summary:
                 await publish({"type": "speech", "agent_id": agent_id, "text": f"✅ Готово: {summary}"})
         except Exception as e:
             err_str = str(e)
+            trace.log("agent_error", agent=agent_id, role=role,
+                      sec=round(time.time() - _job_t0, 1), error=err_str[:200])
             await publish({"type": "error", "agent_id": agent_id, "text": err_str[:100]})
             registry.update_status(agent_id, "idle")
             if task_id and plan.is_generated():
@@ -817,11 +908,11 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 # не трогаем (может быть временный глюк шлюза) — но повтор той же ошибки
                 # для того же агента означает, что это НЕ пройдёт само, и без вмешательства
                 # офис повторял бы один и тот же провальный вызов бесконечно (было в проде).
-                n = _model_fail_count.get(agent_id, 0) + 1
-                _model_fail_count[agent_id] = n
+                n = _model_fail_count.get(_tk(agent_id), 0) + 1
+                _model_fail_count[_tk(agent_id)] = n
                 if n >= 2:
                     cleared = models_module.clear_broken_model(agent_id, role)
-                    _model_fail_count.pop(agent_id, None)
+                    _model_fail_count.pop(_tk(agent_id), None)
                     if cleared:
                         await publish({"type": "system",
                                        "text": f"⚙️ Модель «{cleared}» для {agent_id} недоступна у "
@@ -833,22 +924,45 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                                                f"похоже, недоступна сама модель офиса по умолчанию. "
                                                f"Проверьте «Компания → Интеллект»."})
             else:
-                _model_fail_count.pop(agent_id, None)
+                _model_fail_count.pop(_tk(agent_id), None)
         finally:
-            _thinking_since.pop(agent_id, None)
-            _agent_task.pop(agent_id, None)
+            _thinking_since.pop(_tk(agent_id), None)
+            _agent_task.pop(_tk(agent_id), None)
 
     asyncio.create_task(_job())
 
 
+def _engagement_needs_bot() -> bool:
+    """Нужен ли этому клиенту вообще Telegram-бот. Проверяем цель/бриф/план, а не
+    факт наличия bot.py — иначе случайно созданный агентом bot.py заставлял критик
+    требовать «почини бота» на чисто сайтовом проекте (реальный баг из прода)."""
+    b = brief.get()
+    hay = " ".join(str(b.get(k, "")) for k in ("goal", "summary", "niche")).lower()
+    if any(w in hay for w in ("бот", "bot", "telegram", "телеграм")):
+        return True
+    try:
+        for t in plan.all_tasks():
+            if any(w in (t.get("title", "").lower()) for w in ("бот", "bot", "telegram", "телеграм")):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
-                                department: str, objective: str, publish) -> None:
+                                department: str, objective: str, publish,
+                                result: str = "") -> None:
     """
     Приёмка результата сайта: программные проверки → при проблемах ОДНА доработка.
     Уроки сохраняются в память, выполненная задача плана отмечается готовой.
+
+    `result` — отчёт агента о том, ЧТО он сделал: используется как «что изменилось»
+    в журнале ревизий сайта (понятная правка вместо «новый сайт»).
     """
+    from src.office import trace
     task_l = (task or "").lower()
     files = [f["path"] for f in workspace.list_files()]
+    note = (result or "").strip().replace("\n", " ")[:160]
 
     # --- Верификация Python-кода ---
     py_files = [p for p in files if p.endswith(".py")]
@@ -866,9 +980,11 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
             await fn()
 
     # --- Верификация Telegram-бота ---
+    # ВАЖНО: бот-проверку запускаем ТОЛЬКО если бот реально в задаче/цели клиента.
+    # Раньше триггером был сам факт наличия bot.py, и случайно созданный агентом файл
+    # уводил сайтовый проект в бесконечную «починку бота» (баг из лога прода).
     bot_related = any(w in task_l for w in ("бот", "bot", "telegram", "телеграм"))
-    has_bot_file = any(p in ("bot.py", "main.py") for p in files)
-    if bot_related or has_bot_file:
+    if (bot_related or _engagement_needs_bot()) and any(p in ("bot.py", "main.py") for p in files):
         bot_problems = critic.check_bot()
         if bot_problems:
             for p in bot_problems:
@@ -890,15 +1006,21 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
 
     # Сайт всегда публикуем САМИ — не ждём, пока агент вызовет publish_site
     # (он часто забывает или обрывается на длинном выводе). Сайт сразу живой.
-    await _publish_site_auto(publish)
+    await _publish_site_auto(publish, note=note)
 
-    # Приёмка = программные проверки + «зрячая» оценка результата LLM-ревьюером.
-    goal = brief.get().get("goal", "") or brief.summary()
+    # Приёмка = программные проверки + ЗРЯЧАЯ проверка в браузере + LLM-оценка результата.
+    goal = _goal()
     problems = critic.check_site()
+    try:
+        problems = problems + await critic.review_site_visual()   # рендер в headless-браузере
+    except Exception:
+        pass
     try:
         problems = problems + await critic.review_site_llm(goal)
     except Exception:
         pass
+    trace.log("critic", agent=agent_id, phase="site", problems=len(problems),
+              detail=("; ".join(problems)[:200] if problems else "ok"))
     if not problems:
         return  # сайт принят (задачу плана закроет _job по task_id)
 
@@ -908,17 +1030,56 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
         lessons.add(role, f"Сайт: {p}")
     feedback = critic.critique_text(problems)
     await publish({"type": "speech", "agent_id": agent_id, "text": f"🔁 {feedback[:120]}"})
-    fix_task = (f"{task}\n\n{feedback}\n\nИсправь перечисленное прямо в файлах site/. "
-                f"Публиковать НЕ нужно — офис опубликует сам. Не начинай с нуля.")
+    # Инкрементальная правка с обязательным журналом изменений: агент чинит ТОЧЕЧНО
+    # существующие файлы (не переписывает сайт заново) и отчитывается, ЧТО поменял.
+    fix_task = (f"{task}\n\n{feedback}\n\n"
+                f"ЭТО ПРАВКА существующего сайта, НЕ новый сайт:\n"
+                f"1. Сначала read_file для каждого файла, который правишь.\n"
+                f"2. Меняй ТОЧЕЧНО только нужное, остальное сохрани как есть — НЕ начинай с нуля, "
+                f"НЕ сокращай сайт, НЕ выкидывай готовые секции.\n"
+                f"3. Публиковать НЕ нужно — офис опубликует сам.\n"
+                f"4. В конце ответа ОДНОЙ строкой: «Изменения: …» — что именно поправил.")
     ctx_task = _task_with_context(role, fix_task, skill, department=department, objective=objective)
     fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
-    await fn()
-    await _publish_site_auto(publish)  # перепубликуем исправленную версию
+    fix_result = await fn()
+    fix_note = (fix_result or "").strip().replace("\n", " ")
+    # Берём строку «Изменения: …», если агент её дал — это и есть человекочитаемая правка.
+    import re as _re
+    m = _re.search(r"Изменени[яе]\s*:\s*(.+)", fix_note)
+    fix_note = (m.group(1) if m else fix_note)[:160]
+    await _publish_site_auto(publish, note=fix_note or "правки по замечаниям критика")
+
+    # ПОВТОРНАЯ проверка после правки: раньше задача принималась безусловно, даже если
+    # правка не помогла — офис сдавал заведомо битый сайт (напр. форма не шлёт лиды).
+    # Одна ДОП. попытка на КРИТИЧЕСКИЕ проблемы; если и она не помогла — не молчим,
+    # а честно предупреждаем клиента. Задачу всё равно закрываем, чтобы не зациклиться.
+    remaining = critic.check_site()
+    critical = [p for p in remaining if critic.is_critical(p)]
+    trace.log("critic", agent=agent_id, phase="site_recheck",
+              problems=len(remaining), critical=len(critical))
+    if critical:
+        feedback2 = critic.critique_text(critical)
+        fix_task2 = (f"{task}\n\nОСТАЛИСЬ КРИТИЧЕСКИЕ ПРОБЛЕМЫ:\n{feedback2}\n\n"
+                     f"Почини ТОЧЕЧНО в существующих файлах site/ (read_file → правка), "
+                     f"публиковать не нужно. В конце строкой «Изменения: …».")
+        ctx_task2 = _task_with_context(role, fix_task2, skill, department=department, objective=objective)
+        r2 = await agent_factory.create(role, ctx_task2, agent_id, publish, skill=skill)()
+        n2 = (r2 or "").strip().replace("\n", " ")
+        m2 = _re.search(r"Изменени[яе]\s*:\s*(.+)", n2)
+        await _publish_site_auto(publish, note=(m2.group(1) if m2 else "повторная правка")[:160])
+        still = [p for p in critic.check_site() if critic.is_critical(p)]
+        if still:
+            # Честно: не выдаём битый результат за готовый — просим клиента вмешаться.
+            warn = "; ".join(still[:2])[:200]
+            await publish({"type": "system",
+                           "text": f"⚠️ Сайт сдан, но осталась нерешённая проблема: {warn}. "
+                                   f"Нужна ваша правка или уточнение в чате — команда доработает."})
+            trace.log("critic", agent=agent_id, phase="site_unresolved", detail=warn)
 
 
 def _task_with_context(role: str, task: str, skill: str = "",
                        department: str = "", objective: str = "") -> str:
-    goal = brief.get().get("goal", "") or brief.summary()
+    goal = _goal()
     cur = milestones.get(_cur_ms())
     stage = f"Текущий этап: {cur['title']}\n" if cur else ""
     skill_line = f"Твоя специализация: {skill}\n" if skill else ""
@@ -953,6 +1114,19 @@ def _attribute_result(agent_id: str, role: str, result: str) -> None:
 
 
 async def _bootstrap(publish) -> str:
+    # «Понимание компании» теперь влияет на поведение, а не только на индикатор (B4):
+    # при очень низком score офис честно предупреждает, что работает с неполным брифом,
+    # и приглашает клиента добавить контекст (не блокирует — просто снижает риск мимо цели).
+    try:
+        from src.office import understanding
+        score = understanding.payload().get("score", 100)
+        if score < 30:
+            await publish({"type": "system",
+                           "text": f"ℹ️ Понимание бизнеса пока низкое ({score}/100) — офис стартует "
+                                   f"с неполным брифом. Опишите бизнес и цель в чате CEO, чтобы "
+                                   f"результат точнее попал в задачу."})
+    except Exception:
+        pass
     await publish({"type": "system", "text": "=== BOOTSTRAP: исследуем нишу клиента ==="})
     milestones.mark_active("research")
     await _set_progress_note("Исследуем рынок и тренды", publish)
@@ -994,14 +1168,14 @@ async def _hire_and_run(role: str, task: str, publish, skill: str = "",
         objective = org.state_of(department).get("objective", "") if department else ""
         if task_id and plan.is_generated():
             plan.assign(task_id, agent_id)
-            _agent_task[agent_id] = task_id
+            _agent_task[_tk(agent_id)] = task_id
         await _assign(agent_id, role, task, publish, skill=skill,
                       department=department, objective=objective, task_id=task_id)
     else:
         await publish({"type": "system", "text": f"Не удалось зарегистрировать агента {agent_id}"})
 
 
-def _hire_initial(publish_sync) -> None:
+async def _hire_initial(publish) -> None:
     # CEO + штаб стратегии. Лидеры отделов и работники нанимаются по необходимости
     # (CEO открывает отдел → нанимается лидер → лидер нанимает работников).
     starters = [
@@ -1014,6 +1188,6 @@ def _hire_initial(publish_sync) -> None:
         if not registry.has_role(role):
             rec = registry.register(aid, role, task)
             if rec:
-                asyncio.get_event_loop().create_task(publish_sync({
+                await publish({
                     "type": "hired", "agent_id": aid, "role": role, "desk": rec.desk, "task": rec.task,
-                }))
+                })

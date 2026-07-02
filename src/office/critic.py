@@ -36,24 +36,46 @@ def site_dir() -> str | None:
     return _find_site_dir()
 
 
+def _site_files(site_dir: str) -> list[str]:
+    """Все файлы внутри папки сайта."""
+    files = [f["path"] for f in workspace.list_files()]
+    return [p for p in files if (not site_dir) or p.startswith(site_dir + "/")]
+
+
+def _read(path: str) -> str:
+    c = workspace.read_file(path)
+    return "" if (not c or c.startswith("Файл не найден")) else c
+
+
+def _basename(path: str) -> str:
+    return path.rsplit("/", 1)[-1]
+
+
 def check_site() -> list[str]:
     """
-    Программные проверки опубликованного/собранного сайта. Возвращает список проблем
-    (пустой = всё ок). Дёшево, без LLM — ловит самые частые провалы.
+    Программный тестировщик собранного сайта — как ручная проверка инженера, но
+    детерминированно и без LLM. Проверяет НЕ только index, а ВСЕ страницы: структуру
+    HTML, целостность ссылок, рабочесть форм на каждой странице, синтаксис JS (реальный
+    node --check), дубли/заглушки, базовую доступность. Возвращает список проблем.
     """
     site_dir = _find_site_dir()
     if site_dir is None:
         return ["Не найден index.html — сайт ещё не собран. Создай site/index.html через write_file."]
 
-    problems: list[str] = []
     idx_path = f"{site_dir}/index.html" if site_dir else "index.html"
-    html = workspace.read_file(idx_path)
-    if not html or html.startswith("Файл не найден"):
+    html = _read(idx_path)
+    if not html:
         return ["index.html пустой или не читается — перепиши его полностью."]
 
+    problems: list[str] = []
+    in_dir = _site_files(site_dir)
+    html_pages = [p for p in in_dir if p.endswith(".html")]
+    js_files = [p for p in in_dir if p.endswith(".js")]
+    existing_names = {_basename(p) for p in in_dir}
     low = html.lower()
-    files = [f["path"] for f in workspace.list_files()]
-    in_dir = [p for p in files if (not site_dir) or p.startswith(site_dir + "/")]
+
+    # Общий JS всех страниц (fetch формы часто в отдельном script.js).
+    js_blob = "\n".join(_read(p).lower() for p in js_files)
 
     # 1. Внешние картинки часто не грузятся (Unsplash и т.п.) — требуем локальные/SVG.
     ext_imgs = re.findall(r'<img[^>]+src=["\']https?://[^"\']+', html, re.IGNORECASE)
@@ -62,26 +84,163 @@ def check_site() -> list[str]:
             f"Внешние картинки ({len(ext_imgs)} шт., напр. Unsplash) не грузятся и ломают вид — "
             "замени на встроенные SVG или CSS-градиентные блоки.")
 
-    # 2. Одностраничник без отдельных файлов стиля — просим полноценную структуру.
-    has_css_file = any(p.endswith(".css") for p in in_dir)
-    has_inline_style = "<style" in low
-    if not has_css_file and not has_inline_style:
+    # 2. Стили должны быть.
+    if not any(p.endswith(".css") for p in in_dir) and "<style" not in low:
         problems.append("Нет стилей вообще — добавь css/style.css или хотя бы <style>.")
 
-    # 3. Форма должна слать заявки в нашу систему лидов.
-    if "<form" in low and "/api/site-lead" not in low:
-        problems.append("Форма не отправляет заявки на /api/site-lead — лиды не попадут в «Лиды».")
-    if "<form" not in low:
-        problems.append("Нет формы заявки — сайт не собирает лиды.")
-
-    # 4. Базовая полнота: title и заметный объём контента.
+    # 3. index: title и объём.
     if "<title" not in low:
-        problems.append("Нет <title> — добавь заголовок страницы.")
-    if len(html) < 1500:
-        problems.append("Слишком мало контента для лендинга — добавь секции (оффер, услуги, преимущества, отзывы).")
+        problems.append("Нет <title> у главной — добавь заголовок страницы.")
+    if len(html) < 1200:
+        problems.append("Слишком мало контента на главной — добавь секции (оффер, услуги, преимущества, отзывы).")
 
-    # 5. Многостраничность приветствуется, но не блокирует (мягкая подсказка не нужна в проблемах).
+    # 4. ФОРМЫ на КАЖДОЙ странице реально шлют на /api/site-lead (не только index).
+    stub_markers = ("подключаем crm", "подключаем эндпоинт", "готово к отправке",
+                    "эндпоинт скоро", "заглушк", "todo", "coming soon")
+    pages_with_form = [p for p in html_pages if "<form" in _read(p).lower()]
+    if not pages_with_form:
+        problems.append("Нет формы заявки ни на одной странице — сайт не собирает лиды.")
+    for p in pages_with_form:
+        page_low = _read(p).lower()
+        sends = "/api/site-lead" in page_low or "/api/site-lead" in js_blob
+        if not sends:
+            problems.append(f"{_basename(p)}: форма не отправляет заявки на /api/site-lead — лиды теряются.")
+        elif any(s in (page_low + js_blob) for s in stub_markers) and "/api/site-lead" not in page_low:
+            problems.append(f"{_basename(p)}: форма-заглушка (фраза «подключаем/готово»), реальной отправки нет.")
+
+    # 5. ЦЕЛОСТНОСТЬ ССЫЛОК: каждая внутренняя ссылка ведёт на существующий файл.
+    broken = set()
+    for p in html_pages:
+        for href in re.findall(r'href=["\']([^"\'#?]+\.html)[^"\']*["\']', _read(p), re.IGNORECASE):
+            target = _basename(href.strip("/"))
+            if target and target not in existing_names:
+                broken.add(f"{_basename(p)} → {target}")
+    if broken:
+        problems.append(f"Битые внутренние ссылки на несуществующие страницы: {'; '.join(sorted(broken)[:5])}.")
+
+    # 6. СТРУКТУРА HTML каждой страницы: базовый каркас + мобильный viewport + lang.
+    for p in html_pages:
+        c = _read(p).lower()
+        if not c:
+            continue
+        if "<html" not in c or "<body" not in c:
+            problems.append(f"{_basename(p)}: сломан каркас HTML (нет <html>/<body>).")
+        if "viewport" not in c:
+            problems.append(f"{_basename(p)}: нет мета viewport — сайт сломан на телефоне.")
+        if "<html" in c and "lang=" not in c:
+            problems.append(f"{_basename(p)}: у <html> нет lang — важно для доступности/SEO.")
+
+    # 7. ЗАГЛУШКИ/ДУБЛИ: пустые страницы и свалка почти одинаковых файлов.
+    for p in html_pages:
+        c = _read(p)
+        # ВАЖНО: не матчим слово "placeholder" — это HTML-атрибут инпутов, а не заглушка.
+        # Признак заглушки: крошечный файл или lorem/явная пометка «заглушка».
+        text_only = re.sub(r"<[^>]+>", "", c)
+        if len(c) < 500 or "lorem ipsum" in c.lower() or "текст-заглушка" in c.lower() \
+                or len(text_only.strip()) < 200:
+            problems.append(f"{_basename(p)}: страница-заглушка/пустая — доделай или удали.")
+    dup = _near_duplicate_pages(html_pages)
+    if dup:
+        problems.append(f"Много почти одинаковых страниц ({dup}) — это свалка дублей, "
+                        "оставь по одной на смысл, остальные удали.")
+
+    # 8. JS-СИНТАКСИС: реальный прогон node --check (как ручная проверка), если node есть.
+    for p in js_files:
+        err = _js_syntax_error(_read(p))
+        if err:
+            problems.append(f"{_basename(p)}: JS-ошибка синтаксиса — {err[:100]}")
+
+    # 9. ДОСТУПНОСТЬ (базово): картинки без alt.
+    imgs_no_alt = 0
+    for p in html_pages:
+        imgs_no_alt += len([m for m in re.findall(r'<img\b[^>]*>', _read(p), re.IGNORECASE)
+                            if 'alt=' not in m.lower()])
+    if imgs_no_alt:
+        problems.append(f"Картинки без alt ({imgs_no_alt} шт.) — добавь alt для доступности/SEO.")
+
+    # 10. ФЕЙКОВОЕ 3D: страница заявляет «3D», но это статичная CSS-плашка без движения.
+    fake_3d = _fake_3d_problem(low, js_blob)
+    if fake_3d:
+        problems.append(fake_3d)
+
     return problems
+
+
+def _fake_3d_problem(low_html: str, js_blob: str) -> str | None:
+    """
+    Скилл framer_motion_3d_site требует минимум 2 живых эффекта (mousemove-tilt,
+    scroll-параллакс) — статичный `transform: rotateX(...)` без обработчиков
+    считается «плашкой», а не 3D (см. playbook в skills.py). Реальный кейс: агент
+    писал "3D-концепт"/"3D-эффекты" в тексте страницы, но кроме неподвижного CSS
+    transform там ничего не было — критик это пропускал, публикация не менялась
+    по сути от цикла к циклу.
+    """
+    claims_3d = any(m in low_html for m in ("3d-концепт", "3d-эффект", "3d-лендинг", "премиальный 3d"))
+    if not claims_3d:
+        return None
+
+    blob = low_html + "\n" + js_blob
+    has_framer = "framer-motion" in blob or "importmap" in blob
+    has_live_js = bool(re.search(r"addeventlistener\(['\"](mousemove|scroll)", blob)) \
+        or "intersectionobserver" in blob \
+        or "requestanimationframe" in blob
+    if has_framer or has_live_js:
+        return None
+    return ("Заявлен «3D», но это статичная CSS-плашка без движения (нет framer-motion/importmap "
+            "и нет JS-обработчиков mousemove/scroll) — по правилам скилла это не считается 3D. "
+            "Либо добавь настоящие живые эффекты (tilt за курсором + scroll-параллакс), "
+            "либо убери упоминания «3D» из текста.")
+
+
+def _near_duplicate_pages(pages: list[str]) -> int:
+    """Число страниц, у которых есть почти-дубль (перекрытие текста ≥ 0.85). Ловит
+    свалку из клонов вроде kuhnya.html / kuhnya-kmv.html / kuhnya-vannaya.html."""
+    def toks(path: str) -> set[str]:
+        text = re.sub(r"<[^>]+>", " ", _read(path)).lower()
+        return {w for w in re.split(r"[^\wа-яё]+", text) if len(w) > 3}
+    tokmap = {p: toks(p) for p in pages}
+    dupes = set()
+    items = list(tokmap.items())
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            a, b = items[i][1], items[j][1]
+            if not a or not b:
+                continue
+            jacc = len(a & b) / len(a | b)
+            if jacc >= 0.85:
+                dupes.add(items[i][0])
+                dupes.add(items[j][0])
+    return len(dupes)
+
+
+def _js_syntax_error(code: str) -> str:
+    """Проверяет JS через `node --check` (реальный парсер). '' если ок или node недоступен."""
+    if not code.strip():
+        return ""
+    import shutil
+    if not shutil.which("node"):
+        return ""  # node нет на сервере — тихо пропускаем (не ложная тревога)
+    import subprocess, tempfile, os
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            tmp = f.name
+        r = subprocess.run(["node", "--check", tmp], capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            out = (r.stderr or r.stdout or "").strip().splitlines()
+            # Берём осмысленную строку об ошибке (SyntaxError/Error), а не баннер «Node.js vXX».
+            err_line = next((ln for ln in out if "error" in ln.lower() and "node.js" not in ln.lower()), "")
+            return (err_line or "синтаксическая ошибка").strip()
+        return ""
+    except Exception:
+        return ""
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
 
 
 async def review_site_llm(goal: str) -> list[str]:
@@ -127,6 +286,65 @@ async def review_site_llm(goal: str) -> list[str]:
         return [str(f)[:200] for f in fixes if f][:4]
     except Exception:
         return []
+
+
+async def review_site_visual() -> list[str]:
+    """
+    ЗРЯЧАЯ проверка: реально РЕНДЕРИТ сайт в headless-браузере (Playwright) и ловит то,
+    что видно только на отрисованной странице — ошибки в консоли, горизонтальный скролл
+    и блоки, вылезающие за экран (кривая вёрстка), пустой рендер. Это аналог ручного
+    осмотра инженером «ровно ли стоит».
+
+    Требует playwright (+ chromium): `pip install playwright && playwright install chromium`.
+    Если не установлен или рендер не удался — возвращает [] (не блокирует офис).
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except Exception:
+        return []
+    sdir = _find_site_dir()
+    idx = workspace.resolve(f"{sdir}/index.html" if sdir else "index.html")
+    if idx is None or not idx.is_file():
+        return []
+
+    problems: list[str] = []
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch()
+            # Мобильная ширина — тут вёрстка ломается чаще всего.
+            page = await browser.new_page(viewport={"width": 390, "height": 844})
+            errors: list[str] = []
+            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            try:
+                await page.goto(idx.as_uri(), wait_until="load", timeout=15000)
+                await page.wait_for_timeout(400)  # дать выполниться скриптам/анимациям входа
+            except Exception:
+                await browser.close()
+                return []
+            if errors:
+                problems.append(f"Ошибка JS в консоли при загрузке: {errors[0][:120]} — кнопки/форма могут не работать.")
+            body_h = await page.evaluate("() => document.body ? document.body.scrollHeight : 0")
+            if body_h < 200:
+                problems.append("При рендере страница почти пустая (высота < 200px) — контент не отображается.")
+            overflow = await page.evaluate(
+                "() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2")
+            if overflow:
+                problems.append("На мобильном есть горизонтальный скролл — блоки шире экрана, вёрстка ломается.")
+            over_n = await page.evaluate("""() => {
+                const w = document.documentElement.clientWidth; let n = 0;
+                for (const el of document.querySelectorAll('body *')) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0 && (r.right > w + 2 || r.left < -2)) n++;
+                }
+                return n;
+            }""")
+            if over_n > 3:
+                problems.append(f"{over_n} элементов вылезают за край экрана — проверь ширины/отступы (padding, width:100%).")
+            await browser.close()
+    except Exception:
+        return []
+    return problems
 
 
 def check_bot() -> list[str]:
@@ -185,6 +403,20 @@ def check_python_files() -> list[str]:
             except Exception:
                 pass
     return problems
+
+
+# Признаки КРИТИЧЕСКОЙ (ломающей работу) проблемы сайта — в отличие от косметики.
+# Единый источник правды: используется и финальной верификацией, и приёмкой задачи.
+_CRITICAL_MARKERS = ("не отправляет", "нет формы", "не найден index",
+                     "пустой или не читается", "форма не", "не собирает заявки",
+                     "не работает", "битая ссылка", "битые внутренние ссылки", "сломан",
+                     "js-ошибка", "нет мета viewport", "заглушк", "теряются",
+                     "ошибка js в консоли", "горизонтальный скролл", "почти пустая")
+
+
+def is_critical(problem: str) -> bool:
+    p = (problem or "").lower()
+    return any(w in p for w in _CRITICAL_MARKERS)
 
 
 def critique_text(problems: list[str]) -> str:
