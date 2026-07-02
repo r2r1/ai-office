@@ -372,38 +372,45 @@ async def logout():
 
 
 @app.get("/events")
-async def events():
+async def events(request: Request):
     """SSE endpoint — события только своего тенанта (из контекста запроса)."""
     tid = saas_context.get_tenant()
     q = bus.subscribe(tid)
+    # Реконнект браузера: EventSource присылает Last-Event-ID. Тогда снапшот+историю
+    # НЕ повторяем (клиент их уже получил) — иначе на каждый разрыв прилетали дубли.
+    is_reconnect = bool(request.headers.get("last-event-id"))
 
-    # Отправляем текущее состояние реестра при подключении
     async def stream():
         saas_context.set_tenant(tid)  # контекст для чтения снапшота внутри генератора
+        seq = 0
         try:
-            # Снапшот текущих агентов
-            for agent in registry.all_agents():
-                snapshot = {
-                    "type": "hired",
-                    "agent_id": agent.agent_id,
-                    "role": agent.role,
-                    "desk": agent.desk,
-                    "task": agent.task,
-                    "status": agent.status,
-                    "last_message": agent.last_message,
-                }
-                yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+            if not is_reconnect:
+                # Снапшот текущих агентов
+                for agent in registry.all_agents():
+                    snapshot = {
+                        "type": "hired",
+                        "agent_id": agent.agent_id,
+                        "role": agent.role,
+                        "desk": agent.desk,
+                        "task": agent.task,
+                        "status": agent.status,
+                        "last_message": agent.last_message,
+                    }
+                    seq += 1
+                    yield f"id: {seq}\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
 
-            # Исторические события из прошлых сессий
-            for evt in state.history()[-50:]:
-                historical = dict(evt, historical=True)
-                yield f"data: {json.dumps(historical, ensure_ascii=False)}\n\n"
+                # Исторические события из прошлых сессий
+                for evt in state.history()[-50:]:
+                    historical = dict(evt, historical=True)
+                    seq += 1
+                    yield f"id: {seq}\ndata: {json.dumps(historical, ensure_ascii=False)}\n\n"
 
-            # Живой поток
+            # Живой поток — каждому событию свой id, чтобы браузер отслеживал Last-Event-ID
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=30)
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    seq += 1
+                    yield f"id: {seq}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": heartbeat\n\n"
         finally:
@@ -597,6 +604,14 @@ async def get_logs():
         txt = e.get("text") or e.get("summary") or ""
         lines.append(f"  [{etype}] {who}: {txt[:200]}")
 
+    # Детальный системный трейс — с временем, инструментами, длительностями, моделями,
+    # токенами, публикациями, вердиктами критика. Это «всё, что произошло внутри».
+    from src.office import trace as _trace
+    trace_text = _trace.as_text(2000)
+    if trace_text:
+        lines.append("\n## ДЕТАЛЬНЫЙ ТРЕЙС (системный, с временными метками)")
+        lines.append(trace_text)
+
     # Готовые результаты (полные)
     lines.append("\n## ГОТОВЫЕ РЕЗУЛЬТАТЫ (полный текст)")
     for d in state.deliverables():
@@ -616,6 +631,13 @@ async def get_logs():
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@app.get("/api/trace")
+async def get_trace(limit: int = 400):
+    """Детальный системный трейс (JSON): время, инструменты, длительности, публикации."""
+    from src.office import trace as _trace
+    return {"trace": _trace.tail(max(1, min(limit, 4000)))}
 
 
 @app.get("/api/deliverables")
@@ -736,13 +758,30 @@ async def serve_site_asset(tenant: str, slug: str, path: str):
     return _serve_site_file(site, path or "index.html")
 
 
+# Публично отдаём только веб-ресурсы. Если сайт опубликован из КОРНЯ workspace
+# (root==""), без этого фильтра были бы доступны bot.py с токенами, docs/*, .env и т.п.
+_WEB_ASSET_EXT = {
+    ".html", ".htm", ".css", ".js", ".mjs", ".map", ".json", ".svg", ".png", ".jpg",
+    ".jpeg", ".gif", ".webp", ".avif", ".ico", ".woff", ".woff2", ".ttf", ".otf",
+    ".mp4", ".webm", ".mp3", ".txt", ".xml", ".webmanifest",
+}
+# Явно приватное — никогда не отдаём, даже если попало в веб-папку.
+_FORBIDDEN_NAMES = {".env", "requirements.txt", "config.py", "bot.py", "main.py"}
+
+
 def _serve_site_file(site: dict, subpath: str):
     """Отдаёт файл из папки опубликованного сайта с корректным content-type."""
     import mimetypes
     import re as _re
+    from pathlib import PurePosixPath
     from fastapi.responses import Response
     root = (site.get("root") or "").strip("/")
     rel = (f"{root}/{subpath}").strip("/") if root else subpath
+    # Защита от отдачи исходников/секретов при публикации из корня workspace.
+    name = PurePosixPath(rel).name.lower()
+    ext = PurePosixPath(rel).suffix.lower()
+    if name in _FORBIDDEN_NAMES or (ext and ext not in _WEB_ASSET_EXT):
+        return HTMLResponse("<h1>Не найдено</h1>", status_code=404)
     full = workspace_module.resolve(rel)
     if full is None or not full.is_file():
         idx = (f"{root}/index.html").strip("/") if root else "index.html"
@@ -765,24 +804,90 @@ def _serve_site_file(site: dict, subpath: str):
     return Response(content=full.read_bytes(), media_type=ctype)
 
 
+async def _notify_lead(lead: dict) -> None:
+    """
+    Заметное уведомление о новой заявке: событие в ленту + сообщение в личный чат CEO,
+    чтобы сработал бейдж непрочитанного (раньше лид был только строкой в SSE-ленте и
+    легко терялся — для лид-ген продукта это ключевое событие).
+    """
+    text = f"🎯 Новая заявка с сайта: {lead.get('name') or 'без имени'} — {lead.get('contact','')}"
+    if (lead.get("message") or "").strip():
+        text += f'\n«{lead["message"][:160]}»'
+    await bus.publish({"type": "lead_captured", "slug": lead.get("slug", ""), "lead": lead, "text": text})
+    try:
+        threads_module.post("orchestrator_1", "agent", text, kind="msg")
+        await bus.publish({"type": "agent_message", "agent_id": "orchestrator_1",
+                           "from": "agent", "kind": "msg", "text": text})
+    except Exception:
+        pass
+
+
+async def _lead_payload(request: Request) -> tuple[dict, bool]:
+    """
+    Данные заявки из запроса: JSON ИЛИ обычная HTML-форма (form-urlencoded/multipart).
+    Агенты иногда делают <form method=POST action=...> без fetch — раньше такой POST
+    падал на request.json() → data={} → 400 «нужен контакт», и ЛИД ТЕРЯЛСЯ (реальный
+    кейс из прода). Возвращает (data, is_native_form) — для нативной формы отвечаем
+    HTML-страницей «Спасибо», а не JSON.
+    """
+    ctype = (request.headers.get("content-type") or "").lower()
+    if "json" in ctype:
+        try:
+            return dict(await request.json()), False
+        except Exception:
+            return {}, False
+    if "form" in ctype:  # application/x-www-form-urlencoded или multipart/form-data
+        try:
+            form = await request.form()
+            return {k: str(v) for k, v in form.items()}, True
+        except Exception:
+            return {}, True
+    try:  # content-type не выставлен — пробуем JSON, затем форму
+        return dict(await request.json()), False
+    except Exception:
+        try:
+            form = await request.form()
+            return {k: str(v) for k, v in form.items()}, True
+        except Exception:
+            return {}, False
+
+
+_LEAD_THANKS_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Заявка отправлена</title>
+<style>body{margin:0;min-height:100svh;display:grid;place-items:center;font-family:Inter,system-ui,Arial,sans-serif;background:#0d1220;color:#ecf2ff}.card{max-width:440px;padding:40px 36px;text-align:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:22px}.ok{font-size:44px}h1{font-size:22px;margin:14px 0 8px}p{color:#a9b5d1;line-height:1.6;margin:0 0 22px}a{display:inline-block;padding:12px 22px;border-radius:12px;background:linear-gradient(135deg,#8dd3ff,#6f8cff);color:#08111f;font-weight:700;text-decoration:none}</style>
+</head><body><div class="card"><div class="ok">✅</div><h1>Заявка отправлена</h1>
+<p>Спасибо! Мы получили вашу заявку и свяжемся с вами в ближайшее время.</p>
+<a href="javascript:history.back()">← Вернуться на сайт</a></div></body></html>"""
+
+
+def _extract_lead_fields(data: dict) -> tuple[str, str, str]:
+    """Имя/контакт/сообщение из полей формы с учётом всех вариантов имён полей агентов."""
+    name = (data.get("name") or data.get("имя") or "").strip()
+    contact = (data.get("contact") or data.get("phone") or data.get("tel")
+               or data.get("telefon") or data.get("email") or data.get("телефон") or "").strip()
+    msg = (data.get("message") or data.get("comment") or data.get("комментарий") or "").strip()
+    # Служебные поля (utm_*, quiz-выбор) — в хвост сообщения, чтобы не терять контекст лида.
+    extra = "; ".join(f"{k}={v}" for k, v in data.items()
+                      if v and k not in ("name", "имя", "contact", "phone", "tel", "telefon",
+                                         "email", "телефон", "message", "comment", "комментарий"))
+    if extra:
+        msg = (msg + " | " + extra) if msg else extra
+    return name, contact, msg[:600]
+
+
 @app.post("/api/lead/{tenant}/{slug}")
 async def capture_lead(tenant: str, slug: str, request: Request):
     """Приём заявки с формы лендинга — реальный лид для тенанта (публично)."""
     saas_context.set_tenant(tenant)
     if sites_module.get(slug) is None:
         return JSONResponse({"error": "страница не найдена"}, status_code=404)
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    name = (data.get("name") or "").strip()
-    contact = (data.get("contact") or "").strip()
+    data, native = await _lead_payload(request)
+    name, contact, msg = _extract_lead_fields(data)
     if not contact:
         return JSONResponse({"error": "нужен контакт"}, status_code=400)
-    lead = leads_module.add(slug, name, contact, data.get("message", ""))
-    await bus.publish({"type": "lead_captured", "slug": slug, "lead": lead,
-                       "text": f"🎯 Новая заявка: {lead['name'] or 'без имени'} — {lead['contact']}"})
-    return {"ok": True}
+    lead = leads_module.add(slug, name, contact, msg)
+    await _notify_lead(dict(lead, slug=slug))
+    return HTMLResponse(_LEAD_THANKS_HTML) if native else {"ok": True}
 
 
 @app.post("/api/site-lead")
@@ -801,20 +906,13 @@ async def capture_site_lead(request: Request):
     saas_context.set_tenant(tenant)
     if sites_module.get(slug) is None:
         return JSONResponse({"error": "сайт не найден"}, status_code=404)
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    name = (data.get("name") or data.get("имя") or "").strip()
-    contact = (data.get("contact") or data.get("phone") or data.get("telefon")
-               or data.get("email") or data.get("телефон") or "").strip()
+    data, native = await _lead_payload(request)
+    name, contact, msg = _extract_lead_fields(data)
     if not contact:
         return JSONResponse({"error": "нужен контакт (телефон или email)"}, status_code=400)
-    msg = data.get("message") or data.get("comment") or data.get("комментарий") or ""
     lead = leads_module.add(slug, name, contact, msg)
-    await bus.publish({"type": "lead_captured", "slug": slug, "lead": lead,
-                       "text": f"🎯 Новая заявка: {lead['name'] or 'без имени'} — {lead['contact']}"})
-    return {"ok": True}
+    await _notify_lead(dict(lead, slug=slug))
+    return HTMLResponse(_LEAD_THANKS_HTML) if native else {"ok": True}
 
 
 @app.post("/tg/{tenant}/{secret}")
@@ -1358,6 +1456,13 @@ async def post_autonomy(request: Request):
         return JSONResponse({"error": f"Уровень должен быть одним из: {autonomy_module.LEVELS}"}, status_code=400)
     autonomy_module.set_level(level)
     return {"ok": True, "level": level}
+
+
+@app.post("/api/autonomy/upgrade")
+async def post_autonomy_upgrade(request: Request):
+    """Повысить автономию на один уровень — приём предложения офиса одним нажатием (B3)."""
+    new_level = autonomy_module.upgrade()
+    return {"ok": True, "level": new_level}
 
 
 @app.get("/api/trust")

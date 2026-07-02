@@ -10,7 +10,11 @@ from src.saas import context as ctx
 
 _FILE = "state.json"
 MAX_EVENTS = 800
-RECORD_TYPES = {"hired", "speech", "task_done", "system", "error", "connection_added", "connection_error"}
+# «speech» намеренно НЕ персистится: это самый частый тип (живая болтовня агентов),
+# и запись его в историю переписывала весь state.json на каждое событие — блокирующий
+# I/O в event-loop десятки раз в секунду. Живой поток speech идёт в SSE и в детальный
+# trace (с временем); в постоянной истории он не нужен. Значимые вехи — ниже.
+RECORD_TYPES = {"hired", "task_done", "system", "error", "connection_added", "connection_error"}
 
 
 def _load() -> dict:

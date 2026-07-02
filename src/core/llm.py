@@ -14,6 +14,7 @@
 import json
 import os
 import re
+import time
 from typing import Optional, Callable, Awaitable, Any
 
 from dotenv import load_dotenv
@@ -72,6 +73,10 @@ def _parse_tool_args(raw: str) -> dict:
 BASE_URL = os.getenv("LLM_BASE_URL", "https://apinet.cloud/v1")
 API_KEY = os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "glm-4.5-flash")
+# Жёсткий потолок на ОДИН вызов API: без него зависший запрос к провайдеру висит
+# бесконечно (watchdog офиса лишь метит агента idle, но саму корутину не убивает),
+# продолжая держать соединение. wait_for гарантирует, что вызов завершится.
+CALL_TIMEOUT = float(os.getenv("LLM_CALL_TIMEOUT", "180"))
 
 
 def _resolve_creds() -> tuple[str, str]:
@@ -181,12 +186,17 @@ async def run_agent(
         # в логах — 197k входных токенов на агента). Последние KEEP держим полными.
         if _it > 0:
             _mask_old_observations(messages, keep_last=3)
+        _api_t0 = time.time()
         try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools or None,
-                max_tokens=max_tokens,
+            import asyncio as _asyncio
+            resp = await _asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    tools=tools or None,
+                    max_tokens=max_tokens,
+                ),
+                timeout=CALL_TIMEOUT,
             )
         except Exception as e:
             # Недоступная модель (503/нет канала) НЕ должна зацикливать офис: один раз
@@ -206,6 +216,12 @@ async def run_agent(
             pout = getattr(usage, "completion_tokens", 0) or 0
             in_tokens += pin
             out_tokens += pout
+            try:
+                from src.office import trace
+                trace.log("llm", agent=agent_id, model=model, it=_it,
+                          ms=int((time.time() - _api_t0) * 1000), tok_in=pin, tok_out=pout)
+            except Exception:
+                pass
             # ИНКРЕМЕНТАЛЬНЫЙ учёт: пишем расход СРАЗУ после каждого ответа API,
             # а не в конце run_agent. Иначе длинные/зависшие прогоны (deep research,
             # агент, сброшенный watchdog) тратят реальные деньги, но в индикаторе $0.
@@ -256,6 +272,7 @@ async def run_agent(
                 })
                 continue
 
+            _tool_t0 = time.time()
             if name == "web_search":
                 query = args.get("query", "")
                 qnorm = " ".join(query.lower().split())
@@ -277,6 +294,17 @@ async def run_agent(
                 result = await tool_handlers[name](args)
             else:
                 result = f"Неизвестный инструмент: {name}"
+
+            # Детальный трейс инструмента: что вызвал, ключевой аргумент, сколько занял,
+            # размер результата — «куда что ушло» видно в системном логе.
+            try:
+                from src.office import trace
+                arg_hint = args.get("path") or args.get("query") or args.get("need") or \
+                    args.get("name") or args.get("question") or ""
+                trace.log("tool", agent=agent_id, tool=name, arg=str(arg_hint)[:120],
+                          ms=int((time.time() - _tool_t0) * 1000), out_len=len(result or ""))
+            except Exception:
+                pass
 
             messages.append({
                 "role": "tool",

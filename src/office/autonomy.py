@@ -34,18 +34,53 @@ LEVEL_INFO = {
     },
 }
 
-# Минимальный уровень для авто-выполнения без вопроса пользователю
+# Минимальный уровень для авто-выполнения без вопроса пользователю.
+# ⚠️ Здесь только ВНЕШНЕ-ВИДИМЫЕ действия, которые реально гейтятся:
+#   publish_site — в loop/website; launch_bot/create_repo/send_message/use_integration —
+#   в agent_factory._execute_integration. Внутренние действия в песочнице (write_file,
+#   run_command, hire, open_department) НЕ гейтятся намеренно — они безопасны и без них
+#   офис не может работать; держать их здесь = врать пользователю про «scout».
 _ACTION_MIN_LEVEL: dict[str, str] = {
+    # publish_site — самое ответственное (публичный сайт), с отдельным диалогом-одобрением.
     "publish_site":    "trusted",
-    "launch_bot":      "trusted",
-    "create_repo":     "trusted",
-    "hire":            "trusted",
+    # Прочие внешние действия разрешены с «guided» (дефолт) и выше; блокируются только
+    # на «scout» («только рекомендации»), где офис не действует во внешнем мире без клиента.
+    "launch_bot":      "guided",
+    "create_repo":     "guided",
     "send_message":    "guided",
-    "open_department": "guided",
     "use_integration": "guided",
-    "write_file":      "guided",
-    "run_command":     "guided",
 }
+
+
+def _action_type_for(action_name: str) -> str:
+    """Имя действия интеграции → тип для гейта автономии."""
+    a = (action_name or "").lower()
+    if "publish" in a:
+        return "publish_site"
+    if "launch_bot" in a or a in ("start_bot",):
+        return "launch_bot"
+    if "repo" in a or a == "push":
+        return "create_repo"
+    if "send" in a or "message" in a or "email" in a:
+        return "send_message"
+    return "use_integration"
+
+
+def needs_approval(action_type: str) -> bool:
+    """
+    Единая точка governance: требует ли действие явного OK клиента прямо сейчас.
+    Базовое решение — заработанный уровень автономии (+ «одобрено один раз»). Поверх —
+    ЖЁСТКИЙ оверрайд Конституции: если компания явно задала правило для действия, оно
+    имеет приоритет (True → всегда спрашивать, False → всегда разрешать).
+    """
+    try:
+        from src.office import constitution
+        ov = constitution.override_for(action_type)
+        if ov is not None:
+            return ov
+    except Exception:
+        pass
+    return not can_auto(action_type) and not was_approved_once(action_type)
 
 _DEFAULT_LEVEL = "guided"
 
@@ -101,14 +136,46 @@ def was_approved_once(action_type: str) -> bool:
     return action_type in (d.get("approved_once") or [])
 
 
+def reset_approvals() -> None:
+    """
+    Сбрасывает разовые одобрения. Разрешение «опубликовать» действовало в рамках
+    ТЕКУЩЕГО прогона/цели, а не навсегда — но сброса не было, и однажды одобрив
+    публикацию, клиент включал авто-публикацию на весь срок жизни тенанта. Зовётся
+    при паузе/возобновлении и смене цели.
+    """
+    d = ctx.read_json("autonomy", None) or {}
+    if d.get("approved_once"):
+        d["approved_once"] = []
+        ctx.write_json("autonomy", d)
+
+
+def next_level() -> str:
+    """Следующий уровень автономии вверх, или '' если уже максимум."""
+    i = _idx(get_level())
+    return LEVELS[i + 1] if i + 1 < len(LEVELS) else ""
+
+
+def upgrade() -> str:
+    """Поднять автономию на один уровень. Возвращает новый уровень (или текущий, если макс)."""
+    nl = next_level()
+    if nl:
+        set_level(nl)
+        return nl
+    return get_level()
+
+
 def payload() -> dict:
     level = get_level()
     info = LEVEL_INFO[level]
+    nl = next_level()
     return {
         "level": level,
         "icon": info["icon"],
         "name": info["name"],
         "desc": info["desc"],
+        # Для actionable-предложения «повысить доверие» одним нажатием (B3).
+        "next_level": nl,
+        "can_upgrade": bool(nl),
         "levels": [
             {**LEVEL_INFO[l], "key": l, "active": l == level}
             for l in LEVELS

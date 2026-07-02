@@ -202,6 +202,28 @@ async def interpret_directive(
     return _parse_json(raw)
 
 
+# Ключевые слова роли для мягкой проверки «задача по профилю исполнителя» (A2).
+_ROLE_KEYWORDS = {
+    "developer": ("код", "бот", "скрипт", "api", "автоматиз", "python", "js", "backend", "форм", "квиз"),
+    "designer": ("дизайн", "сайт", "лендинг", "верст", "ui", "ux", "страниц", "landing", "макет"),
+    "integrator": ("интеграц", "подключ", "telegram", "телеграм", "запуст", "webhook", "sheets", "оплат"),
+    "marketer": ("контент", "текст", "оффер", "утп", "пост", "реклам", "бренд", "копирайт", "seo"),
+    "salesman": ("клиент", "лид", "продаж", "переговор", "холодн", "outreach", "crm", "оффер"),
+    "analyst": ("аналит", "метрик", "данны", "отчёт", "kpi", "статист"),
+}
+
+
+def _role_hint(task: str) -> str:
+    """Наиболее вероятная роль по тексту задачи, или '' если непонятно."""
+    t = (task or "").lower()
+    best, best_n = "", 0
+    for role, kws in _ROLE_KEYWORDS.items():
+        n = sum(1 for k in kws if k in t)
+        if n > best_n:
+            best, best_n = role, n
+    return best if best_n >= 2 else ""  # ≥2 совпадения — уверенный сигнал
+
+
 def _parse_json(raw: str) -> dict:
     raw = raw.strip()
     if raw.startswith("```"):
@@ -520,6 +542,17 @@ async def decide(
                 decision["action"] = "wait"
                 decision["thought"] = "Указан несуществующий агент — жду"
                 return decision
+
+        # Мягкая проверка соответствия роли задаче (A2): если задача явно из другой
+        # области и есть подходящий свободный агент — перенаправляем к нему; иначе
+        # оставляем как есть (НЕ блокируем — лучше сделать, чем застрять).
+        hint = _role_hint(decision.get("task", ""))
+        if rec and hint and hint != rec.role:
+            better = next((a for a in agents if a.role == hint
+                           and not avail.get(a.agent_id, {}).get("on_cooldown")), None)
+            if better:
+                decision["agent_id"] = better.agent_id
+                rec = better
 
         # Если директор всё равно выбрал занятого агента — ищем свободного той же роли
         if rec and avail.get(rec.agent_id, {}).get("on_cooldown"):

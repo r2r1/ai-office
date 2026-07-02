@@ -8,8 +8,25 @@
 """
 
 from src.integrations.base import Action, Integration
-from src.office import sites, leads
+from src.office import sites, leads, autonomy
 from src.saas import context as ctx
+
+
+def _publish_needs_approval() -> bool:
+    """
+    Публикация — внешне видимое действие: на уровнях автономии ниже автопубликации
+    её решает клиент. Один гейт для ВСЕХ путей: и центральной авто-публикации офиса
+    (loop._publish_site_auto), и прямого вызова агентом (эта интеграция). Иначе агент
+    публиковал сайт сам, в обход разрешения, а офис потом спрашивал и публиковал повторно.
+    """
+    return autonomy.needs_approval("publish_site")
+
+
+_AWAIT_APPROVAL_MSG = (
+    "Публиковать НЕ нужно и сейчас нельзя: публикация требует разрешения клиента. "
+    "Просто оставь готовые файлы в папке site/ — офис сам спросит клиента и опубликует "
+    "после его «да». Задача считается выполненной, когда файлы записаны."
+)
 
 
 def _esc(s: str) -> str:
@@ -86,6 +103,8 @@ async def _publish_landing(creds: dict, params: dict) -> str:
     headline = (params.get("headline") or title or "").strip()
     if not headline:
         return "Нужен хотя бы headline или title для лендинга."
+    if _publish_needs_approval():
+        return _AWAIT_APPROVAL_MSG
     sub = (params.get("subheadline") or "").strip()
     bullets = params.get("bullets") or []
     if isinstance(bullets, str):
@@ -106,6 +125,8 @@ async def _publish_landing(creds: dict, params: dict) -> str:
 async def _publish_site(creds: dict, params: dict) -> str:
     """Публикует МНОГОСТРАНИЧНЫЙ сайт из папки рабочей директории (живой хостинг)."""
     from src.office import workspace
+    if _publish_needs_approval():
+        return _AWAIT_APPROVAL_MSG
     directory = (params.get("directory") or "").strip().strip("/")
     title = (params.get("title") or "").strip()
     idx_rel = f"{directory}/index.html" if directory else "index.html"
@@ -132,12 +153,19 @@ async def _publish_site(creds: dict, params: dict) -> str:
                 "страницы. Публиковать не обязательно — офис опубликует папку site/ сам.")
     files = workspace.list_dir(directory)
     tid = ctx.get_tenant()
-    slug = sites.make_slug(title or directory or "site")
-    site = sites.save_dir(title or slug, directory, slug)
+    # Один стабильный адрес основного сайта. ПУБЛИКУЕТ офис централизованно
+    # (loop._publish_site_auto после задач и на завершении). Если сайт уже живой —
+    # агент НЕ переиздаёт его (иначе счётчик правок рос бы от каждого вызова агента,
+    # дублируя авто-публикацию офиса). Просто подтверждаем, что сайт актуален.
+    slug = sites.main_slug()
+    if sites.get(slug):
+        return (f"🌐 Сайт уже опубликован и живой: /site/{tid}/{slug}. Офис сам держит его "
+                f"в актуальном состоянии при изменении файлов — повторно публиковать не нужно. "
+                f"Форма с POST на /api/site-lead собирает заявки в «Лиды».")
+    site = sites.save_dir(title or "Сайт", directory, slug)  # первая публикация
     return (f"🌐 Сайт опубликован: /site/{tid}/{site['slug']} "
-            f"(файлов: {len(files)}, заголовок «{site['title']}»). "
-            f"Все страницы и ресурсы папки доступны. Форма с POST на /api/site-lead собирает заявки в «Лиды». "
-            f"Сайт обновляется автоматически при изменении файлов. Разошли ссылку аудитории.")
+            f"(файлов: {len(files)}). Постоянный адрес; дальше офис обновляет его сам. "
+            f"Форма с POST на /api/site-lead собирает заявки в «Лиды».")
 
 
 async def _list_pages(creds: dict, params: dict) -> str:

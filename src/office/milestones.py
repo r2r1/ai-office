@@ -48,12 +48,14 @@ def set_status(stage_id: str, status: str) -> None:
 
 def mark_active(stage_id: str) -> None:
     st = _load()
-    found = False
     for s in st:
         if s["id"] == stage_id:
             s["status"] = "active"
-            found = True
-        elif not found and s["status"] != "done":
+        elif s["status"] == "active":
+            # Закрываем только РАНЕЕ активный этап. Раньше здесь принудительно ставились
+            # done ВСЕ предыдущие не-done этапы — перескок «задним числом» отмечал
+            # пропущенные как выполненные (ложный прогресс). Теперь пропущенный этап
+            # остаётся pending, а не выдаётся за сделанный.
             s["status"] = "done"
     _save(st)
 
@@ -148,7 +150,11 @@ def current_index() -> int:
     if active:
         return active[0]
     done = [i for i, s in enumerate(st) if s["status"] == "done"]
-    return (done[-1] + 1) if done and done[-1] + 1 < len(st) else (done[-1] if done else 0)
+    if not done:
+        return 0
+    # Следующий за последним завершённым; если завершены все — указываем ЗА последний
+    # (len), а не на уже готовый этап (иначе прогресс-бар подсвечивал done как «текущий»).
+    return done[-1] + 1
 
 
 def progress_payload() -> dict:

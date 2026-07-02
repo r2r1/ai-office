@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { useOffice } from "../../data/OfficeProvider"
 import type { Agent } from "../types"
@@ -50,15 +50,22 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
   const agents = useMemo(() => Object.values(state.agents), [state.agents])
   const [meeting, setMeeting] = useState<Record<string, boolean>>({})
 
+  // Держим актуальный список агентов в ref, чтобы интервал ниже НЕ пересоздавался
+  // на каждый SSE-апдейт (иначе таймер 6с постоянно сбрасывался и почти не срабатывал).
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
+
   // Изредка отправляем случайного агента в переговорку и обратно (живость).
   useEffect(() => {
     if (agents.length === 0) return
     const t = setInterval(() => {
-      const a = agents[Math.floor(Math.random() * agents.length)]
+      const list = agentsRef.current
+      if (list.length === 0) return
+      const a = list[Math.floor(Math.random() * list.length)]
       setMeeting(prev => ({ ...prev, [a.id]: !prev[a.id] }))
     }, 6000)
     return () => clearInterval(t)
-  }, [agents])
+  }, [agents.length])
 
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>

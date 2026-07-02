@@ -25,10 +25,22 @@ def is_paused() -> bool:
 
 def pause(reason: str = "") -> None:
     _save({"paused": True, "reason": reason, "paused_at": time.time()})
+    _reset_approvals()
 
 
 def resume() -> None:
     _save({"paused": False, "reason": "", "paused_at": 0})
+    _reset_approvals()
+
+
+def _reset_approvals() -> None:
+    # Разовые одобрения (публикация и т.п.) не должны переживать паузу/возобновление —
+    # это новая «сессия доверия», клиент подтверждает заново. Ленивый импорт против цикла.
+    try:
+        from src.office import autonomy
+        autonomy.reset_approvals()
+    except Exception:
+        pass
 
 
 def status() -> dict:

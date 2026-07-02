@@ -51,6 +51,26 @@ def requires_ok(action_type: str) -> bool:
     return _DEFAULT_RULES.get(action_type, False)
 
 
+def override_for(action_type: str):
+    """
+    ТОЛЬКО явно заданный клиентом оверрайд правила (True/False) или None, если клиент
+    его не трогал. Единый governance: базовое решение о разрешении принимает `autonomy`
+    (заработанный уровень доверия), а Конституция может ЖЁСТКО переопределить его этим
+    оверрайдом. Дефолты (_DEFAULT_RULES) сюда НЕ подмешиваются, иначе они конфликтовали
+    бы с уровнями autonomy для одних и тех же действий.
+    """
+    override = (load().get("rules_override") or {})
+    return bool(override[action_type]) if action_type in override else None
+
+
+def budget_auto_limit() -> float:
+    """Бюджетный порог из Конституции ($; 0 = без лимита). Применяется в costs.over_limit."""
+    try:
+        return max(0.0, float(load().get("budget_auto_limit", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def set_action_rule(action_type: str, requires: bool) -> None:
     d = load()
     d.setdefault("rules_override", {})[action_type] = requires

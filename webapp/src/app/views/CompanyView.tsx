@@ -257,18 +257,34 @@ const ROLE_RU: Record<string, string> = {
   designer: "Дизайнер", integrator: "Интегратор", marketer: "Маркетолог",
   analyst: "Аналитик", salesman: "Продажник", researcher: "Ресёрчер",
 }
-const SKILL_EXAMPLE = `---
-title: Название скилла
-description: Что этот скилл делает
-keywords: ключ1, ключ2
-roles: developer, designer
----
-Тело-плейбук: пошаговые инструкции, приёмы, чеклист.`
+const SKILL_FIELD: React.CSSProperties = {
+  background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+  borderRadius: "var(--radius-md)", padding: "8px 11px", color: "var(--text)",
+  fontSize: 12, outline: "none",
+}
+
+// Разбор вставленного SKILL.md: если есть frontmatter (--- … ---) — вытащить поля,
+// вернуть тело без него. Позволяет вставить готовый скилл и заполнить поля сами.
+function splitFrontmatter(text: string): { fm: Record<string, string> | null; body: string } {
+  const m = text.match(/^﻿?\s*---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+  if (!m) return { fm: null, body: text }
+  const fm: Record<string, string> = {}
+  for (const line of m[1].split("\n")) {
+    const i = line.indexOf(":")
+    if (i > 0) fm[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim()
+  }
+  return { fm, body: m[2].replace(/^\s+/, "") }
+}
 
 function SkillsTab() {
   const [skills, setSkills] = useState<any[]>([])
   const [mode, setMode] = useState<"markdown" | "url" | "github">("markdown")
-  const [content, setContent] = useState("")
+  // Поля скилла — тело первично, параметры заполняются сами при вставке готового SKILL.md.
+  const [body, setBody] = useState("")
+  const [title, setTitle] = useState("")
+  const [desc, setDesc] = useState("")
+  const [keywords, setKeywords] = useState("")
+  const [roles, setRoles] = useState("")
   const [ref, setRef] = useState("")
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -276,26 +292,50 @@ function SkillsTab() {
   const load = () => api.get("/api/skills").then(d => d?.skills && setSkills(d.skills))
   useEffect(() => { load() }, [])
 
+  // Вставили тело — если это готовый SKILL.md с frontmatter, разложим по полям.
+  function onBodyChange(v: string) {
+    const { fm, body: b } = splitFrontmatter(v)
+    if (fm) {
+      if (fm.title || fm.name) setTitle(fm.title || fm.name)
+      if (fm.description) setDesc(fm.description)
+      if (fm.keywords) setKeywords(fm.keywords)
+      if (fm.roles) setRoles(fm.roles)
+      setBody(b)
+    } else {
+      setBody(v)
+    }
+  }
+
+  function assembleMarkdown(): string {
+    const fm = ["---"]
+    fm.push(`title: ${title.trim() || "Новый скилл"}`)
+    if (desc.trim()) fm.push(`description: ${desc.trim()}`)
+    if (keywords.trim()) fm.push(`keywords: ${keywords.trim()}`)
+    if (roles.trim()) fm.push(`roles: ${roles.trim()}`)
+    fm.push("---")
+    return `${fm.join("\n")}\n${body.trim()}`
+  }
+
   async function install() {
     setBusy(true); setMsg(null)
-    const body: any = { source: mode }
-    if (mode === "markdown") body.content = content
-    else if (mode === "url") body.url = ref
-    else body.ref = ref
+    const payload: any = { source: mode }
+    if (mode === "markdown") payload.content = assembleMarkdown()
+    else if (mode === "url") payload.url = ref
+    else payload.ref = ref
     // Прямой fetch: install отдаёт 400 с {message} при ошибке, а api.post глотает
     // тело на non-2xx — нам нужно показать пользователю причину.
     let res: any = null
     try {
       const r = await fetch("/api/skills/install", {
         method: "POST", credentials: "same-origin",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       })
       res = await r.json().catch(() => ({ ok: false }))
     } catch { res = { ok: false, message: "Сеть недоступна" } }
     setBusy(false)
     if (res?.ok) {
       setMsg({ ok: true, text: `Установлен: ${res.title || res.id}` })
-      setContent(""); setRef(""); load()
+      setBody(""); setTitle(""); setDesc(""); setKeywords(""); setRoles(""); setRef(""); load()
     } else {
       setMsg({ ok: false, text: res?.message || "Не удалось установить" })
     }
@@ -329,11 +369,28 @@ function SkillsTab() {
           ))}
         </div>
         {mode === "markdown" ? (
-          <textarea value={content} onChange={e => setContent(e.target.value)}
-            placeholder={SKILL_EXAMPLE} rows={9}
-            style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
-              borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 12,
-              outline: "none", fontFamily: "var(--font-mono)", resize: "vertical", lineHeight: 1.5 }} />
+          <>
+            {/* Тело — первично: вставь сюда готовый скилл ИЛИ опиши, как делать. */}
+            <textarea value={body} onChange={e => onBodyChange(e.target.value)}
+              placeholder={"Вставьте готовый скилл (SKILL.md) — параметры ниже заполнятся сами.\nИли просто опишите, как делать: пошагово, приёмы, чеклист."}
+              rows={8}
+              style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+                borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 12,
+                outline: "none", fontFamily: "var(--font-mono)", resize: "vertical", lineHeight: 1.5 }} />
+            <div style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 4px" }}>
+              Параметры (заполнятся сами, если вставили готовый SKILL.md):
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Название *"
+                style={SKILL_FIELD} />
+              <input value={roles} onChange={e => setRoles(e.target.value)} placeholder="Роли: developer, designer"
+                style={SKILL_FIELD} />
+              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Описание — что делает"
+                style={{ ...SKILL_FIELD, gridColumn: "1 / -1" }} />
+              <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="Ключевые слова (через запятую)"
+                style={{ ...SKILL_FIELD, gridColumn: "1 / -1" }} />
+            </div>
+          </>
         ) : (
           <input value={ref} onChange={e => setRef(e.target.value)}
             placeholder={mode === "url" ? "https://…/SKILL.md (сырой markdown)" : "owner/repo@skill"}
@@ -341,7 +398,7 @@ function SkillsTab() {
               borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
-          <button onClick={install} disabled={busy || (mode === "markdown" ? !content.trim() : !ref.trim())}
+          <button onClick={install} disabled={busy || (mode === "markdown" ? !(body.trim() && title.trim()) : !ref.trim())}
             style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-pill)", padding: "9px 20px",
               background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13,
               opacity: busy ? 0.5 : 1 }}>{busy ? "Устанавливаю…" : "Установить"}</button>
@@ -399,14 +456,17 @@ function SkillCard({ s, onRemove }: { s: any; onRemove?: () => void }) {
 function LimitsTab() {
   const [lim, setLim] = useState<any>(null)
   const [total, setTotal] = useState("")
+  const [daily, setDaily] = useState("")
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    api.get("/api/limits").then(l => { if (l) { setLim(l); setTotal(String(l.total_usd || "")) } })
+    api.get("/api/limits").then(l => {
+      if (l) { setLim(l); setTotal(String(l.total_usd || "")); setDaily(String(l.daily_usd || "")) }
+    })
   }, [])
 
   function save() {
-    api.post("/api/limits", { total_usd: parseFloat(total) || 0 }).then(l => {
+    api.post("/api/limits", { total_usd: parseFloat(total) || 0, daily_usd: parseFloat(daily) || 0 }).then(l => {
       if (l) setLim(l); setSaved(true); setTimeout(() => setSaved(false), 1600)
     })
   }
@@ -423,8 +483,15 @@ function LimitsTab() {
           0 = без лимита.
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 14, color: "var(--text-dim)" }}>$</span>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", width: 56 }}>Всего $</span>
           <input value={total} onChange={e => setTotal(e.target.value)} type="number" min="0" step="0.5"
+            placeholder="0" onKeyDown={e => e.key === "Enter" && save()}
+            style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+              borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", width: 56 }}>В день $</span>
+          <input value={daily} onChange={e => setDaily(e.target.value)} type="number" min="0" step="0.5"
             placeholder="0" onKeyDown={e => e.key === "Enter" && save()}
             style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
               borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
@@ -447,6 +514,14 @@ function LimitsTab() {
           <div style={{ height: 4, background: "var(--hairline)", borderRadius: 2, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${pct}%`, transition: "width 0.5s",
               background: pct >= 100 ? "#e05a5a" : pct >= 75 ? "#ffac2e" : "#a0e0ab" }} />
+          </div>
+        )}
+        {typeof lim.spent_today === "number" && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
+            <span style={{ fontSize: 13, color: "var(--text)" }}>Сегодня</span>
+            <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>
+              ${lim.spent_today.toFixed(4)}{lim.daily_usd > 0 ? ` / $${lim.daily_usd}` : ""}
+            </span>
           </div>
         )}
         {lim.over_limit && <div style={{ fontSize: 11, color: "#e05a5a", marginTop: 8 }}>⛔ Лимит достигнут — офис на паузе</div>}

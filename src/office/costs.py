@@ -34,6 +34,16 @@ def _all() -> dict:
     return ctx.read_json(_FILE, {})
 
 
+def _today() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _agents_only(data: dict) -> dict:
+    """Записи агентов без служебных ключей (напр. '_daily')."""
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
 def record(agent_id: str, model: str, in_tokens: int, out_tokens: int) -> None:
     agent_id = agent_id or "unknown"
     pin, pout = price_for(model)
@@ -45,7 +55,19 @@ def record(agent_id: str, model: str, in_tokens: int, out_tokens: int) -> None:
     a["out_tokens"] += int(out_tokens or 0)
     a["cost"] += cost
     a["calls"] += 1
+    # Посуточный расход для дневного лимита. Служебный ключ '_daily' исключён из
+    # totals()/by_agent(), чтобы не считался «агентом».
+    daily = data.setdefault("_daily", {})
+    daily[_today()] = round(daily.get(_today(), 0.0) + cost, 6)
+    # Держим только последние ~7 дат, иначе словарь растёт бесконечно.
+    if len(daily) > 7:
+        for k in sorted(daily)[:-7]:
+            daily.pop(k, None)
     ctx.write_json(_FILE, data)
+
+
+def spent_today() -> float:
+    return float(_all().get("_daily", {}).get(_today(), 0.0))
 
 
 def for_agent(agent_id: str) -> dict:
@@ -54,7 +76,7 @@ def for_agent(agent_id: str) -> dict:
 
 def totals() -> dict:
     t = {"in_tokens": 0, "out_tokens": 0, "cost": 0.0, "calls": 0}
-    for a in _all().values():
+    for a in _agents_only(_all()).values():
         t["in_tokens"] += a["in_tokens"]
         t["out_tokens"] += a["out_tokens"]
         t["cost"] += a["cost"]
@@ -63,7 +85,7 @@ def totals() -> dict:
 
 
 def by_agent() -> list[dict]:
-    out = [dict(v, agent_id=k) for k, v in _all().items()]
+    out = [dict(v, agent_id=k) for k, v in _agents_only(_all()).items()]
     out.sort(key=lambda x: x["cost"], reverse=True)
     return out
 
@@ -89,19 +111,34 @@ def set_limits(total_usd: float = 0.0, daily_usd: float = 0.0) -> None:
 
 
 def over_limit() -> bool:
-    """Превышен ли общий лимит расхода (для авто-паузы)."""
+    """Превышен ли ОБЩИЙ или ДНЕВНОЙ лимит расхода (для авто-паузы)."""
     lim = limits()
-    cap = lim.get("total_usd", 0.0)
-    return cap > 0 and totals()["cost"] >= cap
+    total_cap = lim.get("total_usd", 0.0)
+    # Единый бюджет: общий лимит из «Лимиты» ИЛИ бюджетный порог из Конституции —
+    # берём минимальный ненулевой (был мёртвый дубль budget_auto_limit).
+    try:
+        from src.office import constitution
+        c_cap = constitution.budget_auto_limit()
+        if c_cap > 0:
+            total_cap = c_cap if total_cap <= 0 else min(total_cap, c_cap)
+    except Exception:
+        pass
+    daily_cap = lim.get("daily_usd", 0.0)
+    total_now = totals()["cost"]
+    if total_cap > 0 and total_now >= total_cap:
+        return True
+    if daily_cap > 0 and spent_today() >= daily_cap:
+        return True
+    return False
 
 
 def limit_payload() -> dict:
     lim = limits()
-    spent = totals()["cost"]
     return {
         "total_usd": lim.get("total_usd", 0.0),
         "daily_usd": lim.get("daily_usd", 0.0),
-        "spent": spent,
+        "spent": totals()["cost"],
+        "spent_today": spent_today(),
         "over_limit": over_limit(),
     }
 

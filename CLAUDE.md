@@ -47,10 +47,15 @@
 
 ```bash
 pip install -r requirements.txt
-python -m uvicorn server:app --reload          # бэкенд + SPA на http://localhost:8000
-DEMO_MODE=1 python -m uvicorn server:app --reload  # демо без расхода токенов
+python scripts/run.py                           # бэкенд + SPA на http://localhost:8000 (reload с исключениями)
+DEMO_MODE=1 python scripts/run.py               # демо без расхода токенов
 python main.py                                  # CLI: ресёрчер → стратег (без игры)
 ```
+
+⚠️ НЕ запускай `uvicorn server:app --reload` напрямую: reload следит за всем деревом,
+включая `data/tenants/<tid>/workspace/`, куда агенты пишут код и сайты. Любая запись
+файла агентом перезапускала сервер и роняла идущий офис-цикл (реальный баг из прода).
+`scripts/run.py` включает reload только для исходников и игнорирует данные тенантов.
 
 Frontend (React/Vite) живёт в `webapp/`, билдится в `static/webapp/` и отдаётся
 бэкендом на `/webapp/` (корень `/` редиректит туда же). Для активной фронтовой
