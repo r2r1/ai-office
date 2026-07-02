@@ -55,9 +55,20 @@ def write_file(path: str, content: str) -> str:
         return "Ошибка: не удалось определить путь файла. Укажи имя явно: index.html, main.py, app.js"
     if len(content.encode("utf-8")) > MAX_FILE_BYTES:
         return f"Файл слишком большой (> {MAX_FILE_BYTES} байт). Разбей на модули."
+    # Регресс контента: агент перезаписывает существующий текстовый файл заметно более
+    # коротким без причины (реальный кейс: docs/offer.md 2808 → 1089 символов — агент не
+    # читал прошлую версию и потерял часть офферов). Не блокируем запись — предупреждаем,
+    # чтобы агент сам решил, специально это или потеря контента.
+    shrink_warning = ""
+    if full.suffix.lower() in (".md", ".txt") and full.is_file():
+        old_len = len(full.read_text(encoding="utf-8", errors="replace"))
+        if old_len > 500 and len(content) < old_len * 0.6:
+            shrink_warning = (f" ⚠ Было {old_len} символов, стало {len(content)} — если это не "
+                              "осознанное сокращение, перечитай прошлую версию и объедини.")
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
-    return f"Файл сохранён: {full.relative_to(_base().resolve()).as_posix()} ({len(content)} символов)."
+    return (f"Файл сохранён: {full.relative_to(_base().resolve()).as_posix()} "
+            f"({len(content)} символов).{shrink_warning}")
 
 
 def read_file(path: str) -> str:
@@ -173,6 +184,19 @@ def execute_code(path: str, stdin_input: str = "") -> str:
         return f"Файл не найден: {path}"
 
     ext = full.suffix.lower()
+    # Долгоживущий Telegram-бот (long polling) НЕЛЬЗЯ запускать здесь: процесс висит
+    # до таймаута, а под uvicorn --reload запись bot.py и так перезагружает сервер.
+    # Боты запускаются штатно через integrations.telegram.launch_bot, не через execute_code.
+    if ext == ".py":
+        try:
+            code = full.read_text(encoding="utf-8", errors="replace").lower()
+        except Exception:
+            code = ""
+        if any(s in code for s in ("start_polling", "run_polling", "infinity_polling",
+                                   "executor.start_polling", "dp.run_polling")):
+            return ("⏭ Пропущен запуск: это бот с long-polling — он работает бесконечно и "
+                    "здесь только повис бы. Синтаксис проверь через verify_code, а сам бот "
+                    "запусти штатно через интеграцию Telegram (launch_bot), не execute_code.")
     if ext == ".py":
         cmd = [sys.executable, str(full)]
     elif ext in (".js", ".mjs", ".ts"):

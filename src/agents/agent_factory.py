@@ -442,8 +442,9 @@ _EXECUTE_CODE_TOOL = {
     "type": "function",
     "function": {
         "name": "execute_code",
-        "description": "Запускает файл из рабочей папки (.py, .js, .sh) и возвращает вывод. "
-                       "Используй чтобы проверить что код реально работает и показать результат.",
+        "description": "Запускает файл из рабочей папки (ТОЛЬКО .py, .js, .sh) и возвращает вывод. "
+                       "НЕ вызывай на .html/.css — их запустить нельзя, для сайта это всегда «Неизвестный "
+                       "тип файла»; для проверки HTML используй verify_code или просто перечитай файл.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -862,6 +863,19 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         if not action:
             acts = ", ".join(integ.actions.keys())
             return f"У '{integ.name}' нет действия '{action_name}'. Доступные действия: {acts}."
+
+        # Гейт автономии для ВНЕШНЕ-видимых действий: на уровнях ниже требуемого офис
+        # не выполняет действие сам, а просит OK клиента. website публикует через свой
+        # гейт (loop._publish_site_auto), поэтому его здесь не дублируем.
+        if integ.name != "website":
+            from src.office import autonomy
+            act_type = autonomy._action_type_for(action_name)
+            if autonomy.needs_approval(act_type):
+                return (f"Действие «{integ.title}.{action_name}» затрагивает внешний мир, а уровень "
+                        f"автономии «{autonomy.get_level()}» (только рекомендации) не позволяет офису "
+                        f"делать это самостоятельно. НЕ повторяй вызов: сообщи клиенту через ask_user, "
+                        f"что рекомендуешь сделать, и предложи повысить уровень автономии в «Компания», "
+                        f"если он хочет, чтобы офис выполнял такое сам.")
 
         creds = integrations_registry.credentials_for(integ)
         if not integrations_registry.is_connected(integ):
