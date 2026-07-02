@@ -1,39 +1,160 @@
 """
-Prompt Builder — единая точка сборки системного промпта (см. docs/arhitecture.md).
+Prompt Builder — компилятор мышления компании (см. docs/bos-architecture.md §7).
 
-Ни у одной роли нет собственного статического промпта: есть Role Definition
-(roles.py) и инварианты команды, а итоговый системный промпт собирается здесь
-под конкретного агента. Меняется формат под новую модель — правится только тут.
+ЕДИНАЯ точка сборки всего, что видит воркер: и системного промпта (build), и
+контекста задачи (task_context). Чистая функция над состоянием мира: Builder не
+знает ничего, чего нет в World Model (бриф, память, знания, план, роли, скиллы).
+Понадобилось что-то ещё — это дырка в модели мира, а не повод дописать шаблон.
 
-Иерархия (сверху вниз по приоритету):
-  Role Definition (roles.render)
-    + специализация в проекте (skill)
-    + бриф клиента
-    + 3-слойная память офиса (memory.context_block)
-    + инварианты: автономность, «артефакты только через инструменты», межагентность
+Слоты (порядок фиксирован спецификацией):
+  system:  Identity (роль + специализация) → Policies (team/autonomy/inter_agent)
+           → Brief → Memory (указания клиента) → Tools (каталог скиллов роли)
+  task:    Business (niche/audience) → Goal → Stage → Department → Task
+           → Knowledge (retrieval) → Lessons → Output Format
 
-Философия и Конституция компании доходят до агента через слой знаний
-(knowledge GLOBAL → task-контекст в loop._task_with_context), поэтому здесь не
-дублируются — иначе платим за одни и те же токены дважды.
+Роли — файлы `builtin_roles/*.md` (roles.py), политики — файлы `policies/*.md`
+(загружаются здесь). Каждая сущность мира сериализуется в промпт ровно одним
+сериализатором — например подпись «цель прогона ≠ то, что продаёт бизнес» живёт
+только здесь, и класс багов goal/niche не может размазаться по коду.
+
+Философия и Конституция доходят до агента через слой знаний (knowledge GLOBAL →
+task_context), поэтому здесь не дублируются — иначе платим за токены дважды.
+
+Каждый собранный промпт ЦЕЛИКОМ логируется в prompts.jsonl тенанта (+ короткая
+запись в trace) — отладка «почему агент сделал глупость» стала зрячей.
 """
+
+import json
+import time
+from datetime import datetime
+from pathlib import Path
 
 from src.office import roles
 from src.office import skills as skills_module
 from src.office import memory as memory_module
+from src.office import brief as brief_module
+
+_POLICY_DIR = Path(__file__).parent / "policies"
+_policy_cache: dict[str, str] = {}
+
+
+def policy(name: str) -> str:
+    """Текст политики из policies/<name>.md (кешируется на процесс)."""
+    if name not in _policy_cache:
+        f = _POLICY_DIR / f"{name}.md"
+        try:
+            _policy_cache[name] = f.read_text(encoding="utf-8").strip()
+        except OSError:
+            _policy_cache[name] = ""
+    return _policy_cache[name]
+
+
+def brief_block() -> str:
+    """Блок брифа клиента — ЕДИНСТВЕННЫЙ сериализатор брифа в промпт.
+    «goal» — ответ клиента на «какой результат вы хотите ОТ ОФИСА» (onboarding.py),
+    НЕ то, что продаёт бизнес; подпись обязательна (реальный баг: сайт продавал
+    «упаковку бизнеса» вместо натяжных потолков)."""
+    b = brief_module.get()
+    if not b:
+        return ""
+    parts = []
+    if b.get("niche"):
+        parts.append(f"Ниша — что бизнес продаёт: {b['niche']}")
+    if b.get("goal"):
+        parts.append(f"Цель ЭТОГО прогона офиса (не то, что продаёт компания): {b['goal']}")
+    if b.get("audience"):
+        parts.append(f"Аудитория — кому продаёт: {b['audience']}")
+    if b.get("assets"):
+        parts.append(f"Что есть: {b['assets']}")
+    if b.get("summary"):
+        parts.append(f"Резюме: {b['summary']}")
+    if not parts:
+        return ""
+    return "\n\n=== БРИФ КЛИЕНТА (всегда держи в контексте) ===\n" + "\n".join(parts)
 
 
 def build(role: str, task: str, agent_id: str, skill: str = "") -> str:
-    """Системный промпт агента. Поведение 1:1 с прежней сборкой в agent_factory.create,
-    но роль теперь — данные (roles.render), а сборка централизована."""
-    # Инварианты и бриф остаются каноничными в agent_factory (CLAUDE.md фиксирует там
-    # _TEAM_PREAMBLE) — берём лениво, чтобы не плодить дубли и не ловить цикл импорта.
-    from src.agents import agent_factory as af
+    """Системный промпт воркера: Identity → Policies → Brief → Memory → Tools."""
+    identity = roles.render(role)
+    if skill:
+        identity += f"\n\nТвоя специализация в этом проекте: {skill}"
+    policies = "\n\n" + policy("team") + "\n\n" + policy("autonomy") + "\n\n" + policy("inter_agent")
+    # Каталог скиллов подмешивается ДИНАМИЧЕСКИ из реестра под роль: добавили скилл
+    # с roles=[...] — он сам появился в промпте только у релевантных ролей.
+    tools = skills_module.prompt_block(role)
+    return identity + policies + brief_block() + memory_module.context_block() + tools
 
-    base = roles.render(role)
-    skill_line = f"\n\nТвоя специализация в этом проекте: {skill}" if skill else ""
-    # Каталог скиллов подмешивается ДИНАМИЧЕСКИ из реестра под роль (skills.prompt_block),
-    # а не зашит в текст роли: добавили скилл с roles=[...] — он сам появился в промпте,
-    # и в промпт идут только релевантные роли скиллы, а не весь каталог.
-    skills_block = skills_module.prompt_block(role)
-    return (base + skill_line + skills_block + af._brief_context() + memory_module.context_block()
-            + af._AUTONOMY_RULES + af._TEAM_PREAMBLE + af._INTER_AGENT_SUFFIX)
+
+def task_context(role: str, task: str, skill: str = "",
+                 department: str = "", objective: str = "") -> str:
+    """Контекст задачи (user-сообщение воркера): бизнес → цель → этап → отдел →
+    задача → знания → уроки → формат результата. Перенесено из loop._task_with_context —
+    теперь итоговый промпт собирается в одном модуле и виден целиком."""
+    from src.office import org, milestones, knowledge, lessons
+    from src.agents import architect
+
+    b = brief_module.get()
+    niche = (b.get("niche") or "").strip()
+    audience = (b.get("audience") or "").strip()
+    biz_line = ""
+    if niche:
+        biz_line += f"Бизнес клиента — ЧТО он продаёт конечным покупателям: {niche}\n"
+    if audience:
+        biz_line += f"Аудитория бизнеса — КОМУ он продаёт: {audience}\n"
+    goal = brief_module.effective_goal()
+    # Активный этап читаем из хранилища вех (SSOT), а не из памяти процесса.
+    cur = next((s for s in milestones.all_stages() if s.get("status") == "active"), None)
+    stage = f"Текущий этап: {cur['title']}\n" if cur else ""
+    skill_line = f"Твоя специализация: {skill}\n" if skill else ""
+    dept_line = ""
+    if department and department in org.catalog():
+        title = org.lead_title(department)
+        dept_line = f"Твой отдел: {org.catalog()[department]['name']} (руководитель — {title}).\n"
+        if objective:
+            dept_line += f"Цель отдела от CEO: {objective}\n"
+    tdd = architect.load()
+    tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:3000]}\n" if tdd else ""
+    lessons_section = lessons.context_block(role)
+    knowledge_section = knowledge.context_block(task, department=department)
+    return (
+        f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
+        f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}"
+        f"Твоя задача от руководителя: {task}\n"
+        f"{tdd_section}{knowledge_section}{lessons_section}\n"
+        f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
+        f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
+    )
+
+
+# ── Лог собранных промптов ────────────────────────────────────────────────────
+# Полный текст (system + task) — в prompts.jsonl тенанта; в trace — короткая
+# запись-указатель (trace режет строки до 400 символов, целиком туда нельзя).
+_PROMPTS_FILE = "prompts.jsonl"
+_MAX_PROMPT_BYTES = 4_000_000  # ~4 МБ на тенанта; дальше оставляем хвост
+_KEEP_LINES = 200
+
+
+def log_prompt(agent_id: str, role: str, system: str, task: str) -> None:
+    from src.saas import context as ctx
+    from src.office import trace
+    try:
+        p = ctx.tenant_dir() / _PROMPTS_FILE
+        entry = {
+            "ts": datetime.now().strftime("%H:%M:%S"),
+            "t": round(time.time(), 3),
+            "agent": agent_id, "role": role,
+            "system_chars": len(system), "task_chars": len(task),
+            "system": system, "task": task,
+        }
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if p.stat().st_size > _MAX_PROMPT_BYTES:
+            keep = p.read_text(encoding="utf-8").splitlines()[-_KEEP_LINES:]
+            p.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    except Exception:
+        pass  # лог промптов не должен ронять офис
+    try:
+        trace.log("prompt", agent=agent_id, role=role,
+                  system_chars=len(system), task_chars=len(task))
+    except Exception:
+        pass

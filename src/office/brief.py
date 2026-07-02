@@ -41,6 +41,29 @@ def summary() -> str:
     return get().get("summary", "")
 
 
+_JUNK_GOALS = {"не знаю", "незнаю", "не знаю.", "-", "—", "нет", "хз", "?", ""}
+
+
+def effective_goal() -> str:
+    """
+    Осмысленная цель компании для промптов (переехало из loop._goal — цель принадлежит
+    брифу, а не циклу). Клиент в онбординге может ответить «не знаю» — тогда
+    «Цель компании: не знаю» замусоривала КАЖДЫЙ промпт, хотя стратег уже сформулировал
+    реальную цель. Мусорная цель → берём её из стратегии.
+    """
+    g = (get().get("goal") or "").strip()
+    if g.lower() not in _JUNK_GOALS:
+        return g
+    # Первая содержательная строка стратегии обычно и есть сформулированная цель.
+    f = ctx.tenant_dir() / "strategy.md"
+    strategy = f.read_text(encoding="utf-8") if f.exists() else ""
+    for line in strategy.splitlines():
+        line = line.strip().lstrip("#*-1234567890. ").strip()
+        if line.lower().startswith("цель"):
+            return line[:200]
+    return summary() or "разобраться в нише и предложить первый результат"
+
+
 def load() -> bool:
     return is_ready()
 

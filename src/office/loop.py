@@ -122,24 +122,9 @@ def _strategy_text() -> str:
     return f.read_text(encoding="utf-8") if f.exists() else ""
 
 
-_JUNK_GOALS = {"не знаю", "незнаю", "не знаю.", "-", "—", "нет", "хз", "?", ""}
-
-
 def _goal() -> str:
-    """
-    Осмысленная цель компании для промптов. Клиент в онбординге может ответить
-    «не знаю» — тогда «Цель компании: не знаю» замусоривала КАЖДЫЙ промпт, хотя
-    стратег уже сформулировал реальную цель. Мусорная цель → берём её из стратегии.
-    """
-    g = (brief.get().get("goal") or "").strip()
-    if g.lower() not in _JUNK_GOALS:
-        return g
-    # Первая содержательная строка стратегии обычно и есть сформулированная цель.
-    for line in _strategy_text().splitlines():
-        line = line.strip().lstrip("#*-1234567890. ").strip()
-        if line.lower().startswith("цель"):
-            return line[:200]
-    return brief.summary() or "разобраться в нише и предложить первый результат"
+    """Осмысленная цель компании — источник теперь в брифе (brief.effective_goal)."""
+    return brief.effective_goal()
 
 
 def _save_strategy(strategy: str) -> None:
@@ -1098,46 +1083,11 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
 
 def _task_with_context(role: str, task: str, skill: str = "",
                        department: str = "", objective: str = "") -> str:
-    goal = _goal()
-    # «Цель» из брифа — это ответ клиента на «какой результат вы хотите ОТ ОФИСА» (см.
-    # onboarding.py), а не описание того, ЧТО продаёт бизнес клиента. Раньше в промпт шло
-    # только "Цель компании: {goal}" — и когда goal был буквально «упаковка бизнеса»,
-    # marketer/designer собрали сайт, который ПРОДАЁТ «упаковку бизнеса» владельцам квартир
-    # (реальный кейс: клиент делает натяжные потолки, просил упаковать СВОЙ бизнес, а не
-    # продавать услугу упаковки конечным клиентам). Явно разводим: что продаёт компания
-    # (niche/audience из брифа) — отдельно от цели ЭТОГО прогона офиса.
-    b = brief.get()
-    niche = (b.get("niche") or "").strip()
-    audience = (b.get("audience") or "").strip()
-    biz_line = ""
-    if niche:
-        biz_line += f"Бизнес клиента — ЧТО он продаёт конечным покупателям: {niche}\n"
-    if audience:
-        biz_line += f"Аудитория бизнеса — КОМУ он продаёт: {audience}\n"
-    cur = milestones.get(_cur_ms())
-    stage = f"Текущий этап: {cur['title']}\n" if cur else ""
-    skill_line = f"Твоя специализация: {skill}\n" if skill else ""
-    # Контекст отдела: какому лидеру подчинён и какая у отдела цель
-    dept_line = ""
-    if department and department in org.catalog():
-        title = org.lead_title(department)
-        dept_line = f"Твой отдел: {org.catalog()[department]['name']} (руководитель — {title}).\n"
-        if objective:
-            dept_line += f"Цель отдела от CEO: {objective}\n"
-    tdd = architect.load()
-    tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:3000]}\n" if tdd else ""
-    lessons_section = lessons.context_block(role)  # память: уроки прошлых задач этой роли
-    # Трёхслойная память: подбираем релевантные ИМЕННО этой задаче факты
-    # (ограничения клиента, его ответы, что отдел уже сделал).
-    knowledge_section = knowledge.context_block(task, department=department)
-    return (
-        f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
-        f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}"
-        f"Твоя задача от руководителя: {task}\n"
-        f"{tdd_section}{knowledge_section}{lessons_section}\n"
-        f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
-        f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
-    )
+    """Контекст задачи теперь собирает Prompt Builder — единая точка сборки промптов
+    (см. docs/bos-architecture.md §7). Обёртка сохранена для читаемости вызовов цикла."""
+    from src.office import prompt_builder
+    return prompt_builder.task_context(role, task, skill,
+                                       department=department, objective=objective)
 
 
 def _attribute_result(agent_id: str, role: str, result: str) -> None:

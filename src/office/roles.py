@@ -11,13 +11,15 @@ Role Definitions — роли как ДАННЫЕ, а не зашитые в к�
 приоритет над seed. Так роль становится редактируемыми данными, а не кодом.
 """
 
+from pathlib import Path
+
 from src.saas import context as ctx
 
 _FILE = "roles.json"
 
 # Структурированные описания ролей (для UI и будущего редактора).
-# Операционный текст («как именно работать») остаётся в seed-playbook —
-# его источник один: agent_factory.ROLE_PROMPTS (берётся лениво, без дублирования).
+# Операционный текст («как именно работать») — файлы builtin_roles/<role>.md
+# (см. _load_seed_files ниже), по одному на роль, как builtin_skills.
 ROLE_META: dict[str, dict] = {
     "cto": {
         "department": "tech", "title": "CTO", "capability": "reasoning",
@@ -138,13 +140,49 @@ def _overrides() -> dict:
     return ctx.read_json(_FILE, None) or {}
 
 
+# Встроенные тексты ролей — файлы builtin_roles/<role>.md (по образцу builtin_skills):
+# frontmatter (id, leader) + markdown-тело-плейбук. Редактируешь роль — открываешь
+# один текстовый файл, а не Python-литерал. Лидерам (leader: true) загрузчик
+# дописывает общую политику руководителя (policies/leader.md) — без дублирования.
+_ROLES_DIR = Path(__file__).parent / "builtin_roles"
+_seed_cache: dict[str, dict] = {}
+
+
+def _load_seed_files() -> dict[str, dict]:
+    import re
+    if _seed_cache:
+        return _seed_cache
+    for f in sorted(_ROLES_DIR.glob("*.md")) if _ROLES_DIR.exists() else []:
+        try:
+            text = f.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        m = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", text, re.DOTALL)
+        if not m:
+            continue
+        front = {}
+        for line in m.group(1).splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                front[k.strip().lower()] = v.strip()
+        rid = front.get("id") or f.stem
+        _seed_cache[rid] = {"body": m.group(2).strip(),
+                            "leader": front.get("leader", "").lower() == "true"}
+    return _seed_cache
+
+
 def _seed_text(role: str) -> str:
-    """Базовый операционный текст роли из встроенного каталога (ленивый импорт)."""
-    try:
-        from src.agents import agent_factory
-        return agent_factory.ROLE_PROMPTS.get(role, "")
-    except Exception:
+    """Базовый операционный текст роли из builtin_roles/<role>.md."""
+    seed = _load_seed_files().get(role)
+    if not seed:
         return ""
+    body = seed["body"]
+    if seed["leader"]:
+        from src.office import prompt_builder
+        lead = prompt_builder.policy("leader")
+        if lead:
+            body = body + "\n" + lead
+    return body
 
 
 def base_text(role: str) -> str:
@@ -159,9 +197,9 @@ def base_text(role: str) -> str:
 
 
 def render(role: str) -> str:
-    """Системная основа промпта роли. Сейчас = base_text (поведение 1:1 с прежним
-    ROLE_PROMPTS); структурированная мета используется в UI и доступна для будущей
-    динамической сборки заголовка роли."""
+    """Системная основа промпта роли (= base_text: оверрайд клиента или seed из
+    builtin_roles/*.md); структурированная мета используется в UI и доступна для
+    будущей динамической сборки заголовка роли."""
     return base_text(role)
 
 
