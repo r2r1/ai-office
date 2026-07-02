@@ -103,10 +103,21 @@ def _global_facts() -> list[dict]:
         pass
 
     b = brief.get()
+    # «Цель клиента» здесь раньше означало ответ на «какой результат вы хотите ОТ ОФИСА»
+    # (см. onboarding.py), а не то, что продаёт бизнес — та же путаница уже чинилась в
+    # loop.py._task_with_context, но knowledge.context_block подмешивается ТУДА ЖЕ и
+    # дублировал старую неразмеченную формулировку, сводя фикс на нет (реальный кейс:
+    # критик увидел этот факт и потребовал переписать сайт натяжных потолков на продажу
+    # «упаковки бизнеса»). Подписываем явно и добавляем аудиторию.
     if b.get("goal"):
-        out.append({"text": f"Цель клиента: {b['goal']}", "base": 0.35, "src": "global"})
+        out.append({"text": f"Цель ЭТОГО прогона офиса (не то, что продаёт компания "
+                    f"конечным покупателям): {b['goal']}", "base": 0.35, "src": "global"})
     if b.get("niche"):
-        out.append({"text": f"Ниша: {b['niche']}", "base": 0.3, "src": "global"})
+        out.append({"text": f"Бизнес клиента — что он продаёт: {b['niche']}",
+                    "base": 0.3, "src": "global"})
+    if b.get("audience"):
+        out.append({"text": f"Аудитория бизнеса — кому он продаёт: {b['audience']}",
+                    "base": 0.3, "src": "global"})
     for key in ("constraints", "avoid", "notes", "preferences"):
         val = b.get(key)
         if val:

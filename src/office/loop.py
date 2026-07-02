@@ -1026,13 +1026,16 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
 
     # Приёмка = программные проверки + ЗРЯЧАЯ проверка в браузере + LLM-оценка результата.
     goal = _goal()
+    b = brief.get()
+    niche = (b.get("niche") or "").strip()
+    audience = (b.get("audience") or "").strip()
     problems = critic.check_site()
     try:
         problems = problems + await critic.review_site_visual()   # рендер в headless-браузере
     except Exception:
         pass
     try:
-        problems = problems + await critic.review_site_llm(goal)
+        problems = problems + await critic.review_site_llm(goal, niche=niche, audience=audience)
     except Exception:
         pass
     trace.log("critic", agent=agent_id, phase="site", problems=len(problems),

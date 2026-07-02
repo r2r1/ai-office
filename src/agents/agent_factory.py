@@ -583,11 +583,13 @@ def _brief_context() -> str:
         return ""
     parts = []
     if b.get("niche"):
-        parts.append(f"Ниша: {b['niche']}")
+        parts.append(f"Ниша — что бизнес продаёт: {b['niche']}")
     if b.get("goal"):
-        parts.append(f"Цель клиента: {b['goal']}")
+        # "goal" — ответ клиента на «какой результат вы хотите ОТ ОФИСА» (onboarding.py),
+        # НЕ то, что продаёт бизнес. Реальный кейс путаницы — см. loop.py._task_with_context.
+        parts.append(f"Цель ЭТОГО прогона офиса (не то, что продаёт компания): {b['goal']}")
     if b.get("audience"):
-        parts.append(f"Аудитория: {b['audience']}")
+        parts.append(f"Аудитория — кому продаёт: {b['audience']}")
     if b.get("assets"):
         parts.append(f"Что есть: {b['assets']}")
     if b.get("summary"):

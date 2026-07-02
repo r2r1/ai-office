@@ -102,11 +102,11 @@ def _build_system(agent_id: str, rec) -> str:
     if b:
         parts = []
         if b.get("niche"):
-            parts.append(f"Ниша: {b['niche']}")
+            parts.append(f"Ниша — что бизнес продаёт: {b['niche']}")
         if b.get("goal"):
-            parts.append(f"Цель: {b['goal']}")
+            parts.append(f"Цель ЭТОГО прогона офиса (не то, что продаёт компания): {b['goal']}")
         if b.get("audience"):
-            parts.append(f"Аудитория: {b['audience']}")
+            parts.append(f"Аудитория — кому продаёт: {b['audience']}")
         if b.get("assets"):
             parts.append(f"Что есть у клиента: {b['assets']}")
         if b.get("summary"):
