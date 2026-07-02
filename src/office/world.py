@@ -32,7 +32,7 @@ def snapshot() -> dict:
     """Полный срез мира текущего тенанта. Только чтение источников истины."""
     from src.office import (brief, objectives, philosophy, constitution, plan,
                             costs, sites, leads, events, autonomy, trust, org,
-                            registry, questions)
+                            registry, questions, projects)
 
     b = brief.get()
     phil = philosophy.load()
@@ -71,6 +71,12 @@ def snapshot() -> dict:
              "measured_by": o.get("measured_by", ""), "current_value": o.get("current_value", ""),
              "priority": o.get("priority", 50), "status": o.get("status", "active")}
             for o in objectives.all_objectives()
+        ],
+        # Projects: активный + история (что каждый оставил после себя)
+        "projects": [
+            {"id": p["id"], "title": p["title"], "status": p.get("status", ""),
+             "left_behind": p.get("left_behind") or {}}
+            for p in projects.all_projects()
         ],
         # Business State: текущее измеримое состояние
         "business_state": {
@@ -171,8 +177,9 @@ def context_block() -> str:
         lines.append("⛔ Блокеры: " + "; ".join(e["summary"][:60] for e in bs["blockers"]))
     if bs["open_questions"]:
         lines.append(f"Открытых вопросов клиенту: {bs['open_questions']}")
+    from src.office import projects
     block = ("\n=== ГДЕ КОМПАНИЯ СЕЙЧАС (Business State) ===\n" + "\n".join(f"- {l}" for l in lines) + "\n")
-    return block + objectives.context_block()
+    return block + projects.context_block() + objectives.context_block()
 
 
 def reset() -> None:

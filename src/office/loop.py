@@ -205,6 +205,15 @@ async def _run_office(tid: str) -> None:
         await publish({"type": "system",
                        "text": f"📋 Составлен план: {len(plan.all_tasks())} задач"})
 
+    # Project: задачи всегда принадлежат проекту (BOS §1). Для тенантов, начавших
+    # до появления сущности, — разовая миграция задач-сирот в активный проект.
+    from src.office import projects
+    proj = projects.ensure_active()
+    adopted = plan.adopt_orphan_tasks(proj["id"])
+    if adopted:
+        await publish({"type": "system",
+                       "text": f"📁 Задачи привязаны к проекту «{proj['title'][:50]}» ({adopted})"})
+
     # Specification (Acceptance L1): контракт приёмки из брифа + плана — что делаем
     # и когда это успех. Не блокирует старт; владелец может подтвердить через API/UI.
     from src.office import specification
@@ -253,6 +262,16 @@ async def _run_office(tid: str) -> None:
                 for s in milestones.all_stages():
                     if s.get("status") == "active":
                         milestones.set_status(s["id"], "done")
+                # Project закрывается с фиксацией «что оставил после себя» (задачи,
+                # сайты, лиды + срез мира) — история компании ведётся по проектам.
+                from src.office import projects as projects_mod
+                closed = projects_mod.close(note="все задачи плана выполнены")
+                if closed:
+                    lb = closed.get("left_behind") or {}
+                    await publish({"type": "system",
+                                   "text": f"📁 Проект «{closed['title'][:50]}» закрыт: "
+                                           f"{lb.get('tasks_done', 0)} задач, "
+                                           f"лидов: {lb.get('leads_count', 0)}"})
                 await _set_progress_note("✅ Запланированная работа выполнена. Жду указаний — что делаем дальше.", publish)
                 await publish({"type": "system",
                                "text": "✅ Запланированная работа выполнена. Напишите в чат, что делать "

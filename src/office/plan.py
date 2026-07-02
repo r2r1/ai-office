@@ -47,7 +47,10 @@ def is_generated() -> bool:
 
 
 def set_tasks(tasks: list[dict]) -> None:
-    """Сохраняет сгенерированный граф задач (нормализует поля)."""
+    """Сохраняет сгенерированный граф задач (нормализует поля). Задачи принадлежат
+    активному ПРОЕКТУ (BOS: Project — единица работы крупнее задачи)."""
+    from src.office import projects
+    project_id = projects.ensure_active()["id"]
     norm = []
     for i, t in enumerate(tasks):
         role = _valid_role(t.get("role") or "")  # роль без отдела → исполнимая (A1)
@@ -62,6 +65,7 @@ def set_tasks(tasks: list[dict]) -> None:
             "status": "pending",
             "assignee": "",        # agent_id исполнителя (когда взята в работу)
             "requested_by": "",    # кто поставил (CEO/план или коллега-агент)
+            "project": project_id,
         })
     # Чистим deps от ссылок на НЕсуществующие id: LLM иногда генерит зависимость на
     # опечатанный/выдуманный id, и такая задача (и всё, что от неё зависит) НИКОГДА не
@@ -93,6 +97,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
                 and t.get("role") == norm_role
                 and " ".join((t.get("title", "")).lower().split()) == norm_title):
             return t  # уже стоит в очереди/в работе — возвращаем существующую
+    from src.office import projects
     tid = f"t{len(tasks) + 1}_{int(time.time()) % 10000}"
     task = {
         "id": tid, "title": (title or "").strip()[:200], "role": (role or "").strip(),
@@ -100,6 +105,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "deps": [x for x in (deps or []) if x],
         "done_criterion": (done_criterion or "").strip()[:200],
         "status": "pending", "assignee": "", "requested_by": requested_by,
+        "project": projects.ensure_active()["id"],
     }
     tasks.append(task)
     d["tasks"] = tasks
@@ -110,6 +116,20 @@ def add_task(title: str, role: str, done_criterion: str = "",
 
 def all_tasks() -> list[dict]:
     return list(_data().get("tasks", []))
+
+
+def adopt_orphan_tasks(project_id: str) -> int:
+    """Миграция: приписывает задачи БЕЗ проекта (созданные до появления сущности
+    Project) к указанному проекту. Возвращает число усыновлённых задач."""
+    d = _data()
+    n = 0
+    for t in d.get("tasks", []):
+        if not t.get("project"):
+            t["project"] = project_id
+            n += 1
+    if n:
+        _save(d)
+    return n
 
 
 def _done_ids() -> set:

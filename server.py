@@ -1466,6 +1466,14 @@ async def get_intents():
     return {"intents": intent_module.recent(50)}
 
 
+@app.get("/api/projects")
+async def get_projects():
+    """Проекты компании: активный + история с «что оставил после себя»."""
+    from src.office import projects as projects_module
+    return {"projects": projects_module.all_projects(),
+            "active": projects_module.active()}
+
+
 @app.get("/api/specification")
 async def get_specification():
     """Спецификация работы — контракт приёмки (Acceptance L1)."""
