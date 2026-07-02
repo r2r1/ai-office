@@ -145,10 +145,20 @@ def check_site() -> list[str]:
                         "оставь по одной на смысл, остальные удали.")
 
     # 8. JS-СИНТАКСИС: реальный прогон node --check (как ручная проверка), если node есть.
+    # Отдельные .js файлы И инлайновый <script type="module"> (3D-скилл часто пишет
+    # React/framer-motion прямо в index.html, а не в отдельный app.js — раньше такой
+    # код никто не проверял вообще).
     for p in js_files:
-        err = _js_syntax_error(_read(p))
+        code = _read(p)
+        is_module = bool(re.search(r"^\s*(import|export)\s", code, re.M))
+        err = workspace._js_syntax_error(code, as_module=is_module)
         if err:
             problems.append(f"{_basename(p)}: JS-ошибка синтаксиса — {err[:100]}")
+    for m in re.finditer(r'<script[^>]*type=["\']module["\'][^>]*>(.*?)</script>',
+                          html, re.IGNORECASE | re.DOTALL):
+        err = workspace._js_syntax_error(m.group(1), as_module=True)
+        if err:
+            problems.append(f"index.html: JS-ошибка синтаксиса в инлайн <script type=module> — {err[:100]}")
 
     # 9. ДОСТУПНОСТЬ (базово): картинки без alt.
     imgs_no_alt = 0
@@ -218,36 +228,6 @@ def _near_duplicate_pages(pages: list[str]) -> int:
                 dupes.add(items[i][0])
                 dupes.add(items[j][0])
     return len(dupes)
-
-
-def _js_syntax_error(code: str) -> str:
-    """Проверяет JS через `node --check` (реальный парсер). '' если ок или node недоступен."""
-    if not code.strip():
-        return ""
-    import shutil
-    if not shutil.which("node"):
-        return ""  # node нет на сервере — тихо пропускаем (не ложная тревога)
-    import subprocess, tempfile, os
-    tmp = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False, encoding="utf-8") as f:
-            f.write(code)
-            tmp = f.name
-        r = subprocess.run(["node", "--check", tmp], capture_output=True, text=True, timeout=15)
-        if r.returncode != 0:
-            out = (r.stderr or r.stdout or "").strip().splitlines()
-            # Берём осмысленную строку об ошибке (SyntaxError/Error), а не баннер «Node.js vXX».
-            err_line = next((ln for ln in out if "error" in ln.lower() and "node.js" not in ln.lower()), "")
-            return (err_line or "синтаксическая ошибка").strip()
-        return ""
-    except Exception:
-        return ""
-    finally:
-        if tmp:
-            try:
-                os.unlink(tmp)
-            except Exception:
-                pass
 
 
 async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> list[str]:

@@ -125,11 +125,57 @@ def tree_text() -> str:
     return "\n".join(f"  {f['path']} ({f['size']} б)" for f in files)
 
 
+def _js_syntax_error(code: str, as_module: bool = True) -> str:
+    """
+    Проверяет JS через `node --check` (реальный парсер). '' если ок или node недоступен.
+    as_module=True пишет во временный .mjs — иначе `node --check` падает на ЛЮБОМ
+    import/export (наш 3D-скилл — React/framer-motion строго через ESM-import), выдавая
+    ложную ошибку на валидном коде.
+    """
+    if not code.strip():
+        return ""
+    import shutil
+    if not shutil.which("node"):
+        return ""  # node нет на сервере — тихо пропускаем (не ложная тревога)
+    import subprocess, tempfile, os
+    tmp = None
+    try:
+        suffix = ".mjs" if as_module else ".js"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False, encoding="utf-8") as f:
+            f.write(code)
+            tmp = f.name
+        r = subprocess.run(["node", "--check", tmp], capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            out = (r.stderr or r.stdout or "").strip().splitlines()
+            err_line = next((ln for ln in out if "error" in ln.lower() and "node.js" not in ln.lower()), "")
+            return (err_line or "синтаксическая ошибка").strip()
+        return ""
+    except Exception:
+        return ""
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+
+
 def verify() -> dict:
-    """Статическая проверка работоспособности: компиляция всех .py файлов проекта."""
+    """
+    Статическая проверка работоспособности: компиляция .py + синтаксис .js/.mjs
+    (отдельных файлов И инлайновых <script type="module"> в .html).
+
+    Раньше проверялся ТОЛЬКО .py — для 3D-лендинга (весь код на React/framer-motion
+    в JS, ни одного .py файла) verify_code всегда отвечал «✅ 0 .py файлов
+    компилируются без ошибок» — ложное «всё ок» без единой реальной проверки того,
+    что агент только что написал (реальный кейс: designer/developer получали этот
+    зелёный чек на JS с синтаксическими ошибками и сдавали задачу как готовую).
+    """
     import py_compile
     files = list_files()
     py_files = [f for f in files if f["path"].endswith(".py")]
+    js_files = [f for f in files if f["path"].endswith((".js", ".mjs"))]
+    html_files = [f for f in files if f["path"].endswith(".html")]
     errors = []
     for f in py_files:
         full = _safe(f["path"])
@@ -139,9 +185,26 @@ def verify() -> dict:
             py_compile.compile(str(full), doraise=True)
         except py_compile.PyCompileError as e:
             errors.append(f"{f['path']}: {getattr(e, 'msg', str(e))}")
+    checked_js = 0
+    for f in js_files:
+        code = read_file(f["path"])
+        is_module = f["path"].endswith(".mjs") or bool(re.search(r"^\s*(import|export)\s", code, re.M))
+        err = _js_syntax_error(code, as_module=is_module)
+        checked_js += 1
+        if err:
+            errors.append(f"{f['path']}: {err}")
+    for f in html_files:
+        code = read_file(f["path"])
+        for m in re.finditer(r'<script[^>]*type=["\']module["\'][^>]*>(.*?)</script>',
+                              code, re.IGNORECASE | re.DOTALL):
+            inline = m.group(1)
+            err = _js_syntax_error(inline, as_module=True)
+            checked_js += 1
+            if err:
+                errors.append(f"{f['path']}: инлайн <script type=module> — {err}")
     has_reqs = any(f["path"].endswith("requirements.txt") for f in files)
-    return {"ok": not errors, "checked_py": len(py_files), "total_files": len(files),
-            "errors": errors, "has_requirements": has_reqs}
+    return {"ok": not errors, "checked_py": len(py_files), "checked_js": checked_js,
+            "total_files": len(files), "errors": errors, "has_requirements": has_reqs}
 
 
 def verify_text() -> str:
@@ -150,8 +213,8 @@ def verify_text() -> str:
     r = verify()
     if r["ok"]:
         warn = "" if r["has_requirements"] else " ⚠ нет requirements.txt — добавь зависимости."
-        return (f"✅ Проверка пройдена: {r['checked_py']} .py файлов компилируются без ошибок "
-                f"(всего файлов: {r['total_files']}).{warn}")
+        return (f"✅ Проверка пройдена: {r['checked_py']} .py и {r['checked_js']} .js/.mjs/inline "
+                f"файлов компилируются без ошибок (всего файлов: {r['total_files']}).{warn}")
     return "❌ Ошибки компиляции:\n" + "\n".join(r["errors"][:15])
 
 
