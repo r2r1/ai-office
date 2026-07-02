@@ -29,6 +29,7 @@ MANAGER_POLL = 5          # как часто менеджер ищет новы
 AGENT_COOLDOWN_SECS = int(os.getenv("AGENT_COOLDOWN_SECS", "25"))  # антидребезг (живость)
 CEO_REASSESS_EVERY = 3    # CEO пересматривает структуру компании раз в N циклов (экономия токенов)
 MAX_THINK_SECS = int(os.getenv("AGENT_MAX_THINK_SECS", "240"))  # дольше → считаем зависшим
+MAX_TASK_ATTEMPTS = 3     # провалов приёмки до блокировки задачи (эскалация вместо цикла)
 
 # Состояние по тенантам
 _current_ms: dict[str, str] = {}        # tid -> id текущего этапа
@@ -203,6 +204,17 @@ async def _run_office(tid: str) -> None:
         plan.set_tasks(tasks)
         await publish({"type": "system",
                        "text": f"📋 Составлен план: {len(plan.all_tasks())} задач"})
+
+    # Specification (Acceptance L1): контракт приёмки из брифа + плана — что делаем
+    # и когда это успех. Не блокирует старт; владелец может подтвердить через API/UI.
+    from src.office import specification
+    if not specification.exists():
+        spec = specification.ensure()
+        if spec.get("functions"):
+            await publish({"type": "system",
+                           "text": f"📜 Спецификация сформирована: {len(spec['functions'])} "
+                                   f"пунктов, {len(spec.get('success_criteria', []))} критериев "
+                                   f"успеха — см. «Проект»"})
 
     # ---- ЦИКЛЫ ----
     cycle = 0
@@ -722,6 +734,10 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                     task_txt = t.get("title", "")
                     if t.get("done_criterion"):
                         task_txt += f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}"
+                    if t.get("last_feedback"):
+                        # Повторная попытка после провала приёмки: исполнитель видит,
+                        # ЧТО именно не прошло, а не решает задачу вслепую заново.
+                        task_txt += f"\n{t['last_feedback']}"
                     plan.assign(t["id"], free.agent_id)  # доска: взято в работу
                     _agent_task[_tk(free.agent_id)] = t["id"]
                     await _assign(free.agent_id, free.role, task_txt, publish,
@@ -858,19 +874,47 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             _attribute_result(agent_id, role, result)
             # Память отдела: фиксируем, что отдел сделал — пригодится коллегам в след. циклах
             knowledge.note_result(department, role, result or "")
-            # Доска: закрываем ИМЕННО эту задачу (а не «первую по роли»).
-            # ПУСТАЯ сдача задачу НЕ закрывает: агент вернул пустой результат (обрыв/
-            # только tool-calls) — возвращаем в очередь, иначе фиктивное «выполнено»
-            # (реальный кейс: integrator сдал пустоту, t3 закрылась).
+            # Доска: закрываем ИМЕННО эту задачу — но ТОЛЬКО через приёмку (BOS §8).
+            # Сдача ≠ приёмка: раньше «done» означало «непустая строка», и система
+            # не отличала работу от рассказа о работе. Теперь acceptance.check гоняет
+            # применимые уровни (build/functional/базовый), провал возвращает задачу
+            # в очередь с фидбеком, а 3-й провал БЛОКИРУЕТ её с blocker-событием —
+            # вместо вечного цикла fail→revert→fail.
             if task_id and plan.is_generated():
-                if (result or "").strip():
-                    plan.complete(task_id)
-                    await publish({"type": "system", "text": f"✅ Задача {task_id} выполнена"})
-                else:
-                    plan.revert(task_id)
+                from src.office import acceptance, events as events_mod
+                t_rec = plan.get_task(task_id) or {}
+                verdict = acceptance.check(t_rec.get("title", task) or task, role, result or "",
+                                           done_criterion=t_rec.get("done_criterion", ""))
+                trace.log("acceptance", agent=agent_id, task_id=task_id,
+                          passed=verdict["passed"], levels=str(verdict["levels"]),
+                          problems="; ".join(verdict["problems"])[:200])
+                if verdict["passed"]:
+                    plan.complete(task_id, acceptance=verdict)
                     await publish({"type": "system",
-                                   "text": f"↩️ {agent_id} вернул пустой результат — "
-                                           f"задача {task_id} возвращена в очередь"})
+                                   "text": f"✅ Задача {task_id} принята (приёмка пройдена)"})
+                else:
+                    attempts = plan.revert(task_id)
+                    fb = acceptance.feedback_text(verdict)
+                    await publish({"type": "system",
+                                   "text": f"↩️ Задача {task_id} НЕ прошла приёмку "
+                                           f"(попытка {attempts}): "
+                                           + "; ".join(verdict["problems"])[:140]})
+                    lessons.add(role, f"Приёмка {task_id}: " + "; ".join(verdict["problems"])[:180])
+                    if attempts >= MAX_TASK_ATTEMPTS:
+                        reason = "; ".join(verdict["problems"])[:200] or "приёмка не проходит"
+                        plan.block(task_id, reason)
+                        events_mod.raise_event(
+                            "blocker",
+                            f"Задача {task_id} заблокирована после {attempts} попыток: {reason}",
+                            from_role=role, from_agent=agent_id)
+                        await publish({"type": "system",
+                                       "text": f"⛔ Задача {task_id} заблокирована после "
+                                               f"{attempts} неудачных попыток — нужно решение "
+                                               f"CEO или уточнение клиента. Причина: {reason[:120]}"})
+                    elif fb:
+                        # Фидбек приёмки сохраняется в задаче — попадёт исполнителю
+                        # при переназначении (см. _run_leaders: last_feedback → task_txt)
+                        plan.set_feedback(task_id, fb)
             # Trust Score: успешная задача повышает доверие к отделу
             if department:
                 trust.record_success(department)

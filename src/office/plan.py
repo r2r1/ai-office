@@ -202,20 +202,82 @@ def assign(task_id: str, agent_id: str) -> None:
     _save(d)
 
 
-def complete(task_id: str) -> None:
-    mark(task_id, "done")
+def complete(task_id: str, acceptance: dict | None = None) -> None:
+    """Закрыть задачу. `acceptance` — вердикт приёмки (уровни/проблемы), пишется
+    в задачу для UI и History (BOS §8: done только через приёмку)."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id:
+            t["status"] = "done"
+            if acceptance is not None:
+                t["acceptance"] = acceptance
+            t["updated_ts"] = time.time()
+            break
+    _save(d)
 
 
-def revert(task_id: str) -> None:
-    """Вернуть зависшую/упавшую задачу в очередь (in_progress → pending)."""
+def revert(task_id: str) -> int:
+    """Вернуть зависшую/упавшую/не прошедшую приёмку задачу в очередь
+    (in_progress → pending). Каждый возврат увеличивает счётчик попыток —
+    по нему loop эскалирует вместо вечного цикла fail→revert→fail (BOS §8).
+    Возвращает новое число попыток (0, если задача не была in_progress)."""
     d = _data()
     for t in d.get("tasks", []):
         if t["id"] == task_id and t.get("status") == "in_progress":
             t["status"] = "pending"
             t["assignee"] = ""
+            t["attempts"] = int(t.get("attempts", 0)) + 1
+            t["updated_ts"] = time.time()
+            _save(d)
+            return t["attempts"]
+    return 0
+
+
+def block(task_id: str, reason: str) -> None:
+    """Заблокировать задачу после исчерпания попыток: она уходит с доски исполнителей
+    (ready_for_department берёт только pending) и ждёт вмешательства владельца/CEO."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id:
+            t["status"] = "blocked"
+            t["assignee"] = ""
+            t["blocked_reason"] = (reason or "")[:300]
             t["updated_ts"] = time.time()
             break
     _save(d)
+
+
+def unblock(task_id: str) -> bool:
+    """Вернуть заблокированную задачу в очередь со сброшенными попытками
+    (владелец/CEO вмешался — исполнитель получает чистый счётчик)."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id and t.get("status") == "blocked":
+            t["status"] = "pending"
+            t["attempts"] = 0
+            t["blocked_reason"] = ""
+            t["last_feedback"] = ""
+            t["updated_ts"] = time.time()
+            _save(d)
+            return True
+    return False
+
+
+def set_feedback(task_id: str, feedback: str) -> None:
+    """Сохранить фидбек приёмки в задаче — попадёт исполнителю при переназначении."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id:
+            t["last_feedback"] = (feedback or "")[:500]
+            break
+    _save(d)
+
+
+def get_task(task_id: str) -> dict | None:
+    for t in all_tasks():
+        if t["id"] == task_id:
+            return t
+    return None
 
 
 def for_agent(agent_id: str) -> list[dict]:
@@ -234,6 +296,7 @@ def board(dept_id: str | None = None) -> dict:
         "todo": [t for t in tasks if t.get("status") == "pending"],
         "doing": [t for t in tasks if t.get("status") == "in_progress"],
         "done": [t for t in tasks if t.get("status") == "done"],
+        "blocked": [t for t in tasks if t.get("status") == "blocked"],
     }
 
 
@@ -241,7 +304,8 @@ def board_summary(dept_id: str | None = None) -> str:
     """Короткая сводка доски для лидера: «✓3 ⟳1 ☐2» + что в работе."""
     b = board(dept_id)
     doing = "; ".join(f"{t['id']}:{t['title'][:30]}" for t in b["doing"]) or "—"
-    return f"✓{len(b['done'])} ⟳{len(b['doing'])} ☐{len(b['todo'])} | в работе: {doing}"
+    blocked = f" ⛔{len(b['blocked'])}" if b.get("blocked") else ""
+    return f"✓{len(b['done'])} ⟳{len(b['doing'])} ☐{len(b['todo'])}{blocked} | в работе: {doing}"
 
 
 def mark_done_by_role(role: str) -> str | None:

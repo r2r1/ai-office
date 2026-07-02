@@ -1466,6 +1466,31 @@ async def get_intents():
     return {"intents": intent_module.recent(50)}
 
 
+@app.get("/api/specification")
+async def get_specification():
+    """Спецификация работы — контракт приёмки (Acceptance L1)."""
+    from src.office import specification as spec_module
+    return spec_module.get() or {"status": "none"}
+
+
+@app.post("/api/specification/confirm")
+async def confirm_specification(request: Request):
+    """Владелец подтверждает спецификацию. Body: {note?}."""
+    from src.office import specification as spec_module
+    data = await request.json() if (await request.body()) else {}
+    return {"ok": True, "specification": spec_module.confirm(data.get("note", ""))}
+
+
+@app.post("/api/task/{task_id}/unblock")
+async def unblock_task(task_id: str):
+    """Вернуть заблокированную задачу в очередь (решение владельца/CEO)."""
+    from src.office import plan as plan_mod
+    if not plan_mod.unblock(task_id):
+        return {"ok": False, "message": "Задача не найдена или не заблокирована"}
+    office_loop.wake_tenant()
+    return {"ok": True}
+
+
 @app.get("/api/philosophy")
 async def get_philosophy(request: Request):
 

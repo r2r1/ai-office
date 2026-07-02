@@ -277,6 +277,8 @@ framer-motion через esm.sh, без шага сборки; доступен 
 | `office/knowledge.py` | 3-слойная память с retrieval |
 | `office/events.py` | Event Layer (доменные события для CEO) |
 | `office/tool_router.py` | `use_capability` → подбор интеграции |
+| `office/acceptance.py` | **Acceptance Layer** (BOS §8): задача закрывается ТОЛЬКО приёмкой — build (компиляция py/js), functional (критик сайта/бота), базовый уровень; вердикт пишется в задачу |
+| `office/specification.py` | Specification — контракт приёмки из брифа + плана (функции, критерии успеха); подтверждение владельцем опционально |
 | `office/world.py` | **World Model v1** (BOS §4): SSOT-агрегатор — `snapshot()` (единый срез мира), `diff()`, журнал срезов, `context_block()` «где компания сейчас» для CEO |
 | `office/objectives.py` | Objectives — измеримые цели (desired state); `measured_by` пуст → цель не в gap-анализе, а источник работы «обеспечить измеримость» |
 | `office/intent.py` | Intent Layer — единый вход намерений владельца: `capture()` до интерпретации + результат CEO-триажа в журнале |
@@ -391,6 +393,7 @@ React + Vite + TypeScript + motion/react. Старый ванильный canvas
 - `GET /api/files`, `/api/file?path=`, `/api/raw?path=` — код проекта; `/api/terminal` — выполнение команд.
 - `GET /api/knowledge` — 3-слойная память (диагностика).
 - `GET /api/world` — снапшот World Model; `GET/POST /api/objectives` — цели; `GET /api/intents` — журнал намерений.
+- `GET /api/specification`, `POST /api/specification/confirm` — контракт приёмки; `POST /api/task/{id}/unblock` — разблокировать задачу.
 - `GET /api/office/status`, `POST /api/office/pause`, `/api/office/resume` — пауза/старт.
 - `GET/POST /api/model`, `/api/models`, `/api/agent/{id}/model` — модели.
 - `GET /api/digest` — Morning Digest.
@@ -426,6 +429,10 @@ React + Vite + TypeScript + motion/react. Старый ванильный canvas
   _brief_context`, `chat.py` И `orchestrator.interpret_directive` одновременно).
   Добавляешь новое место, где `goal` идёт в промпт — подмешивай `niche`/`audience`
   рядом с явной подписью «это НЕ то, что продаёт компания».
+- **Задача закрывается только приёмкой.** Сдача ≠ приёмка: `_job` гоняет результат
+  через `acceptance.check` (build/functional/базовый), провал возвращает задачу в
+  очередь с фидбеком (`last_feedback` виден исполнителю при переназначении), третий
+  провал блокирует её с blocker-событием. Никогда не возвращай «done = непустая строка».
 - **Plan-driven всегда.** Если LLM-генерация плана падает — `_fallback_plan` в
   `loop.py` даёт детерминированный план. Офис без плана уходит в LLM-хаос.
 - **Общие доступы.** Любой ключ доступен любому агенту через `get_connection`.
