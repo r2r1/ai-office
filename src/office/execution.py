@@ -359,6 +359,16 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
         elif role == "strategist":
             result = await strategist.run_async(task, publish=publish, agent_id=agent_id, save=False)
         else:
+            if role in ("designer", "developer"):
+                # Гарантируем «Стиль: …» ДО того, как модель начнёт строить сайт —
+                # инструкция в скилле («marketer пишет строку, designer читает») не
+                # гарантия: в проде marketer пропускал этот необязательный шаг под
+                # давлением токенов, designer тоже не спрашивал коллегу, и сайт
+                # строился по дефолтам модели — одинаково для любой ниши (см. handoff).
+                # Идемпотентно: если строка уже есть (marketer справился сам) — не трогаем.
+                from src.office import design_style
+                b = brief.get()
+                design_style.ensure_style_line(b.get("niche", ""), b.get("audience", ""))
             ctx_task = task_with_context(role, task, skill, department=department, objective=objective)
             fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill,
                                       model=policy["model"])
