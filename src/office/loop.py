@@ -712,6 +712,7 @@ async def _apply_company_decision(decision: dict, publish) -> None:
         await publish({"type": "speech", "agent_id": "orchestrator_1", "text": f"🧭 {thought}"})
 
     # Блок 3: Логируем структурированное решение CEO (для UI «Почему?»)
+    did = ""
     if action != "wait":
         did = decisions.record(
             action=action,
@@ -723,6 +724,9 @@ async def _apply_company_decision(decision: dict, publish) -> None:
             expected_effect=decision.get("expected_effect", ""),
             data_used=decision.get("data_used") or ["strategy", "milestones"],
             made_by="orchestrator_1",
+            # prompt_id проставит Phase 1, когда CEO-промпт пойдёт через Prompt Builder
+            # (сейчас decide_company не логирует свой промпт) — цепочка станет полной.
+            prompt_id=decision.get("_prompt_id", ""),
         )
         await publish({"type": "decision_record", "decision_id": did, "action": action,
                        "thought": thought, "confidence": decision.get("confidence", 60)})
@@ -763,6 +767,17 @@ async def _apply_company_decision(decision: dict, publish) -> None:
     elif action == "delegate" and dept in org.catalog():
         org.set_objective(dept, decision.get("objective") or "")
         await publish({"type": "system", "text": f"🎯 CEO обновил цель отдела «{org.catalog()[dept]['name']}»"})
+
+    # Observability: фиксируем срез мира ПОСЛЕ применения решения и привязываем к нему.
+    # world.diff(этот срез, предыдущий) = «что решение изменило в мире» — по нему
+    # Observability строит цепочку промпт → решение → diff (Phase 0.5, DoD).
+    if did:
+        try:
+            from src.office import world
+            snap = world.save_snapshot(reason=f"decision:{did}")
+            decisions.set_snapshot(did, snap.get("snapshot_id", ""))
+        except Exception:
+            pass  # журнал наблюдаемости не должен ронять цикл
 
 
 async def _hire_leader(dept_id: str, objective: str, publish) -> None:

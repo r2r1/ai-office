@@ -37,8 +37,11 @@ def record(
     expected_effect: str = "",
     data_used: list | None = None,
     made_by: str = "orchestrator_1",
+    prompt_id: str = "",
 ) -> str:
-    """Сохранить решение CEO. Возвращает id записи."""
+    """Сохранить решение CEO. Возвращает id записи. `prompt_id` — ссылка на
+    промпт (prompt_builder.log_prompt), породивший решение: по нему Observability
+    строит цепочку промпт → решение → исполнение → diff мира."""
     did = f"d_{uuid.uuid4().hex[:8]}"
     items = _load()
     items.append({
@@ -53,12 +56,33 @@ def record(
         "risks": risks or [],
         "expected_effect": expected_effect,
         "data_used": data_used or [],
+        "prompt_id": prompt_id or "",
+        "snapshot_id": "",     # ставится world.save_snapshot после применения решения
         "confirmed_by": None,  # "user" | "auto" — кем подтверждено
         "result": None,
         "result_ts": None,
     })
     _save(items)
     return did
+
+
+def get(did: str) -> dict | None:
+    """Запись решения по id (или None)."""
+    for item in _load():
+        if item.get("id") == did:
+            return item
+    return None
+
+
+def set_snapshot(did: str, snapshot_id: str) -> None:
+    """Привязать к решению id среза мира, зафиксированного ПОСЛЕ его применения —
+    Observability берёт этот срез и предыдущий, чтобы показать world.diff решения."""
+    items = _load()
+    for item in items:
+        if item.get("id") == did:
+            item["snapshot_id"] = snapshot_id
+            break
+    _save(items)
 
 
 def set_result(did: str, result: str, confirmed_by: str = "auto") -> None:

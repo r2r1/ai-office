@@ -18,6 +18,7 @@ Snapshot+diff — фундамент обоих Sandbox-механизмов (BO
 
 import json
 import time
+import uuid
 from datetime import datetime
 
 from src.saas import context as ctx
@@ -130,11 +131,16 @@ def diff(a: dict, b: dict) -> dict:
 # ─────────────────────────── журнал срезов ───────────────────────────
 
 def save_snapshot(reason: str = "") -> dict:
-    """Фиксирует текущий срез мира в журнал (Measurement-петля будет читать его)."""
+    """Фиксирует текущий срез мира в журнал (Measurement-петля будет читать его).
+    В снапшот проставляется `snapshot_id` — по нему Observability связывает срез
+    с решением (decisions.set_snapshot) и считает world.diff «до/после»."""
     snap = snapshot()
+    sid = f"s_{uuid.uuid4().hex[:8]}"
+    snap["snapshot_id"] = sid
     try:
         p = ctx.tenant_dir() / _SNAP_FILE
-        entry = {"reason": reason, "at": datetime.now().isoformat(timespec="seconds"), **snap}
+        entry = {"snapshot_id": sid, "reason": reason,
+                 "at": datetime.now().isoformat(timespec="seconds"), **snap}
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         lines = p.read_text(encoding="utf-8").splitlines()
@@ -145,16 +151,51 @@ def save_snapshot(reason: str = "") -> dict:
     return snap
 
 
-def last_snapshot() -> dict | None:
-    """Последний зафиксированный срез (или None)."""
+def _read_snapshots() -> list[dict]:
+    """Весь журнал срезов (по возрастанию времени)."""
+    out: list[dict] = []
     try:
         p = ctx.tenant_dir() / _SNAP_FILE
         if not p.exists():
-            return None
-        lines = p.read_text(encoding="utf-8").splitlines()
-        return json.loads(lines[-1]) if lines else None
+            return out
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                continue
     except Exception:
+        pass
+    return out
+
+
+def snapshot_by_id(sid: str) -> dict | None:
+    if not sid:
         return None
+    for s in reversed(_read_snapshots()):
+        if s.get("snapshot_id") == sid:
+            return s
+    return None
+
+
+def snapshot_before(target_sid: str) -> dict | None:
+    """Срез, зафиксированный непосредственно ПЕРЕД срезом target_sid (или None) —
+    вторая сторона diff «что изменилось при этом решении»."""
+    snaps = _read_snapshots()
+    for i, s in enumerate(snaps):
+        if s.get("snapshot_id") == target_sid:
+            return snaps[i - 1] if i > 0 else None
+    return None
+
+
+def snapshots_between(t0: float, t1: float) -> list[dict]:
+    """Срезы, попавшие во временное окно [t0, t1] (для таймлайна)."""
+    return [s for s in _read_snapshots() if t0 <= s.get("ts", 0) <= t1]
+
+
+def last_snapshot() -> dict | None:
+    """Последний зафиксированный срез (или None)."""
+    snaps = _read_snapshots()
+    return snaps[-1] if snaps else None
 
 
 # ─────────────────────────── проекция в промпт ───────────────────────────

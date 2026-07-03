@@ -648,6 +648,24 @@ async def get_trace(limit: int = 400):
     return {"trace": _trace.tail(max(1, min(limit, 4000)))}
 
 
+@app.get("/api/observability/timeline")
+async def get_observability_timeline(limit: int = 400, since: float | None = None,
+                                     until: float | None = None):
+    """Единая временная шкала офиса: trace + промпты + решения + срезы мира,
+    слитые по времени с перекрёстными ссылками (Phase 0.5)."""
+    from src.office import observability
+    return {"timeline": observability.timeline(since=since, until=until,
+                                               limit=max(1, min(limit, 2000)))}
+
+
+@app.get("/api/observability/decision/{decision_id}")
+async def get_observability_decision(decision_id: str):
+    """Полная цепочка одного решения: промпт → исполнение (trace) → world.diff
+    до/после (Phase 0.5 DoD)."""
+    from src.office import observability
+    return observability.decision_chain(decision_id)
+
+
 @app.get("/api/deliverables")
 async def get_deliverables():
     """Готовые результаты работы агентов — пользователь может посмотреть и скопировать."""

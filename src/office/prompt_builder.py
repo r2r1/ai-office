@@ -26,6 +26,7 @@ task_context), поэтому здесь не дублируются — ина�
 
 import json
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -134,12 +135,17 @@ _MAX_PROMPT_BYTES = 4_000_000  # ~4 МБ на тенанта; дальше ос�
 _KEEP_LINES = 200
 
 
-def log_prompt(agent_id: str, role: str, system: str, task: str) -> None:
+def log_prompt(agent_id: str, role: str, system: str, task: str) -> str:
+    """Логирует собранный промпт целиком в prompts.jsonl и возвращает его prompt_id
+    (стабильный идентификатор для сшивки в Observability: trace-запись исполнения и
+    Decision, порождённые этим промптом, ссылаются на него по prompt_id)."""
     from src.saas import context as ctx
     from src.office import trace
+    pid = f"p_{uuid.uuid4().hex[:8]}"
     try:
         p = ctx.tenant_dir() / _PROMPTS_FILE
         entry = {
+            "id": pid,
             "ts": datetime.now().strftime("%H:%M:%S"),
             "t": round(time.time(), 3),
             "agent": agent_id, "role": role,
@@ -154,7 +160,43 @@ def log_prompt(agent_id: str, role: str, system: str, task: str) -> None:
     except Exception:
         pass  # лог промптов не должен ронять офис
     try:
-        trace.log("prompt", agent=agent_id, role=role,
+        trace.log("prompt", agent=agent_id, role=role, prompt_id=pid,
                   system_chars=len(system), task_chars=len(task))
     except Exception:
         pass
+    return pid
+
+
+def _read_prompts() -> list[dict]:
+    from src.saas import context as ctx
+    out: list[dict] = []
+    try:
+        p = ctx.tenant_dir() / _PROMPTS_FILE
+        if not p.exists():
+            return out
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def prompt_by_id(pid: str) -> dict | None:
+    """Полная запись промпта по prompt_id (или None)."""
+    if not pid:
+        return None
+    for e in reversed(_read_prompts()):
+        if e.get("id") == pid:
+            return e
+    return None
+
+
+def recent_prompts(n: int = 50) -> list[dict]:
+    """Последние N промптов (метаданные без тела — для таймлайна)."""
+    out = []
+    for e in _read_prompts()[-n:]:
+        out.append({k: v for k, v in e.items() if k not in ("system", "task")})
+    return out

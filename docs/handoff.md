@@ -370,6 +370,49 @@ Acceptance L1). Обе дёшевы и без внешних зависимос�
 
 ---
 
+## 🔭 2026-07-03 (Phase 0.5 дорожной карты) — Observability (сшивка журналов)
+
+Вторая фаза. Не создаёт логирование с нуля — **сшивает** существующие журналы
+(trace.jsonl, prompts.jsonl, decisions, world_snapshots.jsonl) в одну шкалу с
+перекрёстными ссылками. DoD: по `decision_id` — полная цепочка одним запросом.
+
+**Пломбировка correlation-id:**
+- `prompt_builder.log_prompt` теперь генерирует и ВОЗВРАЩАЕТ `prompt_id` (кладёт в
+  запись prompts.jsonl и в trace-запись `prompt`); + ридеры `prompt_by_id`,
+  `recent_prompts`.
+- `decisions.record(prompt_id=…)` хранит ссылку на промпт; новые `decisions.get(did)`,
+  `decisions.set_snapshot(did, sid)` (+ поля `prompt_id`/`snapshot_id` в записи).
+- `world.save_snapshot` проставляет `snapshot_id`; новые ридеры `snapshot_by_id`,
+  `snapshot_before` (соседний срез для diff «до/после»), `snapshots_between`.
+- `loop._apply_company_decision`: после применения НЕ-wait решения фиксирует срез
+  мира `decision:<did>` и привязывает его к решению → `world.diff(before, after)` =
+  «что решение изменило в мире». `prompt_id` решения проставит Phase 1 (когда
+  CEO-промпт пойдёт через Builder и залогируется); сейчас цепочка сшивает промпт по
+  времени+автору как фолбэк.
+
+**Новый модуль `office/observability.py`:**
+- `timeline(since, until, limit)` — 4 источника, слитые по времени (`source ∈
+  {trace, prompt, decision, snapshot}`).
+- `decision_chain(did)` — {decision, prompt (по prompt_id или ближайший по времени),
+  trace (по decision_id/prompt_id или в окне ±45с), world_diff (до/после по
+  snapshot_id)}.
+
+**Эндпоинты** (server.py): `GET /api/observability/timeline`,
+`GET /api/observability/decision/{id}`.
+
+Проверено: `py_compile` всего дерева, импорт `server`, сквозной смоук-тест
+(лог промпта → срез → решение с prompt_id → срез после → `decision_chain`: промпт
+слинкован по prompt_id, trace найден, world_diff посчитан; `timeline` сливает все
+4 источника). LLM не вызывался ($0).
+
+**Не сделано (осознанно):** фронтовое переиспользование API во вкладках «События»/
+«Трейс» (DoD чисто бэкендовый, фаза невидима пользователю — ⭐⭐⭐⭐/❌). Прошивка
+`prompt_id` сквозь `llm.run_agent` для worker-трейсов не делалась (слишком
+инвазивно; worker-сшивка идёт по времени+agent, а trace-запись `prompt` уже несёт
+`prompt_id`). Полная линковка CEO-решение↔промпт зажжётся в Phase 1.
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt
