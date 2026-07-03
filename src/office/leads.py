@@ -39,6 +39,16 @@ def count() -> int:
     return len(_all())
 
 
+def count_since(ts: float) -> int:
+    """Число лидов, пришедших после метки времени ts (факт для Measurement)."""
+    return sum(1 for l in _all() if l.get("ts", 0) >= ts)
+
+
+def count_last_days(days: int = 7) -> int:
+    """Число лидов за последние `days` суток — фактическая метрика «заявки/неделю»."""
+    return count_since(time.time() - days * 86400)
+
+
 def load() -> None:
     pass
 

@@ -41,6 +41,19 @@ def summary() -> str:
     return get().get("summary", "")
 
 
+def avg_check() -> float | None:
+    """Средний чек из типизированного брифа (Phase 3a) или None. Вход прокси-выручки
+    Measurement (лиды × чек). Валюта — как ввёл клиент; прокси валюто-независим."""
+    v = get().get("avg_check_usd")
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+def budget() -> float | None:
+    """Бюджет/оборот из типизированного брифа или None."""
+    v = get().get("budget_usd")
+    return float(v) if isinstance(v, (int, float)) else None
+
+
 _JUNK_GOALS = {"не знаю", "незнаю", "не знаю.", "-", "—", "нет", "хз", "?", ""}
 
 

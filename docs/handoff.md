@@ -555,6 +555,40 @@ capabilities` = реестр способностей. Дальше по кар�
 
 ---
 
+## 📊 2026-07-03 (Phase 3) — Measurement Layer
+
+Замыкает вход измерительного полукруга: числа о бизнесе с пометкой источника
+(факт|оценка). Разблокирует Gap Analysis и L4-приёмку (Phase 4).
+
+### 3a — типизированный Brief
+- `onboarding._parse_economics(text)` — best-effort разбор ответа про оборот/чек в
+  `(budget, avg_check)`: по ключевым словам рядом с числом («чек/средний»→чек,
+  «бюджет/оборот/…»→бюджет), затем остаток по убыванию. None, если числа нет.
+- `build_brief_structured` пишет `budget_usd`/`avg_check_usd` (сырой ответ остаётся
+  в `assets` для совместимости). `brief.avg_check()`/`brief.budget()` — аксессоры.
+
+### 3b — Measurement v1
+- Новый `office/metrics.py`: `current()` (чистое чтение leads+brief) — `leads_total`
+  и `leads_7d` (факт), `revenue_proxy_7d` = лиды×чек (**оценка**, только если чек
+  известен). `record/collect/series/latest` — журнал `metrics.json` (тренд).
+- `leads.count_since/count_last_days` — фактическая метрика «заявки/неделю».
+- `objectives.ensure_leads_objective()` — авто-создание ИЗМЕРИМОЙ цели «Заявки в
+  неделю» (`measured_by="leads.count() за 7 дней"`) при первой публикации сайта,
+  идемпотентно. `objectives.measurable()` больше не пуст без владельца.
+- `world.snapshot()` получил раздел `metrics` (ts снят — иначе `world.diff` шумел бы
+  метриками на каждом срезе).
+- `loop._publish_site_auto`: первая публикация → авто-Objective + `metrics.collect()`.
+  Лид (`/api/lead`, `/api/site-lead`) → `metrics.collect()` (тренд пополняется фактом).
+- Эндпоинт `GET /api/metrics` (current + series).
+
+DoD: `/api/world` содержит непустой `metrics`; `objectives.measurable()` ≥1 без
+ручного создания. Смоук: parse (500000/3000), revenue_proxy=оценка (2×15000=30000),
+авто-Objective идемпотентен, world.diff по метрикам пуст при неизменных лидах. $0.
+
+**Дальше:** Phase 4 (Gap Analysis + перепланирование + Acceptance L4).
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

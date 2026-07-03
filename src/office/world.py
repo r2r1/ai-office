@@ -33,7 +33,7 @@ def snapshot() -> dict:
     """Полный срез мира текущего тенанта. Только чтение источников истины."""
     from src.office import (brief, objectives, philosophy, constitution, plan,
                             costs, sites, leads, events, autonomy, trust, org,
-                            registry, questions, projects)
+                            registry, questions, projects, metrics)
 
     b = brief.get()
     phil = philosophy.load()
@@ -66,6 +66,10 @@ def snapshot() -> dict:
             "goal": b.get("goal", ""),
             "summary": b.get("summary", ""),
         },
+        # Measurement (BOS §4): числа о бизнесе, каждое с источником факт|оценка.
+        # ts у метрик снимаем — у снапшота свой ts; иначе world.diff() считал бы
+        # метрики «изменёнными» на каждом срезе (шум в decision_chain).
+        "metrics": [{k: v for k, v in m.items() if k != "ts"} for m in metrics.current()],
         # Objectives: desired state
         "objectives": [
             {"id": o["id"], "title": o["title"], "desired": o.get("desired", ""),

@@ -70,6 +70,40 @@ def interview_questions(mode: str) -> list[dict]:
     return [{"dimension": d, "question": qs[d]} for d in _DIMENSIONS]
 
 
+def _parse_economics(text: str) -> tuple[float | None, float | None]:
+    """Best-effort извлечение (бюджет, средний чек) из свободного ответа про оборот/чек
+    (Phase 3a: типизированный Brief — вход для прокси-экономики Measurement).
+    Возвращает числа как есть (валюта — как ввёл клиент; прокси лиды×чек валюто-
+    независим). None, если число не распозналось. Разбор: сначала по ключевым словам
+    рядом с числом («чек/средний» → чек, «бюджет/оборот/…» → бюджет), затем остаток
+    по убыванию (крупнейшее — бюджет)."""
+    import re
+    t = (text or "").lower().replace(" ", " ")
+    nums: list[tuple[int, float]] = []
+    for m in re.finditer(r"\d[\d\s]*\d|\d", t):
+        raw = m.group(0).replace(" ", "")
+        try:
+            nums.append((m.start(), float(raw)))
+        except ValueError:
+            continue
+    if not nums:
+        return None, None
+    budget = avg = None
+    for pos, val in nums:
+        window = t[max(0, pos - 25):pos + 6]
+        if avg is None and any(k in window for k in ("чек", "средн")):
+            avg = val
+        elif budget is None and any(k in window for k in
+                                    ("бюджет", "оборот", "старт", "влож", "доход", "выручк")):
+            budget = val
+    remaining = sorted((v for _, v in nums if v not in (budget, avg)), reverse=True)
+    if budget is None and remaining:
+        budget = remaining.pop(0)
+    if avg is None and remaining:
+        avg = remaining.pop(0)
+    return budget, avg
+
+
 def build_brief_structured(mode: str, answers: list[dict]) -> dict:
     """
     Детерминированно собирает бриф из ответов интервью — БЕЗ вызова LLM.
@@ -105,12 +139,18 @@ def build_brief_structured(mode: str, answers: list[dict]) -> dict:
         f"Что сейчас работает, кейсы, каналы привлечения."
     )
 
+    budget_usd, avg_check_usd = _parse_economics(revenue)
+
     return {
         "mode": mode,
         "niche": niche,
         "goal": goal,
         "audience": client,
-        "assets": revenue,
+        "assets": revenue,          # сырой ответ (совместимость + человекочитаемо)
+        # Типизированная экономика (Phase 3a): числа для прокси-выручки Measurement.
+        # None, если клиент не назвал число — тогда прокси-экономики нет до уточнения.
+        "budget_usd": budget_usd,
+        "avg_check_usd": avg_check_usd,
         "constraints": constraints,
         "research_question": research_question,
         "summary": summary,

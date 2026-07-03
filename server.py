@@ -923,8 +923,19 @@ async def capture_lead(tenant: str, slug: str, request: Request):
             return HTMLResponse(_LEAD_NO_CONTACT_HTML, status_code=400)
         return JSONResponse({"error": "нужен контакт"}, status_code=400)
     lead = leads_module.add(slug, name, contact, msg)
+    _record_lead_metrics()
     await _notify_lead(dict(lead, slug=slug))
     return HTMLResponse(_LEAD_THANKS_HTML) if native else {"ok": True}
+
+
+def _record_lead_metrics() -> None:
+    """Снимок метрик при новом лиде — тренд «заявки/выручка» пополняется фактом
+    (Measurement, Phase 3b). Не роняет приём лида, если что-то пошло не так."""
+    try:
+        from src.office import metrics as metrics_module
+        metrics_module.collect()
+    except Exception:
+        pass
 
 
 @app.post("/api/site-lead")
@@ -950,6 +961,7 @@ async def capture_site_lead(request: Request):
             return HTMLResponse(_LEAD_NO_CONTACT_HTML, status_code=400)
         return JSONResponse({"error": "нужен контакт (телефон или email)"}, status_code=400)
     lead = leads_module.add(slug, name, contact, msg)
+    _record_lead_metrics()
     await _notify_lead(dict(lead, slug=slug))
     return HTMLResponse(_LEAD_THANKS_HTML) if native else {"ok": True}
 
@@ -1481,6 +1493,15 @@ async def get_world():
     """World Model: единый срез мира компании (Business State + Objectives + DNA)."""
     from src.office import world as world_module
     return world_module.snapshot()
+
+
+@app.get("/api/metrics")
+async def get_metrics():
+    """Measurement (Phase 3): текущие показания метрик (факт|оценка) + история."""
+    from src.office import metrics as metrics_module
+    cur = metrics_module.current()
+    return {"current": cur,
+            "series": {r["metric_id"]: metrics_module.series(r["metric_id"]) for r in cur}}
 
 
 @app.get("/api/objectives")

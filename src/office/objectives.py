@@ -76,6 +76,23 @@ def update(oid: str, **patch) -> dict | None:
     return None
 
 
+def ensure_leads_objective(desired: str = "10 заявок/неделю") -> dict | None:
+    """Автоматически создаёт ИЗМЕРИМУЮ цель «Заявки в неделю» при первой публикации
+    сайта (Phase 3b): measured_by="leads.count() за 7 дней" — реальная метрика, не
+    пустая декларация. Идемпотентно (по measured_by с 'leads'). Так objectives.
+    measurable() перестаёт быть пустым без ручного создания владельцем (DoD)."""
+    for o in all_objectives():
+        if "leads" in (o.get("measured_by") or "").lower():
+            return None  # уже есть измеримая цель по заявкам
+    return add(
+        title="Заявки с сайта в неделю",
+        desired=desired,
+        measured_by="leads.count() за 7 дней",
+        priority=70,
+        source="company",
+    )
+
+
 def measurable() -> list[dict]:
     """Objectives с заполненным measured_by — участвуют в будущем Gap Analysis."""
     return [o for o in all_objectives() if o.get("measured_by") and o.get("status") == "active"]

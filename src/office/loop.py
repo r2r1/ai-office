@@ -560,6 +560,16 @@ async def _publish_site_auto(publish, note: str = "") -> bool:
     from src.office import trace
     trace.log("publish", slug=slug, rev=rev, dir=sdir, note=(note or "")[:120])
     if rev <= 1:
+        # Measurement (Phase 3b): первая публикация — появляется измеримая цель
+        # «Заявки в неделю» с реальной метрикой (leads за 7 дней) и снимок метрик.
+        # objectives.measurable() перестаёт быть пустым без ручного создания владельцем.
+        from src.office import objectives as objectives_mod, metrics as metrics_mod
+        obj = objectives_mod.ensure_leads_objective()
+        metrics_mod.collect()
+        if obj:
+            await publish({"type": "system",
+                           "text": "🎯 Появилась измеримая цель «Заявки в неделю» — "
+                                   "офис начал считать результат сайта"})
         msg = f"🌐 Сайт опубликован: /site/{tid}/{slug} — форма собирает заявки в «Лиды»"
     else:
         tail = f" — {note[:90]}" if note else ""
