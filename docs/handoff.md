@@ -534,14 +534,24 @@ build/functional прошли — **мягкий сигнал, не жёстки
 (telegram_bot→missing/connect_integration; landing_site→have) и `missing_for_plan`.
 DoD-grep `_NON_SITE_WORDS|_SITE_WORDS|_TASK_CAPABILITY` пуст. LLM не вызывался ($0).
 
-### Отложено внутри Phase 2 (для следующей сессии)
-**2a-ii — структурная тяжесть критика**: `critic.check_site()` → `list[{code,
-severity,text}]`, удалить `_CRITICAL_MARKERS`, `is_critical` по severity. Отложено
-осознанно: инвазивно (≥8 call-sites + 3 функции-производителя проблем
-`check_site`/`review_site_visual`/`review_site_llm` мержат строковые списки +
-`critique_text`), а payload низкий (структура тяжести) — отдельный сфокусированный
-коммит. `plan._BOT_WORDS` остаётся (единая точка вывода артефактов/маршрутизации —
-это не consumption-эвристика).
+### 2a-ii — структурная тяжесть критика (готово, коммит отдельно)
+Проблема критика теперь `{code, severity, text}` — тяжесть объявляется В МЕСТЕ
+обнаружения, а не угадывается подстрокой в русской фразе.
+- `critic.check_site/check_bot/review_site_visual/review_site_llm` → `list[dict]`;
+  каждый append обёрнут `_p(code, severity, text)` (severity ∈ critical|cosmetic),
+  severity выставлена так, чтобы сохранить прежнее поведение `_CRITICAL_MARKERS`.
+- `is_critical(p)` → `p["severity"]=="critical"`; **константа `_CRITICAL_MARKERS`
+  удалена**. Новый `critic.text_of(p)` — текст (устойчив к строковому легаси).
+- `critique_text/critique_text_bot` и все потребители (`acceptance`, ~8 мест в
+  `loop`) печатают через `text_of`. bot-проблемы все `critical`; llm-ревью и
+  overflow/alt/дубли/lang — `cosmetic`.
+- Смоук на реальном мини-сайте: no_form/no_viewport→critical, no_styles/no_lang→
+  cosmetic; приёмка сайт-задачи с critical → functional fail.
+
+**Phase 2 закрыта полностью.** DoD-grep `_NON_SITE_WORDS|_SITE_WORDS|_BOT_WORDS|
+_CRITICAL_MARKERS` — только `plan._BOT_WORDS` (единая точка вывода артефактов/
+маршрутизации, НЕ consumption-эвристика) и один комментарий в critic. `/api/
+capabilities` = реестр способностей. Дальше по карте — **Phase 3 (Measurement Layer)**.
 
 ---
 

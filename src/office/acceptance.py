@@ -101,11 +101,11 @@ def check(task_title: str, role: str, result: str,
     if _is_bot_task(artifacts):
         bot_problems = critic.check_bot()
         levels["functional"] = "fail" if bot_problems else "ok"
-        problems += [f"бот: {p}" for p in bot_problems[:3]]
+        problems += [f"бот: {critic.text_of(p)}" for p in bot_problems[:3]]
     elif _is_site_task(artifacts, started_ts):
         site_critical = [p for p in critic.check_site() if critic.is_critical(p)]
         levels["functional"] = "fail" if site_critical else "ok"
-        problems += [f"сайт: {p}" for p in site_critical[:3]]
+        problems += [f"сайт: {critic.text_of(p)}" for p in site_critical[:3]]
 
     # Уверенность приёмки — модификатор от статуса контракта (не гейт): подтверждённая
     # владельцем спецификация без предупреждений → high; черновик или расхождение → ниже.

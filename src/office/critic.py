@@ -52,7 +52,20 @@ def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1]
 
 
-def check_site() -> list[str]:
+# ── Структурный контракт проблемы (BOS §12) ──────────────────────────────────
+# Проблема — не строка, а запись {code, severity, text}. Тяжесть объявляется В
+# МЕСТЕ обнаружения проверкой, а не угадывается потом подстрокой в русской фразе
+# (переформулировал сообщение — потерял критичность). severity ∈ critical|cosmetic.
+def _p(code: str, severity: str, text: str) -> dict:
+    return {"code": code, "severity": severity, "text": text}
+
+
+def text_of(problem) -> str:
+    """Текст проблемы (устойчиво к старому строковому формату, если где-то остался)."""
+    return problem.get("text", "") if isinstance(problem, dict) else str(problem)
+
+
+def check_site() -> list[dict]:
     """
     Программный тестировщик собранного сайта — как ручная проверка инженера, но
     детерминированно и без LLM. Проверяет НЕ только index, а ВСЕ страницы: структуру
@@ -61,14 +74,16 @@ def check_site() -> list[str]:
     """
     site_dir = _find_site_dir()
     if site_dir is None:
-        return ["Не найден index.html — сайт ещё не собран. Создай site/index.html через write_file."]
+        return [_p("no_index", "critical",
+                   "Не найден index.html — сайт ещё не собран. Создай site/index.html через write_file.")]
 
     idx_path = f"{site_dir}/index.html" if site_dir else "index.html"
     html = _read(idx_path)
     if not html:
-        return ["index.html пустой или не читается — перепиши его полностью."]
+        return [_p("empty_index", "critical",
+                   "index.html пустой или не читается — перепиши его полностью.")]
 
-    problems: list[str] = []
+    problems: list[dict] = []
     in_dir = _site_files(site_dir)
     html_pages = [p for p in in_dir if p.endswith(".html")]
     js_files = [p for p in in_dir if p.endswith(".js")]
@@ -81,33 +96,38 @@ def check_site() -> list[str]:
     # 1. Внешние картинки часто не грузятся (Unsplash и т.п.) — требуем локальные/SVG.
     ext_imgs = re.findall(r'<img[^>]+src=["\']https?://[^"\']+', html, re.IGNORECASE)
     if ext_imgs:
-        problems.append(
+        problems.append(_p("external_images", "cosmetic",
             f"Внешние картинки ({len(ext_imgs)} шт., напр. Unsplash) не грузятся и ломают вид — "
-            "замени на встроенные SVG или CSS-градиентные блоки.")
+            "замени на встроенные SVG или CSS-градиентные блоки."))
 
     # 2. Стили должны быть.
     if not any(p.endswith(".css") for p in in_dir) and "<style" not in low:
-        problems.append("Нет стилей вообще — добавь css/style.css или хотя бы <style>.")
+        problems.append(_p("no_styles", "cosmetic",
+            "Нет стилей вообще — добавь css/style.css или хотя бы <style>."))
 
     # 3. index: title и объём.
     if "<title" not in low:
-        problems.append("Нет <title> у главной — добавь заголовок страницы.")
+        problems.append(_p("no_title", "cosmetic", "Нет <title> у главной — добавь заголовок страницы."))
     if len(html) < 1200:
-        problems.append("Слишком мало контента на главной — добавь секции (оффер, услуги, преимущества, отзывы).")
+        problems.append(_p("thin_content", "cosmetic",
+            "Слишком мало контента на главной — добавь секции (оффер, услуги, преимущества, отзывы)."))
 
     # 4. ФОРМЫ на КАЖДОЙ странице реально шлют на /api/site-lead (не только index).
     stub_markers = ("подключаем crm", "подключаем эндпоинт", "готово к отправке",
                     "эндпоинт скоро", "заглушк", "todo", "coming soon")
     pages_with_form = [p for p in html_pages if "<form" in _read(p).lower()]
     if not pages_with_form:
-        problems.append("Нет формы заявки ни на одной странице — сайт не собирает лиды.")
+        problems.append(_p("no_form", "critical",
+            "Нет формы заявки ни на одной странице — сайт не собирает лиды."))
     for p in pages_with_form:
         page_low = _read(p).lower()
         sends = "/api/site-lead" in page_low or "/api/site-lead" in js_blob
         if not sends:
-            problems.append(f"{_basename(p)}: форма не отправляет заявки на /api/site-lead — лиды теряются.")
+            problems.append(_p("form_no_send", "critical",
+                f"{_basename(p)}: форма не отправляет заявки на /api/site-lead — лиды теряются."))
         elif any(s in (page_low + js_blob) for s in stub_markers) and "/api/site-lead" not in page_low:
-            problems.append(f"{_basename(p)}: форма-заглушка (фраза «подключаем/готово»), реальной отправки нет.")
+            problems.append(_p("form_stub", "critical",
+                f"{_basename(p)}: форма-заглушка (фраза «подключаем/готово»), реальной отправки нет."))
 
     # 5. ЦЕЛОСТНОСТЬ ССЫЛОК: каждая внутренняя ссылка ведёт на существующий файл.
     # Сначала пробуем путь ПОЛНОСТЬЮ (разрешённый относительно директории страницы) —
@@ -128,7 +148,8 @@ def check_site() -> list[str]:
             if target and target not in existing_names:
                 broken.add(f"{_basename(p)} → {target}")
     if broken:
-        problems.append(f"Битые внутренние ссылки на несуществующие страницы: {'; '.join(sorted(broken)[:5])}.")
+        problems.append(_p("broken_links", "critical",
+            f"Битые внутренние ссылки на несуществующие страницы: {'; '.join(sorted(broken)[:5])}."))
 
     # 6. СТРУКТУРА HTML каждой страницы: базовый каркас + мобильный viewport + lang.
     for p in html_pages:
@@ -136,11 +157,14 @@ def check_site() -> list[str]:
         if not c:
             continue
         if "<html" not in c or "<body" not in c:
-            problems.append(f"{_basename(p)}: сломан каркас HTML (нет <html>/<body>).")
+            problems.append(_p("broken_frame", "critical",
+                f"{_basename(p)}: сломан каркас HTML (нет <html>/<body>)."))
         if "viewport" not in c:
-            problems.append(f"{_basename(p)}: нет мета viewport — сайт сломан на телефоне.")
+            problems.append(_p("no_viewport", "critical",
+                f"{_basename(p)}: нет мета viewport — сайт сломан на телефоне."))
         if "<html" in c and "lang=" not in c:
-            problems.append(f"{_basename(p)}: у <html> нет lang — важно для доступности/SEO.")
+            problems.append(_p("no_lang", "cosmetic",
+                f"{_basename(p)}: у <html> нет lang — важно для доступности/SEO."))
 
     # 7. ЗАГЛУШКИ/ДУБЛИ: пустые страницы и свалка почти одинаковых файлов.
     for p in html_pages:
@@ -150,11 +174,13 @@ def check_site() -> list[str]:
         text_only = re.sub(r"<[^>]+>", "", c)
         if len(c) < 500 or "lorem ipsum" in c.lower() or "текст-заглушка" in c.lower() \
                 or len(text_only.strip()) < 200:
-            problems.append(f"{_basename(p)}: страница-заглушка/пустая — доделай или удали.")
+            problems.append(_p("stub_page", "critical",
+                f"{_basename(p)}: страница-заглушка/пустая — доделай или удали."))
     dup = _near_duplicate_pages(html_pages)
     if dup:
-        problems.append(f"Много почти одинаковых страниц ({dup}) — это свалка дублей, "
-                        "оставь по одной на смысл, остальные удали.")
+        problems.append(_p("duplicate_pages", "cosmetic",
+            f"Много почти одинаковых страниц ({dup}) — это свалка дублей, "
+            "оставь по одной на смысл, остальные удали."))
 
     # 8. JS-СИНТАКСИС: реальный прогон node --check (как ручная проверка), если node есть.
     # Отдельные .js файлы И инлайновый <script type="module"> (3D-скилл часто пишет
@@ -165,12 +191,14 @@ def check_site() -> list[str]:
         is_module = bool(re.search(r"^\s*(import|export)\s", code, re.M))
         err = workspace._js_syntax_error(code, as_module=is_module)
         if err:
-            problems.append(f"{_basename(p)}: JS-ошибка синтаксиса — {err[:100]}")
+            problems.append(_p("js_error", "critical",
+                f"{_basename(p)}: JS-ошибка синтаксиса — {err[:100]}"))
     for m in re.finditer(r'<script[^>]*type=["\']module["\'][^>]*>(.*?)</script>',
                           html, re.IGNORECASE | re.DOTALL):
         err = workspace._js_syntax_error(m.group(1), as_module=True)
         if err:
-            problems.append(f"index.html: JS-ошибка синтаксиса в инлайн <script type=module> — {err[:100]}")
+            problems.append(_p("js_error", "critical",
+                f"index.html: JS-ошибка синтаксиса в инлайн <script type=module> — {err[:100]}"))
 
     # 9. ДОСТУПНОСТЬ (базово): картинки без alt.
     imgs_no_alt = 0
@@ -178,14 +206,15 @@ def check_site() -> list[str]:
         imgs_no_alt += len([m for m in re.findall(r'<img\b[^>]*>', _read(p), re.IGNORECASE)
                             if 'alt=' not in m.lower()])
     if imgs_no_alt:
-        problems.append(f"Картинки без alt ({imgs_no_alt} шт.) — добавь alt для доступности/SEO.")
+        problems.append(_p("no_alt", "cosmetic",
+            f"Картинки без alt ({imgs_no_alt} шт.) — добавь alt для доступности/SEO."))
 
     # 10. ФЕЙКОВОЕ 3D: страница заявляет «3D», но это статичная CSS-плашка без движения.
     text_only_full = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html,
                              flags=re.IGNORECASE | re.DOTALL))
     fake_3d = _fake_3d_problem(text_only_full, low, js_blob)
     if fake_3d:
-        problems.append(fake_3d)
+        problems.append(_p("fake_3d", "cosmetic", fake_3d))
 
     return problems
 
@@ -242,7 +271,7 @@ def _near_duplicate_pages(pages: list[str]) -> int:
     return len(dupes)
 
 
-async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> list[str]:
+async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> list[dict]:
     """
     «Зрячая» самопроверка: LLM-ревьюер читает реальный HTML готового сайта и судит,
     достигает ли он цели клиента (ясность оффера, заметность CTA, доверие, тексты).
@@ -312,11 +341,13 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
             continue
         if isinstance(obj, dict) and "fixes" in obj:
             fixes = obj.get("fixes", [])
-            return [str(f)[:200] for f in fixes if f][:4]
+            # LLM-замечания позиционирования — cosmetic: запускают одну доработку,
+            # но не входят в критический гейт приёмки (тот считается по check_site).
+            return [_p("llm_review", "cosmetic", str(f)[:200]) for f in fixes if f][:4]
         pos = idx + max(end, 1)
 
 
-async def review_site_visual() -> list[str]:
+async def review_site_visual() -> list[dict]:
     """
     ЗРЯЧАЯ проверка: реально РЕНДЕРИТ сайт в headless-браузере (Playwright) и ловит то,
     что видно только на отрисованной странице — ошибки в консоли, горизонтальный скролл
@@ -335,7 +366,7 @@ async def review_site_visual() -> list[str]:
     if idx is None or not idx.is_file():
         return []
 
-    problems: list[str] = []
+    problems: list[dict] = []
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
@@ -351,14 +382,17 @@ async def review_site_visual() -> list[str]:
                 await browser.close()
                 return []
             if errors:
-                problems.append(f"Ошибка JS в консоли при загрузке: {errors[0][:120]} — кнопки/форма могут не работать.")
+                problems.append(_p("console_error", "critical",
+                    f"Ошибка JS в консоли при загрузке: {errors[0][:120]} — кнопки/форма могут не работать."))
             body_h = await page.evaluate("() => document.body ? document.body.scrollHeight : 0")
             if body_h < 200:
-                problems.append("При рендере страница почти пустая (высота < 200px) — контент не отображается.")
+                problems.append(_p("empty_render", "critical",
+                    "При рендере страница почти пустая (высота < 200px) — контент не отображается."))
             overflow = await page.evaluate(
                 "() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2")
             if overflow:
-                problems.append("На мобильном есть горизонтальный скролл — блоки шире экрана, вёрстка ломается.")
+                problems.append(_p("h_scroll", "critical",
+                    "На мобильном есть горизонтальный скролл — блоки шире экрана, вёрстка ломается."))
             over_n = await page.evaluate("""() => {
                 const w = document.documentElement.clientWidth; let n = 0;
                 for (const el of document.querySelectorAll('body *')) {
@@ -368,38 +402,45 @@ async def review_site_visual() -> list[str]:
                 return n;
             }""")
             if over_n > 3:
-                problems.append(f"{over_n} элементов вылезают за край экрана — проверь ширины/отступы (padding, width:100%).")
+                problems.append(_p("overflow_elements", "cosmetic",
+                    f"{over_n} элементов вылезают за край экрана — проверь ширины/отступы (padding, width:100%)."))
             await browser.close()
     except Exception:
         return []
     return problems
 
 
-def check_bot() -> list[str]:
+def check_bot() -> list[dict]:
     """
     Проверка Telegram-бота: bot.py / main.py существует и содержит рабочую структуру.
-    Возвращает список проблем (пустой = всё ок).
+    Возвращает список проблем (пустой = всё ок). Любая проблема бота — critical
+    (нерабочий бот не должен считаться сданным).
     """
     files = {f["path"]: f for f in workspace.list_files()}
     bot_path = next((p for p in ("bot.py", "main.py", "src/bot.py") if p in files), None)
     if bot_path is None:
-        return ["Не найден файл бота (bot.py / main.py) — создай его через write_file."]
+        return [_p("no_bot_file", "critical",
+                   "Не найден файл бота (bot.py / main.py) — создай его через write_file.")]
 
     code = workspace.read_file(bot_path)
     if not code or code.startswith("Файл не найден"):
-        return [f"{bot_path} пустой или не читается — перепиши его полностью."]
+        return [_p("empty_bot", "critical", f"{bot_path} пустой или не читается — перепиши его полностью.")]
 
-    problems: list[str] = []
+    problems: list[dict] = []
     low = code.lower()
 
     if "aiogram" not in low and "telebot" not in low and "telegram" not in low:
-        problems.append(f"{bot_path}: не импортируется библиотека бота (aiogram / telebot).")
+        problems.append(_p("no_bot_lib", "critical",
+            f"{bot_path}: не импортируется библиотека бота (aiogram / telebot)."))
     if "token" not in low and "bot_token" not in low:
-        problems.append(f"{bot_path}: нет переменной TOKEN / BOT_TOKEN — бот не сможет запуститься.")
+        problems.append(_p("no_bot_token", "critical",
+            f"{bot_path}: нет переменной TOKEN / BOT_TOKEN — бот не сможет запуститься."))
     if "async def" not in low and "def " not in low:
-        problems.append(f"{bot_path}: нет обработчиков сообщений (async def handler).")
+        problems.append(_p("no_bot_handlers", "critical",
+            f"{bot_path}: нет обработчиков сообщений (async def handler)."))
     if len(code) < 300:
-        problems.append(f"{bot_path}: слишком мало кода ({len(code)} символов) — добавь обработчики команд.")
+        problems.append(_p("thin_bot", "critical",
+            f"{bot_path}: слишком мало кода ({len(code)} символов) — добавь обработчики команд."))
 
     return problems
 
@@ -433,33 +474,29 @@ def check_python_files() -> list[str]:
     return problems
 
 
-# Признаки КРИТИЧЕСКОЙ (ломающей работу) проблемы сайта — в отличие от косметики.
-# Единый источник правды: используется и финальной верификацией, и приёмкой задачи.
-_CRITICAL_MARKERS = ("не отправляет", "нет формы", "не найден index",
-                     "пустой или не читается", "форма не", "не собирает заявки",
-                     "не работает", "битая ссылка", "битые внутренние ссылки", "сломан",
-                     "js-ошибка", "нет мета viewport", "заглушк", "теряются",
-                     "ошибка js в консоли", "горизонтальный скролл", "почти пустая")
+def is_critical(problem) -> bool:
+    """Критическая (ломающая работу) проблема — по ОБЪЯВЛЕННОЙ тяжести (severity),
+    а не по подстроке в русской фразе. Раньше критичность угадывалась списком
+    _CRITICAL_MARKERS: переформулировал сообщение проверки — потерял критичность
+    (хрупко). Теперь severity ставится в месте обнаружения проблемы (BOS §12)."""
+    if isinstance(problem, dict):
+        return problem.get("severity") == "critical"
+    return False  # строковый формат больше не производится критиком
 
 
-def is_critical(problem: str) -> bool:
-    p = (problem or "").lower()
-    return any(w in p for w in _CRITICAL_MARKERS)
-
-
-def critique_text(problems: list[str]) -> str:
+def critique_text(problems: list) -> str:
     """Человекочитаемый фидбэк исполнителю по сайту."""
     if not problems:
         return ""
-    lines = "\n".join(f"- {p}" for p in problems)
+    lines = "\n".join(f"- {text_of(p)}" for p in problems)
     return ("⚠ Нужны небольшие правки. Исправь прямо в существующих файлах папки site/ "
             "(НЕ начинай с нуля, НЕ вызывай publish_site — офис опубликует сам):\n" + lines)
 
 
-def critique_text_bot(problems: list[str]) -> str:
+def critique_text_bot(problems: list) -> str:
     """Человекочитаемый фидбэк исполнителю по боту."""
     if not problems:
         return ""
-    lines = "\n".join(f"- {p}" for p in problems)
+    lines = "\n".join(f"- {text_of(p)}" for p in problems)
     return ("⚠ Нужны правки в боте. Прочитай файл через read_file, "
             "исправь проблемы, перезапись через write_file:\n" + lines)

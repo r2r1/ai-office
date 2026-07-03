@@ -451,7 +451,7 @@ async def _heal_stuck_agents(publish) -> None:
                         continue
                     plan.set_feedback(tid, "⚠ ПРИЁМКА НЕ ПРОЙДЕНА (сайт написан, но есть "
                                            "критические проблемы):\n"
-                                      + "\n".join(f"- {p}" for p in critical[:3]))
+                                      + "\n".join(f"- {critic.text_of(p)}" for p in critical[:3]))
                 plan.revert(tid)  # иначе — вернуть зависшую задачу в очередь
             # Trust Score: зависший агент снижает доверие к его отделу
             rec_stuck = registry.get(aid)
@@ -475,13 +475,14 @@ async def _verify_and_fix_if_needed(strategy: str, publish) -> bool:
     # «работа выполнена» с оставшимися критическими проблемами. Теперь done не глушит
     # новую попытку; blocked глушит (ждём владельца, не плодим дубли) — бесконечный
     # цикл исключён эскалацией приёмки: 3 провала → задача блокируется сама.
-    fix_title = "Исправить критические проблемы сайта: " + "; ".join(critical[:2])[:120]
+    crit_text = "; ".join(critic.text_of(p) for p in critical[:2])
+    fix_title = "Исправить критические проблемы сайта: " + crit_text[:120]
     if any("исправить критические" in (t.get("title", "").lower())
            and t.get("status") in ("pending", "in_progress", "blocked")
            for t in plan.all_tasks()):
         return False  # доработка уже в очереди/в работе/у владельца — не дублируем
     await publish({"type": "system",
-                   "text": f"🔍 Финальная проверка нашла проблемы: {'; '.join(critical[:2])[:100]} — "
+                   "text": f"🔍 Финальная проверка нашла проблемы: {crit_text[:100]} — "
                            "добавляю задачу на исправление"})
     plan.add_task(fix_title, "developer",
                   "форма шлёт на /api/site-lead, сайт открывается без ошибок",
@@ -1186,7 +1187,7 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
         bot_problems = critic.check_bot()
         if bot_problems:
             for p in bot_problems:
-                lessons.add(role, f"Бот: {p}")
+                lessons.add(role, f"Бот: {critic.text_of(p)}")
             feedback = critic.critique_text_bot(bot_problems)
             await publish({"type": "speech", "agent_id": agent_id,
                            "text": f"🔁 Бот проверен — нужны правки: {feedback[:120]}"})
@@ -1221,14 +1222,14 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     except Exception:
         pass
     trace.log("critic", agent=agent_id, phase="site", problems=len(problems),
-              detail=("; ".join(problems)[:200] if problems else "ok"))
+              detail=("; ".join(critic.text_of(p) for p in problems)[:200] if problems else "ok"))
     if not problems:
         return  # сайт принят (задачу плана закроет _job по task_id)
 
     # Есть проблемы — сохраняем урок и даём РОВНО ОДНУ доработку, потом ДВИГАЕМСЯ дальше
     # (никаких бесконечных переприёмок — это и есть «затуп»). Задачу закроет _job.
     for p in problems:
-        lessons.add(role, f"Сайт: {p}")
+        lessons.add(role, f"Сайт: {critic.text_of(p)}")
     feedback = critic.critique_text(problems)
     await publish({"type": "speech", "agent_id": agent_id, "text": f"🔁 {feedback[:120]}"})
     # Инкрементальная правка с обязательным журналом изменений: агент чинит ТОЧЕЧНО
@@ -1271,7 +1272,7 @@ async def _review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
         still = [p for p in critic.check_site() if critic.is_critical(p)]
         if still:
             # Честно: не выдаём битый результат за готовый — просим клиента вмешаться.
-            warn = "; ".join(still[:2])[:200]
+            warn = "; ".join(critic.text_of(p) for p in still[:2])[:200]
             await publish({"type": "system",
                            "text": f"⚠️ Сайт сдан, но осталась нерешённая проблема: {warn}. "
                                    f"Нужна ваша правка или уточнение в чате — команда доработает."})
