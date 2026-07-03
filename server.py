@@ -1133,6 +1133,15 @@ async def get_understanding():
     return understanding_module.payload()
 
 
+@app.get("/api/digital-infrastructure")
+async def get_digital_infrastructure():
+    """Уровень 2 Instant Learning: единый список источников данных о компании —
+    подключённые интеграции платформы + сигналы, увиденные на сайте клиента
+    (CRM/аналитика/соцсети), к которым платформа пока не подключена напрямую."""
+    from src.office import digital_infrastructure
+    return digital_infrastructure.payload()
+
+
 @app.get("/api/costs")
 async def get_costs():
     """Расход токенов и стоимость по агентам и суммарно (ROI-панель)."""

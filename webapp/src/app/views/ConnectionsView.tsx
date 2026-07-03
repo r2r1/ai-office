@@ -118,16 +118,61 @@ function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) 
   )
 }
 
+const DI_CATEGORY_LABEL: Record<string, string> = {
+  crm: "CRM", analytics: "Аналитика", social: "Соцсети",
+}
+
+/** Карточка источника Digital Infrastructure (уровень 2 Instant Learning) —
+ * то, что НЕ является интеграцией платформы, но офис увидел на сайте клиента
+ * (соцсети/аналитика/CRM-виджет). Действие — не «подключить» (интеграции нет),
+ * а попросить офис обратить на это внимание. */
+function DiCard({ src }: { src: any }) {
+  const [asked, setAsked] = useState(false)
+  const detected = src.status === "detected_external"
+  return (
+    <Card style={{ padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+      <span style={{ fontSize: 18, flexShrink: 0 }}>{src.icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 600 }}>{src.label}</div>
+        <div style={{ fontSize: 10.5, marginTop: 2 }}>
+          {detected
+            ? <span style={{ color: "#a0e0ab", fontWeight: 500 }}>✓ Видим на сайте</span>
+            : <span style={{ color: "var(--faint)" }}>Не найдено</span>}
+        </div>
+      </div>
+      {detected && (
+        <button
+          disabled={asked}
+          onClick={async () => {
+            await api.ask("orchestrator_1",
+              `Заметил на сайте ${src.label} — учти это в работе (проанализируй/используй, если уместно).`)
+            setAsked(true)
+          }}
+          style={{
+            padding: "6px 12px", borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--hairline-strong)", background: asked ? "transparent" : "var(--surface-soft)",
+            color: asked ? "var(--faint)" : "var(--text-dim)", fontSize: 11, cursor: asked ? "default" : "pointer",
+            whiteSpace: "nowrap",
+          }}>
+          {asked ? "Передано" : "Сказать офису"}
+        </button>
+      )}
+    </Card>
+  )
+}
+
 /** Тело раздела «Доступы» без обёртки ViewShell — переиспользуется во вкладке
  *  «Компания → Доступы». */
 export function ConnectionsBody() {
   const { state } = useOffice()
   const [connections, setConnections]   = useState<any[]>([])
   const [integrations, setIntegrations] = useState<any[]>([])
+  const [diSources, setDiSources]       = useState<any[]>([])
 
   const refresh = () => {
     api.connections().then(d => setConnections(d.connections || []))
     api.integrations().then(d => setIntegrations(d.integrations || []))
+    api.digitalInfrastructure().then(d => setDiSources(d.sources || []))
   }
 
   const tick = useThrottled(state.feed.length, 2500)
@@ -142,8 +187,32 @@ export function ConnectionsBody() {
     }
   }, [])
 
+  const diByCategory = ["crm", "analytics", "social"].map(cat => ({
+    cat, items: diSources.filter(s => s.category === cat),
+  })).filter(g => g.items.length > 0)
+
   return (
       <ViewBody>
+        {/* Digital Infrastructure — что офис видит о компании за пределами
+            своих интеграций (CRM-виджеты/аналитика/соцсети на сайте клиента) */}
+        {diByCategory.length > 0 && (
+          <>
+            <SectionLabel style={{ marginBottom: 14 }}>
+              Цифровая инфраструктура компании
+            </SectionLabel>
+            {diByCategory.map(({ cat, items }) => (
+              <div key={cat} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, fontWeight: 600 }}>
+                  {DI_CATEGORY_LABEL[cat] || cat}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                  {items.map((src: any, i: number) => <DiCard key={i} src={src} />)}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
         {/* Каталог интеграций */}
         <SectionLabel style={{ marginBottom: 14 }}>
           Каталог интеграций · {integrations.length}

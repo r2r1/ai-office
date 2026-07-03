@@ -79,6 +79,7 @@ export const api = {
   setAgentModel: (id: string, model: string) => postJSON<any>(`/api/agent/${id}/model`, { model }, null),
   milestones: () => getJSON<any>("/api/milestones", { stages: [] }),
   integrations: () => getJSON<any>("/api/integrations", { integrations: [] }),
+  digitalInfrastructure: () => getJSON<any>("/api/digital-infrastructure", { sources: [] }),
   // /api/file отдаёт СЫРОЙ текст — читаем как текст, не как JSON.
   fileContent: async (path: string) => ({ content: await getText(`/api/file?path=${encodeURIComponent(path)}`) }),
   rawUrl: (path: string) => `/api/raw/${path.split("/").map(encodeURIComponent).join("/")}`,

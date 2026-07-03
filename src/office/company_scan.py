@@ -42,6 +42,19 @@ _QUIZ_RE = re.compile(r"(квиз|quiz)", re.I)
 _FORM_RE = re.compile(r"<form\b", re.I)
 _VIEWPORT_RE = re.compile(r'name=["\']viewport["\']', re.I)
 
+# Digital Infrastructure (уровень 2): что из аналитики/CRM УЖЕ стоит на сайте
+# клиента — маркеры в том же HTML, без доп. запросов.
+_ANALYTICS_MARKERS = {
+    "ga4": ("gtag(", "googletagmanager.com/gtag", "google-analytics.com"),
+    "yandex_metrika": ("mc.yandex.ru", "ym(", "yandex_metrika"),
+    "vk_pixel": ("vk.com/js/api/openapi", "VK.Retargeting"),
+    "meta_pixel": ("connect.facebook.net", "fbq("),
+}
+_CRM_MARKERS = {
+    "amocrm": ("amocrm.ru", "amocrm_id", "amo_forms"),
+    "bitrix24": ("bitrix24", "b24-form"),
+}
+
 
 def _ru_plural(n: int) -> str:
     """«точку/точки/точек роста» (винительный падеж — «нашли N ...»)."""
@@ -137,6 +150,12 @@ async def scan(url: str) -> dict:
         detected["has_reviews"] = bool(_REVIEWS_RE.search(html))
         detected["has_quiz"] = bool(_QUIZ_RE.search(html))
         detected["has_viewport"] = bool(_VIEWPORT_RE.search(html))
+
+        html_lower = html.lower()
+        detected["analytics"] = {name: any(m.lower() in html_lower for m in markers)
+                                 for name, markers in _ANALYTICS_MARKERS.items()}
+        detected["crm_widgets"] = {name: any(m.lower() in html_lower for m in markers)
+                                   for name, markers in _CRM_MARKERS.items()}
 
         favicon = bool(re.search(r'rel=["\'][^"\']*icon', html, re.I))
         detected["favicon"] = favicon
