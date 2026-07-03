@@ -23,9 +23,6 @@ from src.office import critic, workspace
 # Роли, чья сдача обязана проходить Build-проверку кода
 _CODING_ROLES = ("developer", "designer", "integrator")
 
-_SITE_WORDS = ("сайт", "лендинг", "landing", "site", "страниц")
-_BOT_WORDS = ("бот", "bot", "telegram", "телеграм")
-
 
 def _site_touched_since(ts: float) -> bool:
     """Менялись ли файлы папки сайта после метки времени (агент реально трогал сайт)."""
@@ -39,37 +36,36 @@ def _site_touched_since(ts: float) -> bool:
     return False
 
 
-def _is_site_task(task_title: str, role: str, started_ts: float = 0.0) -> bool:
-    t = (task_title or "").lower()
-    if any(w in t for w in _SITE_WORDS):
-        return True
-    # designer/developer без бот-слов почти всегда работают по site/ (тот же
-    # инвертированный принцип, что в plan.touches_site). Но роль-эвристика при
-    # известном started_ts требует, чтобы сайт РЕАЛЬНО трогали в этой задаче —
-    # иначе критические проблемы, оставленные ЧУЖОЙ задачей, валили приёмку
-    # несвязанной работы (кросс-контаминация: 3 провала → блок невиновной задачи).
-    if role not in ("designer", "developer") or any(w in t for w in _BOT_WORDS):
+def _is_site_task(artifacts: list[str], started_ts: float = 0.0) -> bool:
+    """Задача производит артефакт «site» (BOS §12: тип берётся из ДЕКЛАРАЦИИ задачи,
+    а не из слов заголовка). Роль-декларация «site» при известном started_ts ещё
+    требует реального касания site/ в этой задаче — иначе критические проблемы,
+    оставленные ЧУЖОЙ задачей, валили приёмку несвязанной работы (кросс-контаминация:
+    3 провала → блок невиновной задачи)."""
+    if "site" not in (artifacts or []):
         return False
     if started_ts > 0:
         return _site_touched_since(started_ts)
     return critic.site_dir() is not None
 
 
-def _is_bot_task(task_title: str) -> bool:
-    return any(w in (task_title or "").lower() for w in _BOT_WORDS)
+def _is_bot_task(artifacts: list[str]) -> bool:
+    return "bot" in (artifacts or [])
 
 
 def check(task_title: str, role: str, result: str,
-          done_criterion: str = "", started_ts: float = 0.0) -> dict:
+          done_criterion: str = "", started_ts: float = 0.0,
+          artifacts: list[str] | None = None) -> dict:
     """
     Приёмка сдачи задачи. Возвращает:
       {"passed": bool, "problems": [...], "levels": {level: "ok"|"fail"|"skip"}}
 
-    `started_ts` — момент старта задачи: Build проверяет только файлы, изменённые
-    ЭТОЙ задачей, а роль-эвристика сайта требует реального касания site/ —
-    чужой битый артефакт не валит приёмку невиновной задачи. Задачи с сайтом
-    в ЗАГОЛОВКЕ проверяются по сайту всегда (явная ответственность).
+    `artifacts` — ДЕКЛАРАЦИЯ артефактов задачи (plan.artifacts_of): по ней выбираются
+    уровни L3 (site/bot), а не по словам заголовка (BOS §12). `started_ts` — момент
+    старта: Build проверяет только файлы этой задачи, а site-декларация требует
+    реального касания site/ — чужой битый артефакт не валит приёмку невиновной задачи.
     """
+    artifacts = artifacts or []
     problems: list[str] = []
     warnings: list[str] = []
     levels: dict[str, str] = {"specification": "skip", "build": "skip",
@@ -101,12 +97,12 @@ def check(task_title: str, role: str, result: str,
         levels["build"] = "ok" if v.get("ok") else "fail"
         problems += [f"код: {e}" for e in v.get("errors", [])[:3]]
 
-    # L3 Functional: сайт/бот — критические проблемы артефакта
-    if _is_bot_task(task_title):
+    # L3 Functional: сайт/бот — критические проблемы артефакта (по декларации)
+    if _is_bot_task(artifacts):
         bot_problems = critic.check_bot()
         levels["functional"] = "fail" if bot_problems else "ok"
         problems += [f"бот: {p}" for p in bot_problems[:3]]
-    elif _is_site_task(task_title, role, started_ts):
+    elif _is_site_task(artifacts, started_ts):
         site_critical = [p for p in critic.check_site() if critic.is_critical(p)]
         levels["functional"] = "fail" if site_critical else "ok"
         problems += [f"сайт: {p}" for p in site_critical[:3]]

@@ -66,6 +66,41 @@ def _route_role(role: str, title: str) -> str:
     return role
 
 
+# ── Artifacts-декларации (BOS §12) ───────────────────────────────────────────
+# Задача ОБЪЯВЛЯЕТ, какой артефакт производит/трогает — это ЕДИНСТВЕННЫЙ источник
+# для мьютекса (plan.touches_site), выбора уровней приёмки (acceptance) и capability-
+# гейта. Раньше «трогает ли задача сайт» определялось по словам в ЗАГОЛОВКЕ в момент
+# ПОТРЕБЛЕНИЯ (plan._NON_SITE_WORDS, acceptance._SITE_WORDS) — и дважды ловило один
+# прод-баг (QA-задача «Собрать сценарий проверки» без site-слов реально писала в
+# site/). Теперь тип артефакта выводится ОДИН раз при генерации плана и хранится в
+# задаче; потребители читают декларацию, а не парсят заголовок заново.
+#
+# Словарь артефактов: "site" (папка site/), "bot" (Telegram-бот), "integration"
+# (внешний сервис), "doc" (тексты/аналитика в docs/).
+def _derive_artifacts(role: str, title: str) -> list[str]:
+    """Тип артефакта задачи по роли+заголовку (единая точка вывода). LLM-план может
+    задать `artifacts` явно — тогда вывод не нужен (см. set_tasks)."""
+    t = (title or "").lower()
+    if any(w in t for w in _BOT_WORDS):
+        return ["bot"]
+    if role in ("designer", "developer"):
+        # designer/developer по умолчанию пишут в site/ (тот же инвертированный
+        # безопасный принцип, что был в touches_site) — кроме бот-задач (выше).
+        return ["site"]
+    if role == "integrator":
+        return ["integration"]
+    return ["doc"]
+
+
+def artifacts_of(task: dict) -> list[str]:
+    """Артефакты задачи: явная декларация или вывод (совместимость со старыми
+    задачами без поля artifacts)."""
+    arts = task.get("artifacts")
+    if arts:
+        return list(arts)
+    return _derive_artifacts(task.get("role", ""), task.get("title", ""))
+
+
 def _save(d: dict) -> None:
     ctx.write_json(_FILE, d)
 
@@ -97,6 +132,8 @@ def set_tasks(tasks: list[dict]) -> None:
             "project": project_id,
             # Подсказка Execution Policy: routine → дешёвая модель (опционально)
             "tier": (t.get("tier") or "").strip().lower(),
+            # Декларация артефактов (BOS §12): явная из LLM-плана или выведенная
+            "artifacts": [a for a in (t.get("artifacts") or []) if a] or _derive_artifacts(role, t.get("title") or ""),
         })
     # Чистим deps от ссылок на НЕсуществующие id: LLM иногда генерит зависимость на
     # опечатанный/выдуманный id, и такая задача (и всё, что от неё зависит) НИКОГДА не
@@ -137,6 +174,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "done_criterion": (done_criterion or "").strip()[:200],
         "status": "pending", "assignee": "", "requested_by": requested_by,
         "project": projects.ensure_active()["id"],
+        "artifacts": _derive_artifacts(role, title),
     }
     tasks.append(task)
     d["tasks"] = tasks
@@ -208,25 +246,15 @@ def next_for_department(dept_id: str) -> dict | None:
 # index.html целиком и затирают работу друг друга (реальный кейс: designer затёр
 # 3D-версию developer через 9 секунд — «последний победил»).
 #
-# Раньше считали «трогает сайт» по словам в ЗАГОЛОВКЕ задачи — и словили тот же
-# баг снова: задача developer «Собрать сценарий проверки и протестировать путь
-# обращения» не содержит ни одного site-слова в заголовке, но по факту это QA
-# по site/ (использует qa_site_selfcheck, читает и правит site/index.html) —
-# мьютекс её не увидел, и designer с developer 4 минуты параллельно переписывали
-# один и тот же site/index.html (ai-office-log-20260702_134612). Инвертируем
-# логику: designer/developer в tech-отделе по умолчанию считаются «трогают
-# сайт», кроме явно НЕ-сайтовых задач (телеграм-бот и т.п.) — так безопаснее,
-# чем угадывать по формулировке заголовка.
-_NON_SITE_WORDS = ("telegram", "телеграм", " бот", "-бот", "бот)", "боту", "бота",
-                    "aiogram", "чат-бот", "chatbot")
-
-
+# Мьютекс читает ДЕКЛАРАЦИЮ артефактов задачи (artifacts_of), а не парсит заголовок
+# в момент проверки. Раньше «трогает сайт» считалось по словам в ЗАГОЛОВКЕ — и
+# дважды ловило баг: QA-задача developer «Собрать сценарий проверки…» без site-слов
+# по факту писала в site/, мьютекс её не видел, и два агента 4 минуты параллельно
+# переписывали один site/index.html (ai-office-log-20260702_134612). Теперь тип
+# артефакта объявлен при генерации задачи (см. _derive_artifacts) и хранится в ней.
 def touches_site(task: dict) -> bool:
-    """Задача, скорее всего, пишет в site/ (по роли; НЕ-сайтовые задачи — исключение)."""
-    if task.get("role") not in ("designer", "developer"):
-        return False
-    t = (task.get("title") or "").lower()
-    return not any(w in t for w in _NON_SITE_WORDS)
+    """Задача пишет в site/ — по объявленному артефакту «site» (BOS §12)."""
+    return "site" in artifacts_of(task)
 
 
 def site_task_in_progress() -> str:
