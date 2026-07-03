@@ -16,12 +16,14 @@ use_skill; архитектор называет стек только для К
     python tests/test_no_stack_lockin.py
 """
 
+import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.office import prompt_builder
+from src.saas import context as ctx
 
 # Литералы стека, которые не должны диктоваться ролью/ТЗ для ТИПОВЫХ артефактов
 # (сайт/лендинг) — они принадлежат скиллам (framer_motion_3d_site, static_landing_site).
@@ -39,6 +41,36 @@ def test_ceo_plan_policy_does_not_hardcode_designer_stack():
     p = prompt_builder.policy("ceo_plan")
     for phrase in _STACK_LOCKIN_PHRASES:
         assert phrase not in p, f"ceo_plan снова диктует стек designer'у: {phrase!r}"
+
+
+def test_architect_asks_about_crm_instead_of_blanket_refusing():
+    """Прод-находка (пользователь): «НЕ закладывай CRM/email/аналитику, если клиент
+    не попросил явно» — жёсткий запрет вместо ask_user. Автономная система должна
+    СПРАШИВАТЬ (и предлагать ценность), а не молча пропускать то, о чём клиент мог
+    не знать, что стоит упомянуть. Платный конструктор — единственное, что должно
+    остаться жёстким запретом (вендор-лок, отдельно проверяется decision_engine)."""
+    p = prompt_builder.policy("architect")
+    assert "НИЧЕГО из этого, если клиент не попросил явно" not in p
+    assert "ask_user" in p, "CRM/аналитика/Sheets должны вести к ask_user, не к молчанию"
+    assert "Tilda/Webflow/Wix" in p and "запрет" in p.lower(), \
+        "платный конструктор обязан остаться жёстким запретом"
+
+
+def test_brief_block_serializes_constraints():
+    """`constraints` (в т.ч. «уже используем CRM X») раньше тонуло внутри `summary`
+    одной строкой среди прочего — architect/воркеры не видели его явно. Теперь у
+    брифа единый сериализатор (prompt_builder.brief_block) отдаёт constraints
+    отдельной подписанной строкой."""
+    ctx.set_tenant("brief_constraints_unit")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "потолки", "goal": "сайт",
+        "constraints": "уже есть CRM amoCRM, хотим туда лиды",
+    })
+    block = prompt_builder.brief_block()
+    assert "amoCRM" in block
+    assert "Ограничения" in block
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
 def _run():

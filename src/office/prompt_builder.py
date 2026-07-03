@@ -67,6 +67,11 @@ def brief_block() -> str:
         parts.append(f"Аудитория — кому продаёт: {b['audience']}")
     if b.get("assets"):
         parts.append(f"Что есть: {b['assets']}")
+    if b.get("constraints"):
+        # Раньше тонуло внутри summary (одной строкой среди прочего) — архитектор/
+        # воркеры не видели явно, что клиент уже пользуется (CRM/таблицы/рассылки/
+        # аналитика) или прямо запретил. Отдельная строка — не пропустишь.
+        parts.append(f"Ограничения и уже используемые инструменты клиента: {b['constraints']}")
     if b.get("summary"):
         parts.append(f"Резюме: {b['summary']}")
     if not parts:
