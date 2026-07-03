@@ -40,8 +40,11 @@ def _save(d: dict) -> None:
 
 
 def raise_event(kind: str, summary: str, detail: str = "",
-                from_role: str = "", from_agent: str = "") -> dict:
-    """Отдел публикует событие в компанию. Возвращает созданное событие."""
+                from_role: str = "", from_agent: str = "",
+                task_id: str = "") -> dict:
+    """Отдел публикует событие в компанию. Возвращает созданное событие.
+    `task_id` — привязка к задаче плана (для blocker'ов: разблокировка задачи
+    детерминированно закрывает её событие — kind-контракт BOS §10)."""
     summary = (summary or "").strip()
     if not summary:
         return {}
@@ -55,6 +58,7 @@ def raise_event(kind: str, summary: str, detail: str = "",
         "detail": (detail or "").strip()[:600],
         "from_role": from_role,
         "from_agent": from_agent,
+        "task_id": task_id,
         "ts": time.time(),
         "processed": False,
     }
@@ -77,6 +81,23 @@ def mark_processed(ids: list[int]) -> None:
         if e.get("id") in idset:
             e["processed"] = True
     _save(d)
+
+
+def resolve_for_task(task_id: str) -> int:
+    """Детерминированная реакция kind-контракта (BOS §10): задача разблокирована →
+    её pending-события (blocker и пр.) помечаются обработанными. Иначе blocker висел
+    в pending вечно и продолжал показываться CEO/в World Model даже после решения."""
+    if not task_id:
+        return 0
+    d = _load()
+    n = 0
+    for e in d.get("events", []):
+        if not e.get("processed") and e.get("task_id") == task_id:
+            e["processed"] = True
+            n += 1
+    if n:
+        _save(d)
+    return n
 
 
 def recent(n: int = 30) -> list[dict]:

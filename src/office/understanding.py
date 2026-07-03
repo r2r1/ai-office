@@ -27,12 +27,14 @@ def payload() -> dict:
         missing.append({"label": "Описание бизнеса", "icon": "⬜",
                         "hint": "Расскажи CEO о своём бизнесе в чате"})
 
-    if b.get("goal"):
+    # Мусорная цель («не знаю») не считается понятой — тот же сигнал качества, что
+    # у effective_goal (brief.is_junk_goal), иначе индикатор врёт «цель ясна».
+    if brief_module.has_meaningful_goal():
         score += 10
         items.append({"label": "Цель компании", "icon": "✅"})
     else:
         missing.append({"label": "Цель компании", "icon": "⬜",
-                        "hint": "Укажи цель — что хочешь достичь"})
+                        "hint": "Укажи конкретную цель — что хочешь достичь"})
 
     if b.get("niche") or b.get("industry"):
         score += 5

@@ -1,18 +1,12 @@
 """
-Orchestrator (Директор) — вершина иерархии офиса.
+Orchestrator (CEO) — вершина иерархии офиса.
 
-Он НЕ делает работу руками. Его задача — управлять:
-  • разбивает путь к цели на этапы (вехи) на основе стратегии;
-  • на каждом цикле решает, ЧТО делать дальше и КОМУ поручить;
-  • отслеживает прогресс по этапам и пишет сводки;
-  • решает, кого нанять, когда не хватает рук.
-
-Иерархия:
-    Директор (orchestrator)
-      ├── Ресёрчер   — добывает данные
-      ├── Стратег    — планирует
-      ├── HR         — нанимает
-      └── Рабочие    — продажник / разработчик / маркетолог / аналитик
+Он НЕ делает работу руками и НЕ ставит задачи людям — задачи распределяет
+детерминированная маршрутизация плана (loop._run_leaders). Что осталось за CEO:
+  • plan_milestones / plan_tasks — разбить путь к цели на этапы и план-граф;
+  • decide_company — структура компании: открыть/закрыть отдел, цель отделу;
+  • interpret_directive — триаж сообщений владельца (Intent → правки плана);
+  • board_decide / generate_initiative — совет директоров и инициативы.
 
 Работает через ядро llm.py, отвечает строгим JSON.
 """
@@ -21,10 +15,13 @@ import json
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
-from src.office import registry, models as models_module, org as org_module
+from src.office import models as models_module, org as org_module
 
-HIREABLE_ROLES = {"salesman", "developer", "marketer", "analyst"}
-MAX_PER_ROLE = 1  # один ответственный на роль (единая зона ответственности, без клонов)
+# Документированный инвариант «на роль — один агент» (CLAUDE.md §3.2). Enforcement
+# живёт в call-sites: registry.has_role (_hire_leader), leaders.decide («уже в отделе»),
+# детерминированная маршрутизация loop._run_leaders. Прежний LLM-решатель уровня
+# агентов (decide) удалён как мёртвый код — plan-driven цикл его не вызывал.
+MAX_PER_ROLE = 1
 
 _COMPANY_SYSTEM = """Ты — CEO автономной AI-компании. Ты НЕ делаешь работу руками и НЕ ставишь
 задачи отдельным сотрудникам — этим занимаются руководители отделов. Твоя задача — управлять
@@ -78,51 +75,6 @@ _MILESTONES_SYSTEM = """Ты — директор автономного AI-оф
 {"stages": [{"id": "content", "title": "Контент и оффер"}, {"id": "build", "title": "Сборка"}, {"id": "delivered", "title": "Результат готов"}]}
 
 id — короткий латиницей, title — по-русски. 3-5 этапов."""
-
-_DECIDE_SYSTEM = """Ты — директор автономного AI-офиса. Ты управляешь командой агентов и
-ведёшь бизнес к цели клиента. Каждый ход ты принимаешь ОДНО решение: поручить конкретную
-задачу одному агенту, нанять нового специалиста или подождать.
-
-ЗОНЫ ОТВЕТСТВЕННОСТИ (соблюдай строго):
-- researcher — исследование, сбор данных, анализ рынка
-- strategist — планирование, стратегия, бизнес-модель
-- salesman — продажи, поиск клиентов, переговоры, CRM
-- developer — технические задачи, автоматизации, продукт, код
-- marketer — маркетинг, контент, соцсети, реклама, бренд
-- analyst — аналитика данных, метрики, отчёты, KPI
-- integrator — подключение внешних сервисов (Telegram и др.), проверка доступов, реальные действия через API. Поручай ему всё, что требует реальной отправки/публикации во внешний сервис.
-
-Принципы:
-- Двигай бизнес к текущему этапу. Ставь конкретные, выполнимые задачи с измеримым результатом.
-- Не повторяй задачи, которые агент уже сделал, и НЕ повторяй задачу, которая прямо сейчас в работе.
-- Назначай задачу агенту строго по его зоне ответственности (role).
-- ЕДИНАЯ ОТВЕТСТВЕННОСТЬ: на каждую роль ОДИН агент. Если нужный исполнитель занят (on_cooldown/thinking) — ПОДОЖДИ (action=wait), НЕ нанимай второго такого же. Никаких клонов на одну и ту же работу.
-- Если нужной роли вообще нет в команде — найми (только из доступных ролей).
-- ПРИОРИТЕТ УКАЗАНИЙ ПОЛЬЗОВАТЕЛЯ: если в разделе «Указания пользователя» есть решение клиента — оно ГЛАВНЕЕ стратегии и ТЗ. Не ставь задачи, противоречащие ему (пример: клиент сказал «не BotsBox, пишем своего бота» → задачи про BotsBox ЗАПРЕЩЕНЫ, поручай разработку своего бота).
-- Не поручай подключение платных сторонних конструкторов (Tilda, BotsBox и т.п.), если клиент их не одобрил: сайт публикуется встроенной интеграцией website, бот/код разработчик пишет сам.
-- КРИТИЧНО: Все API-ключи доступны ЛЮБОМУ агенту через get_connection(). НЕ выбирай агента потому что "у него ключ".
-- СИГНАЛЫ ОТ ОТДЕЛОВ: если есть блок «Сигналы от отделов» — интерпретируй их. Проблема/блокер → поставь задачу нужному отделу на устранение; возможность → задача на её реализацию; наблюдение → учти в решении. Это и есть твоя работа CEO: превращать сигналы отделов в действия.
-- Если текущий этап достигнут — пометь его выполненным и опиши, что сделано.
-- При найме (action=hire) — указывай конкретный skill агента: его специализацию на весь проект.
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "thought": "краткая мысль директора (1 предложение, по-русски)",
-  "action": "assign" | "hire" | "wait",
-  "agent_id": "id агента для action=assign (например salesman_1)",
-  "role": "роль для action=hire (одна из доступных)",
-  "task": "конкретная задача для агента (для assign или hire)",
-  "skill": "специализация агента при найме (например: 'создание Telegram-ботов', 'разработка лендингов', 'настройка CRM'), null если assign",
-  "current_milestone": "id текущего этапа",
-  "milestone_done": "id этапа, если он ТОЛЬКО ЧТО завершён, иначе null",
-  "milestone_summary": "что достигнуто на завершённом этапе, иначе null",
-  "alternatives": [{"action": "...", "reason": "почему не выбрано"}],
-  "confidence": 70,
-  "risks": ["риск 1"],
-  "expected_effect": "ожидаемый результат этого решения",
-  "data_used": ["strategy", "milestones", "team"]
-}"""
-
 
 _DIRECTIVE_SYSTEM = """Ты — CEO автономного AI-офиса. Владелец бизнеса (предприниматель) написал
 тебе в общий чат. Твоя работа — ПОНЯТЬ запрос и ОРГАНИЧНО вписать его в текущую работу офиса:
@@ -216,28 +168,6 @@ async def interpret_directive(
         agent_id="orchestrator_1",
     )
     return _parse_json(raw)
-
-
-# Ключевые слова роли для мягкой проверки «задача по профилю исполнителя» (A2).
-_ROLE_KEYWORDS = {
-    "developer": ("код", "бот", "скрипт", "api", "автоматиз", "python", "js", "backend", "форм", "квиз"),
-    "designer": ("дизайн", "сайт", "лендинг", "верст", "ui", "ux", "страниц", "landing", "макет"),
-    "integrator": ("интеграц", "подключ", "telegram", "телеграм", "запуст", "webhook", "sheets", "оплат"),
-    "marketer": ("контент", "текст", "оффер", "утп", "пост", "реклам", "бренд", "копирайт", "seo"),
-    "salesman": ("клиент", "лид", "продаж", "переговор", "холодн", "outreach", "crm", "оффер"),
-    "analyst": ("аналит", "метрик", "данны", "отчёт", "kpi", "статист"),
-}
-
-
-def _role_hint(task: str) -> str:
-    """Наиболее вероятная роль по тексту задачи, или '' если непонятно."""
-    t = (task or "").lower()
-    best, best_n = "", 0
-    for role, kws in _ROLE_KEYWORDS.items():
-        n = sum(1 for k in kws if k in t)
-        if n > best_n:
-            best, best_n = role, n
-    return best if best_n >= 2 else ""  # ≥2 совпадения — уверенный сигнал
 
 
 def _parse_json(raw: str) -> dict:
@@ -381,6 +311,7 @@ async def decide_company(
 
     from src.office import memory as memory_module, lessons as lessons_module
     from src.office import world as world_module
+    from src.office import events as events_module
     user_directives = memory_module.context_block() or ""
     directives_section = (
         f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ) ===\n{user_directives}\n"
@@ -389,6 +320,12 @@ async def decide_company(
     # World Model: CEO смотрит на единый срез «где компания сейчас» (Business State +
     # Objectives), а не восстанавливает картину из кусков — BOS §4, SSOT.
     directives_section += world_module.context_block()
+    # Event Layer (BOS §10): сигналы отделов CEO видит ЗДЕСЬ — прежний потребитель
+    # (decide) мёртв с перехода на plan-driven цикл, и problem/signal/info не читал
+    # никто. После показа помечаем их обработанными детерминированно; opportunity
+    # оставляем блоку инициатив (_orchestrate), blocker — до разблокировки задачи.
+    pending_events = events_module.pending()
+    directives_section += events_module.context_block()
 
     # Нерешённые замечания от критика — CEO видит незакрытые проблемы результатов
     all_lessons = lessons_module.all_lessons()
@@ -427,6 +364,13 @@ async def decide_company(
         agent_id="orchestrator_1",
     )
     decision = _parse_json(raw)
+
+    # problem/signal/info показаны CEO этим ходом → обработаны (иначе копились в
+    # pending навсегда и раздували контекст каждого следующего решения).
+    seen = [e["id"] for e in pending_events if e.get("kind") in ("problem", "signal", "info")]
+    if seen:
+        events_module.mark_processed(seen)
+
     if not decision:
         return {"action": "wait", "thought": "CEO не принял решение, жду следующий цикл"}
 
@@ -439,155 +383,6 @@ async def decide_company(
             return {"action": "wait", "thought": f"Отдел {dept} уже открыт — жду"}
         if action in ("close_department", "delegate") and not org_module.is_open(dept):
             return {"action": "wait", "thought": f"Отдел {dept} не открыт — нечего {action}"}
-    return decision
-
-
-async def decide(
-    goal: str,
-    strategy: str,
-    milestones: list[dict],
-    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
-    agent_availability: Optional[dict] = None,
-    tech_design: str = "",
-) -> dict:
-    """
-    Главное решение директора: кому что поручить дальше.
-    Возвращает dict с action: assign | hire | wait.
-    agent_availability: {agent_id: {status, on_cooldown, cooldown_secs}}
-    """
-    agents = registry.all_agents()
-    avail = agent_availability or {}
-
-    # Подсчёт агентов по ролям
-    role_counts = {}
-    for a in agents:
-        role_counts[a.role] = role_counts.get(a.role, 0) + 1
-
-    existing_roles = {a.role for a in agents if a.role in HIREABLE_ROLES}
-    hireable_missing = HIREABLE_ROLES - existing_roles
-
-    # Сводка по команде с доступностью и последними результатами
-    from src.office import state
-    roster_lines = []
-    for a in agents:
-        avl = avail.get(a.agent_id, {})
-        cooldown_note = f"🔴занят/кулдаун {avl['cooldown_secs']}с" if avl.get("on_cooldown") else "🟢свободен"
-        if a.status == "thinking":
-            cooldown_note = "🔴думает"
-        last = state.result_for(a.agent_id)
-        last_short = (last[:100] + "…") if last and len(last) > 100 else (last or "ещё не сдавал")
-        roster_lines.append(
-            f"- {a.agent_id} ({a.role}) [{cooldown_note}]: {last_short}"
-        )
-    roster = "\n".join(roster_lines) or "команда пустая"
-
-    ms_lines = [f"- [{m['status']}] {m['id']}: {m['title']}" for m in milestones]
-    ms_text = "\n".join(ms_lines) or "этапы ещё не заданы"
-
-    # Нанимать можно только ОТСУТСТВУЮЩУЮ роль — занятых не клонируем (единая ответственность)
-    available_to_hire = hireable_missing
-
-    # Указания пользователя (его ответы агентам) — приоритетнее стратегии и ТЗ
-    from src.office import memory as memory_module
-    from src.office import events as events_module
-    user_directives = memory_module.context_block() or ""
-
-    # Event Layer: необработанные сигналы отделов — CEO интерпретирует их этим ходом
-    pending_events = events_module.pending()
-    events_section = events_module.context_block()
-
-    if publish:
-        await publish({"type": "thinking", "agent_id": "orchestrator_1",
-                       "text": "Анализирую команду и решаю, что делать дальше..."})
-
-    tdd_section = f"\nТЗ архитектора:\n{tech_design[:1500]}\n" if tech_design else ""
-    directives_section = f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ над стратегией/ТЗ) ===\n{user_directives}\n" if user_directives.strip() else ""
-    directives_section += events_section
-    user = (
-        f"Цель: {goal}\n\n"
-        f"Стратегия (кратко):\n{strategy[:1500]}\n"
-        f"{tdd_section}"
-        f"{directives_section}\n"
-        f"Этапы пути:\n{ms_text}\n\n"
-        f"Команда сейчас (статус и доступность):\n{roster}\n\n"
-        f"Роли доступные для найма (только отсутствующие): {', '.join(sorted(available_to_hire)) or 'нет — все нужные роли уже в команде'}\n\n"
-        f"Прими ОДНО решение: assign (поручить 🟢свободному агенту), "
-        f"hire (только отсутствующую роль), или wait (если нужный исполнитель занят — жди, не клонируй)."
-    )
-
-    raw = await llm.run_agent(
-        system=_DECIDE_SYSTEM,
-        user=user,
-        model=models_module.for_agent("orchestrator_1"),
-        max_tokens=600,
-        use_search=False,
-        agent_id="orchestrator_1",
-    )
-    decision = _parse_json(raw)
-
-    # Event Layer: сигналы показаны CEO этим ходом — помечаем обработанными,
-    # чтобы не зацикливать их в каждом цикле. Решение по ним уже в decision.
-    if pending_events:
-        events_module.mark_processed([e["id"] for e in pending_events])
-        if publish and decision:
-            await publish({"type": "speech", "agent_id": "orchestrator_1",
-                           "text": f"📨 Учёл {len(pending_events)} сигнал(ов) от отделов: {decision.get('thought', '')[:70]}"})
-
-    if not decision:
-        return {"action": "wait", "thought": "Не удалось принять решение, жду следующий цикл"}
-
-    # --- Валидация решения ---
-    action = decision.get("action", "wait")
-
-    if action == "hire":
-        role = decision.get("role", "")
-        if role not in HIREABLE_ROLES:
-            decision["action"] = "wait"
-            decision["thought"] = f"Роль {role} не подходит для найма — жду"
-        elif role_counts.get(role, 0) >= MAX_PER_ROLE:
-            decision["action"] = "wait"
-            decision["thought"] = f"Уже {role_counts.get(role, 0)} агентов роли {role} — жду освобождения"
-
-    elif action == "assign":
-        aid = decision.get("agent_id", "")
-        rec = registry.get(aid)
-        if rec is None:
-            # пробуем найти агента по роли
-            role_hint = decision.get("role", "")
-            match = next((a for a in agents if a.role == role_hint), None)
-            if match:
-                decision["agent_id"] = match.agent_id
-                rec = match
-            else:
-                decision["action"] = "wait"
-                decision["thought"] = "Указан несуществующий агент — жду"
-                return decision
-
-        # Мягкая проверка соответствия роли задаче (A2): если задача явно из другой
-        # области и есть подходящий свободный агент — перенаправляем к нему; иначе
-        # оставляем как есть (НЕ блокируем — лучше сделать, чем застрять).
-        hint = _role_hint(decision.get("task", ""))
-        if rec and hint and hint != rec.role:
-            better = next((a for a in agents if a.role == hint
-                           and not avail.get(a.agent_id, {}).get("on_cooldown")), None)
-            if better:
-                decision["agent_id"] = better.agent_id
-                rec = better
-
-        # Если директор всё равно выбрал занятого агента — ищем свободного той же роли
-        if rec and avail.get(rec.agent_id, {}).get("on_cooldown"):
-            role = rec.role
-            free = next(
-                (a for a in agents if a.role == role and not avail.get(a.agent_id, {}).get("on_cooldown")),
-                None,
-            )
-            if free:
-                decision["agent_id"] = free.agent_id
-            else:
-                # Единая ответственность: исполнитель занят — ждём его, не клонируем роль
-                decision["action"] = "wait"
-                decision["thought"] = f"{role} занят текущей задачей — жду результат, не дублирую"
-
     return decision
 
 

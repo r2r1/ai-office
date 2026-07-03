@@ -77,6 +77,11 @@ DEFAULT_MODEL = os.getenv("LLM_MODEL", "glm-4.5-flash")
 # бесконечно (watchdog офиса лишь метит агента idle, но саму корутину не убивает),
 # продолжая держать соединение. wait_for гарантирует, что вызов завершится.
 CALL_TIMEOUT = float(os.getenv("LLM_CALL_TIMEOUT", "180"))
+# Потолок на ОДИН веб-поиск. Реальный вис прода: DDG недоступен/медленен →
+# asyncio.to_thread(web_search) ждал тред ВЕЧНО, корутина агента зависала, а
+# bootstrap (ресёрчер — первый, кто ищет после онбординга) вообще не под watchdog.
+# Плюс зависшие треды исчерпывали общий thread-pool — замирали поиски ВСЕХ агентов.
+SEARCH_TIMEOUT = float(os.getenv("SEARCH_TIMEOUT", "45"))
 
 
 def _resolve_creds() -> tuple[str, str]:
@@ -354,6 +359,13 @@ async def run_agent(
 
 
 async def _search_async(query: str) -> str:
-    """DuckDuckGo синхронный — запускаем в потоке, чтобы не блокировать event loop."""
+    """DuckDuckGo синхронный — запускаем в потоке, чтобы не блокировать event loop.
+    wait_for обязателен: поиск без ответа не должен вешать агента (см. SEARCH_TIMEOUT)."""
     import asyncio
-    return await asyncio.to_thread(web_search, query)
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(web_search, query),
+                                      timeout=SEARCH_TIMEOUT)
+    except (asyncio.TimeoutError, TimeoutError):
+        return ("Поиск не ответил (сеть или поисковый сервис недоступны). "
+                "НЕ повторяй этот запрос — продолжай задачу на основе того, "
+                "что уже знаешь, и честно отметь, каких данных не хватило.")

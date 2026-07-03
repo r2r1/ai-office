@@ -150,13 +150,17 @@ const COLS = [
   { key: "in_progress", label: "В работе",   dot: "var(--mercury-a)" },
   { key: "done",        label: "Готово",      dot: "#a0e0ab" },
   { key: "blocked",     label: "Заблокированы", dot: "#e08a8a" },
+  // skipped — задача снята офисом (роль без отдела-исполнителя), НЕ выполнена.
+  { key: "skipped",     label: "Пропущены",  dot: "var(--muted)" },
 ]
 
 function TasksTab({ tasks }: { tasks: any[] }) {
   const [unblocking, setUnblocking] = useState<string>("")
   const hasBlocked = tasks.some((t: any) => t.status === "blocked")
-  // Колонку «Заблокированы» показываем только когда в ней есть задачи — не пугаем зря.
-  const cols = hasBlocked ? COLS : COLS.filter(c => c.key !== "blocked")
+  const hasSkipped = tasks.some((t: any) => t.status === "skipped")
+  // Колонки «Заблокированы»/«Пропущены» показываем только когда в них есть задачи.
+  const cols = COLS.filter(c =>
+    (c.key !== "blocked" || hasBlocked) && (c.key !== "skipped" || hasSkipped))
 
   const unblock = async (id: string) => {
     setUnblocking(id)

@@ -100,7 +100,7 @@ ROLE_META: dict[str, dict] = {
 SERVICE_ROLES = ["researcher", "strategist", "architect", "hr"]
 
 # capability для штаб-ролей — не входят в ROLE_META (нет отдела), но должны
-# роутиться на подходящую модель через capabilities.role_capability.
+# роутиться на подходящую модель через quality_modes.role_capability.
 _SERVICE_CAPABILITY: dict[str, str] = {
     "researcher": "search", "strategist": "reasoning",
     "architect": "reasoning", "hr": "text",
@@ -130,7 +130,7 @@ def roles_in_department(dept_id: str) -> list[str]:
 
 def capability_of(role: str) -> str:
     """Тип задачи роли для capability-роутинга моделей (было отдельным
-    hardcoded-словарём в capabilities.py — теперь одно поле здесь)."""
+    hardcoded-словарём в quality_modes.py — теперь одно поле здесь)."""
     if role in ROLE_META:
         return ROLE_META[role].get("capability", "reasoning")
     return _SERVICE_CAPABILITY.get(role, "reasoning")

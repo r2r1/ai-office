@@ -45,7 +45,7 @@ from src.office import trust as trust_module
 from src.office import decisions as decisions_module
 from src.office import initiatives as initiatives_module
 from src.office import health as health_module
-from src.office import capabilities as capabilities_module
+from src.office import quality_modes as quality_modes_module
 from src.office import skills as skills_module
 from src.office import roles as roles_module
 
@@ -87,6 +87,11 @@ _MAX_AUTH_PER_MIN = 10
 
 def _check_rate_limit(ip: str) -> bool:
     now = time.time()
+    # Не копим мёртвые IP бесконечно: записи чистились только при повторном визите
+    # ТОГО ЖЕ ip — словарь рос на каждом новом посетителе (утечка памяти).
+    if len(_auth_attempts) > 1000:
+        for stale in [k for k, ts in _auth_attempts.items() if all(now - t >= 60 for t in ts)]:
+            _auth_attempts.pop(stale, None)
     attempts = [t for t in _auth_attempts.get(ip, []) if now - t < 60]
     _auth_attempts[ip] = attempts
     if len(attempts) >= _MAX_AUTH_PER_MIN:
@@ -113,8 +118,11 @@ async def tenant_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# Пути /api/*, доступные без авторизации
-_PUBLIC_API = {"/api/me"}
+# Пути /api/*, доступные без авторизации.
+# ⚠️ /api/site-lead — публичный приём заявок с опубликованных сайтов: посетитель
+# лендинга НЕ авторизован в SaaS, а формы многофайловых сайтов шлют именно сюда
+# (critic.check_site это требует). Без исключения посетитель получал 401 и лид терялся.
+_PUBLIC_API = {"/api/me", "/api/site-lead"}
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -859,6 +867,15 @@ _LEAD_THANKS_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8
 <p>Спасибо! Мы получили вашу заявку и свяжемся с вами в ближайшее время.</p>
 <a href="javascript:history.back()">← Вернуться на сайт</a></div></body></html>"""
 
+# Нативная HTML-форма без контакта: посетитель должен увидеть страницу с просьбой
+# вернуться и заполнить поле, а не сырой JSON {"error": ...} (реальный UX публичного сайта).
+_LEAD_NO_CONTACT_HTML = _LEAD_THANKS_HTML \
+    .replace('<title>Заявка отправлена</title>', '<title>Не хватает контакта</title>') \
+    .replace('<div class="ok">✅</div>', '<div class="ok">✍️</div>') \
+    .replace('<h1>Заявка отправлена</h1>', '<h1>Не хватает контакта</h1>') \
+    .replace('Спасибо! Мы получили вашу заявку и свяжемся с вами в ближайшее время.',
+             'Укажите, пожалуйста, телефон или email — иначе мы не сможем с вами связаться.')
+
 
 def _extract_lead_fields(data: dict) -> tuple[str, str, str]:
     """Имя/контакт/сообщение из полей формы с учётом всех вариантов имён полей агентов."""
@@ -884,6 +901,8 @@ async def capture_lead(tenant: str, slug: str, request: Request):
     data, native = await _lead_payload(request)
     name, contact, msg = _extract_lead_fields(data)
     if not contact:
+        if native:
+            return HTMLResponse(_LEAD_NO_CONTACT_HTML, status_code=400)
         return JSONResponse({"error": "нужен контакт"}, status_code=400)
     lead = leads_module.add(slug, name, contact, msg)
     await _notify_lead(dict(lead, slug=slug))
@@ -909,6 +928,8 @@ async def capture_site_lead(request: Request):
     data, native = await _lead_payload(request)
     name, contact, msg = _extract_lead_fields(data)
     if not contact:
+        if native:
+            return HTMLResponse(_LEAD_NO_CONTACT_HTML, status_code=400)
         return JSONResponse({"error": "нужен контакт (телефон или email)"}, status_code=400)
     lead = leads_module.add(slug, name, contact, msg)
     await _notify_lead(dict(lead, slug=slug))
@@ -1117,6 +1138,9 @@ async def office_resume():
 @app.post("/api/brief/reset")
 async def brief_reset():
     """Полный сброс ТЕКУЩЕГО тенанта: новый клиент с чистого листа."""
+    # СНАЧАЛА гасим живой офис-цикл: иначе его задача переживала wipe и продолжала
+    # работать со старым состоянием в RAM — реанимировала план/стратегию и жгла токены.
+    office_loop.forget_tenant(saas_context.get_tenant())
     models_module.reset()      # сбрасываем индивидуальные модели, глобальную оставляем
     saas_context.wipe()        # удаляет все файлы данных тенанта (бриф, состояние, код, стратегия, ТЗ…)
     return {"ok": True}
@@ -1263,6 +1287,13 @@ async def ask_agent(request: Request):
     # директивой (например «запусти бота») — иначе автономный цикл его не увидит.
     role = registry.get(agent_id).role
     memory.remember(f"Указание пользователя ({role})", message)
+    # Intent Layer (BOS §1): ЕДИНЫЙ вход намерений владельца — личный чат тоже
+    # фиксируется в журнале, а не только общий канал (/api/chat).
+    from src.office import intent as intent_module
+    _it = intent_module.capture(message, source="owner")
+    if _it:
+        intent_module.set_interpretation(_it["id"], scope="personal_chat",
+                                         directive=f"диалог с {agent_id} → память офиса")
     await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "user",
                        "kind": "msg", "text": message})
     try:
@@ -1493,8 +1524,12 @@ async def confirm_specification(request: Request):
 async def unblock_task(task_id: str):
     """Вернуть заблокированную задачу в очередь (решение владельца/CEO)."""
     from src.office import plan as plan_mod
+    from src.office import events as events_module
     if not plan_mod.unblock(task_id):
         return {"ok": False, "message": "Задача не найдена или не заблокирована"}
+    # kind-контракт BOS §10: разблокировка задачи закрывает её blocker-событие,
+    # иначе оно вечно висело в pending и в World Model.
+    events_module.resolve_for_task(task_id)
     office_loop.wake_tenant()
     return {"ok": True}
 
@@ -1598,7 +1633,7 @@ async def get_health(request: Request):
 @app.get("/api/capabilities")
 async def get_capabilities(request: Request):
 
-    return capabilities_module.payload()
+    return quality_modes_module.payload()
 
 
 @app.post("/api/capabilities")
@@ -1607,13 +1642,13 @@ async def post_capabilities(request: Request):
     data = await request.json()
     mode = data.get("mode")
     if mode:
-        if mode not in capabilities_module.QUALITY_MODES:
+        if mode not in quality_modes_module.QUALITY_MODES:
             return JSONResponse({"error": "Неизвестный режим"}, status_code=400)
-        capabilities_module.set_mode(mode)
+        quality_modes_module.set_mode(mode)
     # Эксперт-режим: точечные оверрайды по capability.
     for cap, model in (data.get("expert") or {}).items():
-        capabilities_module.set_expert(cap, model)
-    return {"ok": True, **capabilities_module.payload()}
+        quality_modes_module.set_expert(cap, model)
+    return {"ok": True, **quality_modes_module.payload()}
 
 
 @app.get("/api/skills")

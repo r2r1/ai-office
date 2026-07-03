@@ -162,7 +162,7 @@ def _js_syntax_error(code: str, as_module: bool = True) -> str:
                 pass
 
 
-def verify() -> dict:
+def verify(changed_since: float = 0.0) -> dict:
     """
     Статическая проверка работоспособности: компиляция .py + синтаксис .js/.mjs
     (отдельных файлов И инлайновых <script type="module"> в .html).
@@ -172,9 +172,16 @@ def verify() -> dict:
     компилируются без ошибок» — ложное «всё ок» без единой реальной проверки того,
     что агент только что написал (реальный кейс: designer/developer получали этот
     зелёный чек на JS с синтаксическими ошибками и сдавали задачу как готовую).
+
+    `changed_since` > 0 — проверять только файлы, изменённые после этой метки
+    (mtime). Нужен приёмке ЗАДАЧИ: битый файл, оставленный ЧУЖОЙ задачей, не должен
+    валить приёмку текущей (кросс-контаминация: 3 таких провала блокировали
+    невиновную задачу). 0 — прежнее поведение, весь workspace.
     """
     import py_compile
     files = list_files()
+    if changed_since > 0:
+        files = [f for f in files if f.get("mtime", 0) >= changed_since]
     py_files = [f for f in files if f["path"].endswith(".py")]
     js_files = [f for f in files if f["path"].endswith((".js", ".mjs"))]
     html_files = [f for f in files if f["path"].endswith(".html")]

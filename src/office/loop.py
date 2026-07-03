@@ -30,6 +30,10 @@ AGENT_COOLDOWN_SECS = int(os.getenv("AGENT_COOLDOWN_SECS", "25"))  # антид�
 CEO_REASSESS_EVERY = 3    # CEO пересматривает структуру компании раз в N циклов (экономия токенов)
 MAX_THINK_SECS = int(os.getenv("AGENT_MAX_THINK_SECS", "240"))  # дольше → считаем зависшим
 MAX_TASK_ATTEMPTS = 3     # провалов приёмки до блокировки задачи (эскалация вместо цикла)
+# Потолок одного шага BOOTSTRAP (deep-ресёрч, архитектор): watchdog _heal_stuck_agents
+# работает только в циклах и НЕ покрывает bootstrap — зависший первый шаг (ресёрчер)
+# раньше замораживал офис навсегда, без единой ошибки в ленте.
+BOOTSTRAP_STEP_TIMEOUT = int(os.getenv("BOOTSTRAP_STEP_TIMEOUT", "900"))
 
 # Состояние по тенантам
 _current_ms: dict[str, str] = {}        # tid -> id текущего этапа
@@ -54,6 +58,27 @@ def wake_tenant() -> None:
     «цель достигнута», чтобы офис, ушедший в режим мониторинга, переоценил работу
     и подхватил новые задачи/этапы в ближайшем цикле."""
     _completion_announced.pop(ctx.get_tenant(), None)
+
+
+def forget_tenant(tid: str) -> None:
+    """Полный сброс тенанта (reset «новый клиент»): гасим его офис-задачу и чистим
+    per-tenant живость в памяти процесса. Без этого /api/brief/reset стирал файлы,
+    но СТАРАЯ задача офиса продолжала крутиться со стейтом в RAM (стратегия, цикл),
+    реанимировала данные и жгла токены, а менеджер не запускал офис заново, пока
+    задача жива. Уже стартовавшие _job-корутины агентов дорабатывают и гаснут сами
+    (их таймауты ≤ CALL_TIMEOUT/ask_user)."""
+    task = _office_tasks.pop(tid, None)
+    if task and not task.done():
+        task.cancel()
+    prefix = f"{tid}:"
+    for d in (_thinking_since, _agent_task, _model_fail_count):
+        for k in [k for k in d if k.startswith(prefix)]:
+            d.pop(k, None)
+    for k in [k for k in _last_leader_sig
+              if k.startswith(prefix) or k.startswith(f"board:{tid}:")]:
+        _last_leader_sig.pop(k, None)
+    for d2 in (_current_ms, _first_cycle_done, _completion_announced):
+        d2.pop(tid, None)
 
 
 def _fallback_plan(goal: str) -> list[dict]:
@@ -104,7 +129,9 @@ def _engagement_complete() -> bool:
     if not plan.is_generated():
         return False
     p = plan.progress()
-    complete = p["total"] > 0 and p["done"] >= p["total"]
+    # done + skipped: пропущенные (роль без отдела) закрывают план, но не считаются
+    # «выполненными» — прогресс не врёт, а офис не виснет на неисполнимой задаче.
+    complete = p["total"] > 0 and (p["done"] + p.get("skipped", 0)) >= p["total"]
     if not complete:
         _completion_announced.pop(ctx.get_tenant(), None)  # появилась работа — снова активны
     return complete
@@ -160,8 +187,13 @@ async def _run_office(tid: str) -> None:
     ctx.set_tenant(tid)
     publish = bus.publish
 
+    # «Это рестарт?» смотрим ДО _hire_initial: он сам публикует hired-события, которые
+    # попадают в state.saved_agents() — из-за этого СВЕЖИЙ офис всегда выглядел как
+    # «восстановленный» и первый цикл уходил на ветку рестарта с сообщением
+    # «Офис восстановлен» сразу после онбординга.
+    had_saved_agents = bool(state.saved_agents())
     await _hire_initial(publish)
-    _first_cycle_done[tid] = not bool(state.saved_agents())
+    _first_cycle_done[tid] = not had_saved_agents
 
     # ---- BOOTSTRAP ----
     strategy = _strategy_text()
@@ -176,7 +208,10 @@ async def _run_office(tid: str) -> None:
         goal = _goal()
         await publish({"type": "system", "text": "Архитектор проектирует техническое решение..."})
         try:
-            tech_design = await architect.run_async(strategy, goal, publish)
+            # Архитектор тоже ищет в вебе (use_search=True) — bootstrap не под watchdog,
+            # поэтому шаг ограничен по времени так же, как ресёрчер.
+            tech_design = await asyncio.wait_for(architect.run_async(strategy, goal, publish),
+                                                 timeout=BOOTSTRAP_STEP_TIMEOUT)
         except Exception as e:
             await publish({"type": "error", "agent_id": "architect_1", "text": str(e)[:100]})
 
@@ -358,6 +393,19 @@ async def _heal_stuck_agents(publish) -> None:
     """
     now = time.time()
     prefix = f"{ctx.get_tenant()}:"  # только агенты ТЕКУЩЕГО тенанта, не чужие
+    # Агент, ждущий ответа клиента (ask_user до 300с, одобрение публикации до 600с),
+    # НЕ завис — это штатное ожидание дольше MAX_THINK_SECS. Сбрасывать его нельзя:
+    # задача вернулась бы в очередь и получила бы ВТОРОГО исполнителя, пока первая
+    # корутина продолжает работать после ответа (двойная запись site/ — реальный
+    # класс багов прода). Пока в тенанте есть открытые вопросы — продлеваем таймеры;
+    # вечного зависания не будет: у ожиданий futures свои таймауты, после которых
+    # вопрос уходит из pending и watchdog снова активен.
+    from src.office import questions as questions_mod
+    if questions_mod.list_pending():
+        for key in list(_thinking_since):
+            if key.startswith(prefix):
+                _thinking_since[key] = now
+        return
     for key, since in list(_thinking_since.items()):
         if not key.startswith(prefix):
             continue
@@ -384,12 +432,24 @@ async def _heal_stuck_agents(publish) -> None:
                     except OSError:
                         site_touched = False
                 if rec and rec.role in ("designer", "developer") and site_touched:
-                    await _publish_site_auto(publish)
-                    plan.complete(tid)
-                    await publish({"type": "system",
-                                   "text": f"✅ {aid} долго думал, но сайт уже готов — задача {tid} "
-                                           f"принята и опубликована (без перезапуска)."})
-                    continue
+                    # BOS §8: даже антицикл-закрытие идёт через приёмку. Раньше watchdog
+                    # закрывал задачу БЕЗ проверки — битый сайт (форма не шлёт лиды)
+                    # засчитывался как выполненная работа. Проверка детерминированная
+                    # и дешёвая: только критические маркеры критика, без LLM.
+                    critical = [p for p in critic.check_site() if critic.is_critical(p)]
+                    if not critical:
+                        await _publish_site_auto(publish)
+                        plan.complete(tid, acceptance={"passed": True, "problems": [],
+                                                       "levels": {"build": "skip",
+                                                                  "functional": "ok",
+                                                                  "acceptance": "watchdog"}})
+                        await publish({"type": "system",
+                                       "text": f"✅ {aid} долго думал, но сайт уже готов — задача {tid} "
+                                               f"принята и опубликована (без перезапуска)."})
+                        continue
+                    plan.set_feedback(tid, "⚠ ПРИЁМКА НЕ ПРОЙДЕНА (сайт написан, но есть "
+                                           "критические проблемы):\n"
+                                      + "\n".join(f"- {p}" for p in critical[:3]))
                 plan.revert(tid)  # иначе — вернуть зависшую задачу в очередь
             # Trust Score: зависший агент снижает доверие к его отделу
             rec_stuck = registry.get(aid)
@@ -408,23 +468,21 @@ async def _verify_and_fix_if_needed(strategy: str, publish) -> bool:
     critical = [p for p in problems if critic.is_critical(p)]
     if not critical:
         return False
-    # Смотрим, не добавляли ли уже аналогичную fix-задачу
-    existing_titles = {t.get("title", "").lower() for t in plan.all_tasks()}
+    # Дедуп по НЕзакрытым fix-задачам. Раньше считались и done-задачи: после ОДНОЙ
+    # выполненной доработки новая fix-задача не создавалась никогда, и офис объявлял
+    # «работа выполнена» с оставшимися критическими проблемами. Теперь done не глушит
+    # новую попытку; blocked глушит (ждём владельца, не плодим дубли) — бесконечный
+    # цикл исключён эскалацией приёмки: 3 провала → задача блокируется сама.
     fix_title = "Исправить критические проблемы сайта: " + "; ".join(critical[:2])[:120]
-    if any("исправить критические" in t for t in existing_titles):
-        return False  # уже есть, не дублируем
+    if any("исправить критические" in (t.get("title", "").lower())
+           and t.get("status") in ("pending", "in_progress", "blocked")
+           for t in plan.all_tasks()):
+        return False  # доработка уже в очереди/в работе/у владельца — не дублируем
     await publish({"type": "system",
                    "text": f"🔍 Финальная проверка нашла проблемы: {'; '.join(critical[:2])[:100]} — "
                            "добавляю задачу на исправление"})
-    fix_task = {
-        "id": f"fix_{int(__import__('time').time())}",
-        "title": fix_title,
-        "role": "developer",
-        "deps": [],
-        "done_criterion": "форма шлёт на /api/site-lead, сайт открывается без ошибок",
-        "status": "pending",
-    }
-    plan.add_task(fix_task["title"], fix_task["role"], fix_task["done_criterion"],
+    plan.add_task(fix_title, "developer",
+                  "форма шлёт на /api/site-lead, сайт открывается без ошибок",
                   requested_by="orchestrator_1")
     return True
 
@@ -578,10 +636,12 @@ async def _orchestrate(strategy: str, publish, tech_design: str = "", cycle: int
         for t in plan.all_tasks():
             if t.get("status") in ("pending", "in_progress") and not t.get("department") \
                     and t.get("role") not in servable:
-                plan.complete(t["id"])
+                # skipped, НЕ done: задача не выполнялась — done-прогресс не завышаем
+                # (раньше complete() зачитывал её как сделанную работу).
+                plan.mark(t["id"], "skipped")
                 await publish({"type": "system",
-                               "text": f"⏭ Задача {t['id']} ({t.get('role','?')}) пропущена — "
-                                       f"роль не входит в отделы, не блокирует сдачу"})
+                               "text": f"⏭ Задача {t['id']} ({t.get('role','?')}) снята — "
+                                       f"роль не входит в отделы, сдачу не блокирует"})
 
     # ---- CEO-тир (гейт по необходимости — экономия токенов) ----
     need_ceo = (not org.open_departments()) or (cycle % CEO_REASSESS_EVERY == 0)
@@ -886,6 +946,22 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
         from src.office import execution_policy
         t_rec_policy = (plan.get_task(task_id) if task_id and plan.is_generated() else None) or {"title": task}
         policy = execution_policy.decide(t_rec_policy, agent_id, role)
+        # BOS §6: оценка стоимости сверяется с ОСТАТКОМ бюджета ДО исполнения —
+        # cycle-гейт over_limit ловит уже случившийся перерасход, а этот не даёт
+        # начать шаг, который заведомо выйдет за лимит.
+        if costs.would_exceed(policy["estimated_usd"]):
+            registry.update_status(agent_id, "idle")
+            _thinking_since.pop(_tk(agent_id), None)
+            _agent_task.pop(_tk(agent_id), None)
+            if task_id and plan.is_generated():
+                plan.revert(task_id)
+            reason = (f"⛔ Оценка задачи ~${policy['estimated_usd']:.2f} превышает остаток "
+                      f"бюджета — офис на паузе. Повысьте лимит в «Компания → Лимиты».")
+            control.pause(reason)
+            trace.log("budget_gate", agent=agent_id, task_id=task_id,
+                      est_usd=policy["estimated_usd"])
+            await publish({"type": "system", "text": reason})
+            return
         trace.log("agent_start", agent=agent_id, role=role,
                   model=policy["model"], tier=policy["tier"],
                   est_usd=policy["estimated_usd"], skill=skill or "")
@@ -923,7 +999,8 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 from src.office import acceptance, events as events_mod
                 t_rec = plan.get_task(task_id) or {}
                 verdict = acceptance.check(t_rec.get("title", task) or task, role, result or "",
-                                           done_criterion=t_rec.get("done_criterion", ""))
+                                           done_criterion=t_rec.get("done_criterion", ""),
+                                           started_ts=_job_t0)
                 trace.log("acceptance", agent=agent_id, task_id=task_id,
                           passed=verdict["passed"], levels=str(verdict["levels"]),
                           problems="; ".join(verdict["problems"])[:200])
@@ -945,11 +1022,23 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                         events_mod.raise_event(
                             "blocker",
                             f"Задача {task_id} заблокирована после {attempts} попыток: {reason}",
-                            from_role=role, from_agent=agent_id)
+                            from_role=role, from_agent=agent_id, task_id=task_id)
                         await publish({"type": "system",
                                        "text": f"⛔ Задача {task_id} заблокирована после "
                                                f"{attempts} неудачных попыток — нужно решение "
                                                f"CEO или уточнение клиента. Причина: {reason[:120]}"})
+                        # Blocker гарантированно доходит до владельца (BOS §10): сообщение
+                        # в личный чат CEO зажигает бейдж непрочитанного, а не тонет в ленте.
+                        # НЕ questions.ask: незакрытый вопрос отключил бы watchdog
+                        # (_heal_stuck_agents продлевает таймеры, пока есть pending-вопросы).
+                        from src.office import threads as threads_mod
+                        t_rec_b = plan.get_task(task_id) or {}
+                        note = (f"⛔ Задача «{(t_rec_b.get('title') or task_id)[:80]}» заблокирована: "
+                                f"{reason[:160]}. Разблокировать можно во вкладке "
+                                f"«Проект → Задачи» — команда попробует заново.")
+                        threads_mod.post("orchestrator_1", "agent", note, kind="msg")
+                        await publish({"type": "agent_message", "agent_id": "orchestrator_1",
+                                       "from": "agent", "kind": "msg", "text": note})
                     elif fb:
                         # Фидбек приёмки сохраняется в задаче — попадёт исполнителю
                         # при переназначении (см. _run_leaders: last_feedback → task_txt)
@@ -1201,7 +1290,13 @@ async def _bootstrap(publish) -> str:
 
     question = brief.research_question() or researcher.DEFAULT_QUESTION
     try:
-        research = await researcher.deep(question, publish=publish)
+        research = await asyncio.wait_for(researcher.deep(question, publish=publish),
+                                          timeout=BOOTSTRAP_STEP_TIMEOUT)
+    except asyncio.TimeoutError:
+        await publish({"type": "system", "agent_id": "researcher_1",
+                       "text": f"⏱ Исследование не уложилось в {BOOTSTRAP_STEP_TIMEOUT // 60} мин — "
+                               f"продолжаю по брифу без глубокого ресёрча"})
+        research = ""
     except Exception as e:
         await publish({"type": "error", "agent_id": "researcher_1", "text": str(e)[:100]})
         research = ""

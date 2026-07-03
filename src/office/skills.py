@@ -42,26 +42,10 @@ class Skill:
     source: str = "builtin"
 
     def score(self, task: str) -> int:
-        """
-        Насколько Skill подходит задаче (число совпавших ключевых слов).
-        Учитывает отрицание: «премиальный сайт БЕЗ 3D» содержит слово «3d» как
-        подстроку и раньше засчитывалось В ПОЛЬЗУ 3D-скилла (реальный кейс — designer
-        просил "без 3D", а use_skill выдал framer_motion_3d_site). Ключевое слово,
-        которому непосредственно предшествует «без »/«не », штрафуется, а не
-        засчитывается — так конкурирующий (не-3D) скилл выигрывает матч.
-        """
-        t = (task or "").lower()
-        total = 0
-        for k in self.keywords:
-            idx = t.find(k)
-            if idx == -1:
-                continue
-            prefix = t[max(0, idx - 6):idx]
-            if "без " in prefix or "не " in prefix:
-                total -= 1
-            else:
-                total += 1
-        return total
+        """Насколько Skill подходит задаче — единый скорер потребностей (needs.py,
+        BOS §5): совпадения ключевых слов с обработкой отрицания («без 3D»)."""
+        from src.office import needs
+        return needs.score_keywords(task, self.keywords)
 
     def to_public(self) -> dict:
         return {"id": self.id, "title": self.title, "description": self.description,

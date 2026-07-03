@@ -38,6 +38,34 @@ def _valid_role(role: str) -> str:
     return _ROLE_REMAP.get(role, "developer")
 
 
+# ── Детерминированная маршрутизация бота записи ──────────────────────────────
+# Бизнес-правило «бот записи клиентов / сбора лидов → ТОЛЬКО integrator, НИКОГДА
+# developer» раньше жило исключительно в подсказке LLM-пути лидеров
+# (leaders._DEPT_HINTS), который работает только до генерации плана — то есть
+# почти никогда. Живая детерминированная маршрутизация правило не знала: план мог
+# назначить booking-бота developer, и никто не поправлял (скрытый прод-баг).
+# Платформа имеет готовый движок записи (bot_engine) — его настраивает и запускает
+# integrator (launch_bot), кастомный код developer тут не нужен. Бот с НЕСТАНДАРТНОЙ
+# логикой (постинг в группу, парсинг, рассылка) — исключение, остаётся у developer.
+_BOT_WORDS = ("telegram", "телеграм", "бот", "aiogram", "chatbot", "чат-бот")
+_BOOKING_WORDS = ("запис", "бронир", "лид", "заяв", "букинг", "booking")
+_CUSTOM_BOT_WORDS = ("постинг", "парс", "групп", "кастом", "рассылк", "нестандарт")
+
+
+def _route_role(role: str, title: str) -> str:
+    """Детерминированно корректирует роль задачи по заголовку. Задача про бота
+    записи/сбора лидов принудительно уходит integrator (кроме кастомной логики)."""
+    role = _valid_role(role)
+    if role not in ("developer", "designer", "integrator"):
+        return role
+    t = (title or "").lower()
+    is_bot = any(w in t for w in _BOT_WORDS)
+    if is_bot and any(w in t for w in _BOOKING_WORDS) \
+            and not any(w in t for w in _CUSTOM_BOT_WORDS):
+        return "integrator"
+    return role
+
+
 def _save(d: dict) -> None:
     ctx.write_json(_FILE, d)
 
@@ -53,7 +81,8 @@ def set_tasks(tasks: list[dict]) -> None:
     project_id = projects.ensure_active()["id"]
     norm = []
     for i, t in enumerate(tasks):
-        role = _valid_role(t.get("role") or "")  # роль без отдела → исполнимая (A1)
+        # роль без отдела → исполнимая (A1); бот записи → integrator (детерминированно)
+        role = _route_role(t.get("role") or "", t.get("title") or "")
         tid = (t.get("id") or f"t{i+1}").strip()
         norm.append({
             "id": tid,
@@ -88,7 +117,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
     """
     d = _data()
     tasks = d.get("tasks", [])
-    role = _valid_role(role)  # роль без отдела → исполнимая (A1)
+    role = _route_role(role, title)  # роль без отдела → исполнимая; бот записи → integrator
     # Дедуп: если такая же незакрытая задача той же роли уже есть — не плодим дубль
     # (циклы делегирования иначе ставили один и тот же таск несколько раз). Инвариант
     # проекта — дедупликация.
@@ -134,15 +163,21 @@ def adopt_orphan_tasks(project_id: str) -> int:
     return n
 
 
+# Статусы, закрывающие задачу. skipped — задача снята осознанно (роль без
+# отдела-исполнителя), НЕ выполнена: зависимости она удовлетворяет (иначе всё,
+# что от неё зависит, зависло бы навсегда), но в done-прогрессе не врёт.
+_CLOSED = ("done", "skipped")
+
+
 def _done_ids() -> set:
-    return {t["id"] for t in all_tasks() if t.get("status") == "done"}
+    return {t["id"] for t in all_tasks() if t.get("status") in _CLOSED}
 
 
 def departments_needed() -> list[str]:
     """Какие отделы нужны для невыполненных задач (для CEO — открыть параллельно)."""
     deps = set()
     for t in all_tasks():
-        if t.get("status") != "done" and t.get("department"):
+        if t.get("status") not in _CLOSED and t.get("department"):
             deps.add(t["department"])
     return sorted(deps)
 
@@ -305,7 +340,7 @@ def get_task(task_id: str) -> dict | None:
 def for_agent(agent_id: str) -> list[dict]:
     """To-do список конкретного агента: его задачи + поставленные ему коллегами."""
     return [t for t in all_tasks()
-            if t.get("assignee") == agent_id and t.get("status") != "done"]
+            if t.get("assignee") == agent_id and t.get("status") not in _CLOSED]
 
 
 def board(dept_id: str | None = None) -> dict:
@@ -319,6 +354,7 @@ def board(dept_id: str | None = None) -> dict:
         "doing": [t for t in tasks if t.get("status") == "in_progress"],
         "done": [t for t in tasks if t.get("status") == "done"],
         "blocked": [t for t in tasks if t.get("status") == "blocked"],
+        "skipped": [t for t in tasks if t.get("status") == "skipped"],
     }
 
 
@@ -327,32 +363,19 @@ def board_summary(dept_id: str | None = None) -> str:
     b = board(dept_id)
     doing = "; ".join(f"{t['id']}:{t['title'][:30]}" for t in b["doing"]) or "—"
     blocked = f" ⛔{len(b['blocked'])}" if b.get("blocked") else ""
-    return f"✓{len(b['done'])} ⟳{len(b['doing'])} ☐{len(b['todo'])}{blocked} | в работе: {doing}"
-
-
-def mark_done_by_role(role: str) -> str | None:
-    """
-    Помечает выполненной первую задачу роли в работе/ожидании. Возвращает её id.
-    Используется когда работник сдал результат и прошёл критика.
-    """
-    d = _data()
-    done = {t["id"] for t in d.get("tasks", []) if t.get("status") == "done"}
-    for t in d.get("tasks", []):
-        if t.get("role") == role and t.get("status") in ("pending", "in_progress") \
-                and all(dep in done for dep in t.get("deps", [])):
-            t["status"] = "done"
-            t["updated_ts"] = time.time()
-            _save(d)
-            return t["id"]
-    return None
+    skipped = f" ⏭{len(b['skipped'])}" if b.get("skipped") else ""
+    return f"✓{len(b['done'])} ⟳{len(b['doing'])} ☐{len(b['todo'])}{blocked}{skipped} | в работе: {doing}"
 
 
 def progress() -> dict:
+    """done — реально выполненные; skipped — снятые (роль без отдела). Процент и
+    «всё закрыто» считаются по done+skipped, но done НЕ завышается пропущенными."""
     tasks = all_tasks()
     total = len(tasks)
     done = sum(1 for t in tasks if t.get("status") == "done")
-    return {"total": total, "done": done,
-            "percent": round(done / total * 100) if total else 0}
+    skipped = sum(1 for t in tasks if t.get("status") == "skipped")
+    return {"total": total, "done": done, "skipped": skipped,
+            "percent": round((done + skipped) / total * 100) if total else 0}
 
 
 def reset() -> None:

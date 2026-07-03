@@ -79,10 +79,10 @@ def for_agent(agent_id: str) -> str:
     pr = cfg.get("per_role", {})
     if role in pr:
         return pr[role]
-    # Режим качества (capabilities) — мягкий слой поверх дефолта офиса.
+    # Режим качества (quality_modes) — мягкий слой поверх дефолта офиса.
     try:
-        from src.office import capabilities
-        cap_model = capabilities.model_for_role(role)
+        from src.office import quality_modes
+        cap_model = quality_modes.model_for_role(role)
         if cap_model:
             return cap_model
     except Exception:
@@ -164,11 +164,11 @@ def clear_broken_model(agent_id: str, role: str) -> str:
     if changed:
         ctx.write_json(_FILE, cfg)
     try:
-        from src.office import capabilities
-        if capabilities.get_mode() == "expert":
-            cap = capabilities.role_capability(role_key)
-            if capabilities.expert_overrides().get(cap) == broken:
-                capabilities.set_expert(cap, "")
+        from src.office import quality_modes
+        if quality_modes.get_mode() == "expert":
+            cap = quality_modes.role_capability(role_key)
+            if quality_modes.expert_overrides().get(cap) == broken:
+                quality_modes.set_expert(cap, "")
                 changed = True
     except Exception:
         pass

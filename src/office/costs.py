@@ -126,12 +126,9 @@ def set_limits(total_usd: float = 0.0, daily_usd: float = 0.0) -> None:
     })
 
 
-def over_limit() -> bool:
-    """Превышен ли ОБЩИЙ или ДНЕВНОЙ лимит расхода (для авто-паузы)."""
-    lim = limits()
-    total_cap = lim.get("total_usd", 0.0)
-    # Единый бюджет: общий лимит из «Лимиты» ИЛИ бюджетный порог из Конституции —
-    # берём минимальный ненулевой (был мёртвый дубль budget_auto_limit).
+def _effective_total_cap() -> float:
+    """Единый общий лимит: минимальный ненулевой из «Лимиты» и порога Конституции."""
+    total_cap = limits().get("total_usd", 0.0)
     try:
         from src.office import constitution
         c_cap = constitution.budget_auto_limit()
@@ -139,11 +136,30 @@ def over_limit() -> bool:
             total_cap = c_cap if total_cap <= 0 else min(total_cap, c_cap)
     except Exception:
         pass
-    daily_cap = lim.get("daily_usd", 0.0)
-    total_now = totals()["cost"]
-    if total_cap > 0 and total_now >= total_cap:
+    return total_cap
+
+
+def over_limit() -> bool:
+    """Превышен ли ОБЩИЙ или ДНЕВНОЙ лимит расхода (для авто-паузы)."""
+    total_cap = _effective_total_cap()
+    daily_cap = limits().get("daily_usd", 0.0)
+    if total_cap > 0 and totals()["cost"] >= total_cap:
         return True
     if daily_cap > 0 and spent_today() >= daily_cap:
+        return True
+    return False
+
+
+def would_exceed(estimated_usd: float) -> bool:
+    """Выйдет ли ПРЕДСТОЯЩИЙ платный шаг за лимиты (BOS §6: estimated_cost сверяется
+    с бюджетом ДО исполнения, а не после). 0/отрицательная оценка → не блокируем."""
+    if estimated_usd <= 0:
+        return False
+    total_cap = _effective_total_cap()
+    daily_cap = limits().get("daily_usd", 0.0)
+    if total_cap > 0 and totals()["cost"] + estimated_usd > total_cap:
+        return True
+    if daily_cap > 0 and spent_today() + estimated_usd > daily_cap:
         return True
     return False
 

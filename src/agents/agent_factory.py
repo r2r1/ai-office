@@ -12,7 +12,6 @@ from typing import Callable, Awaitable
 from src.core import llm
 from src.agents import researcher as researcher_agent
 from src.office import questions as questions_module
-from src.office import agent_inbox
 from src.office import state
 from src.office import connections
 from src.office import memory as memory_module
@@ -116,36 +115,10 @@ _DELEGATE_TASK_TOOL = {
     },
 }
 
-# Инструмент: отправить сообщение другому агенту
-_SEND_MESSAGE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "send_message",
-        "description": "Отправляет сообщение другому агенту по его agent_id.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "to_agent_id": {"type": "string", "description": "ID агента-получателя"},
-                "message": {"type": "string", "description": "Текст сообщения"},
-            },
-            "required": ["to_agent_id", "message"],
-        },
-    },
-}
-
-# Инструмент: прочитать входящие сообщения
-_READ_MESSAGES_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "read_messages",
-        "description": "Читает входящие сообщения от других агентов.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-}
+# Прямые send_message/read_messages у воркеров убраны: межагентка идёт через
+# ask_colleague (синхронная консультация) и delegate_task (задача на доску) —
+# см. tool_handlers ниже. Свои копии этих инструментов остались только в chat.py
+# (диалог пользователя с агентом), там они живые.
 
 # Инструмент: получить доступ/учётные данные к внешней платформе
 _GET_CONNECTION_TOOL = {
@@ -604,21 +577,6 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                        "text": f"📌 @{col_role}, задача: {title[:160]}"})
         return (f"Задача поставлена {col_role} (id={t['id']}) и добавлена на доску — "
                 f"его лидер назначит исполнителя. Можешь продолжать своё.")
-
-    async def _handle_send_message(args: dict) -> str:
-        to_agent_id = (args.get("to_agent_id") or "").strip()
-        message = args.get("message", "")
-        if not registry_module.get(to_agent_id):
-            real = ", ".join(a.agent_id for a in registry_module.all_agents()) or "пока никто не нанят"
-            return f"Агента «{to_agent_id}» не существует — сообщение НЕ отправлено. Реальные коллеги: {real}."
-        agent_inbox.send(to_agent_id, agent_id, message)
-        await publish({"type": "speech", "agent_id": agent_id,
-                       "text": f"→ {to_agent_id}: {message[:60]}"})
-        return f"Сообщение отправлено агенту {to_agent_id}"
-
-    async def _handle_read_messages(args: dict) -> str:
-        msgs = agent_inbox.read(agent_id)
-        return json.dumps(msgs, ensure_ascii=False)
 
     async def _handle_read_office_chat(args: dict) -> str:
         n = args.get("n", 20)

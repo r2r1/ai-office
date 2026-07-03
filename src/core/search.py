@@ -6,8 +6,13 @@
 from typing import Optional
 
 
-def web_search(query: str, max_results: int = 5) -> str:
-    """Ищет в DuckDuckGo и возвращает отформатированный текст результатов."""
+def web_search(query: str, max_results: int = 5, timeout: int = 20) -> str:
+    """Ищет в DuckDuckGo и возвращает отформатированный текст результатов.
+
+    `timeout` — потолок HTTP-запросов внутри DDGS. Без него зависший поисковик
+    (DDG в РФ нередко блокируется/стоит) держал тред вечно; треды копились в общем
+    пуле asyncio.to_thread и в итоге замораживали ВСЕ поиски всех агентов.
+    """
     try:
         from ddgs import DDGS
     except ImportError:
@@ -18,7 +23,11 @@ def web_search(query: str, max_results: int = 5) -> str:
 
     try:
         results = []
-        with DDGS() as ddgs:
+        try:
+            client = DDGS(timeout=timeout)
+        except TypeError:  # версия библиотеки без параметра timeout
+            client = DDGS()
+        with client as ddgs:
             for r in ddgs.text(query, max_results=max_results):
                 results.append(r)
     except Exception as e:

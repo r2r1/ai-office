@@ -58,12 +58,12 @@ def decide(task: dict, agent_id: str, role: str) -> dict:
     "estimated_usd": float}. Точечные оверрайды владельца (per_agent/per_role/expert)
     всегда главнее эвристики — policy не спорит с явной волей.
     """
-    from src.office import capabilities
+    from src.office import quality_modes
     cfg_model = models_module.for_agent(agent_id)
     overridden = (
         agent_id in models_module.assignments()
         or role in models_module.role_assignments()
-        or capabilities.get_mode() == "expert"
+        or quality_modes.get_mode() == "expert"
     )
     if not overridden and is_routine(task):
         model, tier, reason = _ECONOMY_MODEL, "routine", "рутинная задача → дешёвая модель"
@@ -113,7 +113,7 @@ def missing_for_plan() -> list[dict]:
     seen: set[str] = set()
     out: list[dict] = []
     for t in plan.all_tasks():
-        if t.get("status") == "done":
+        if t.get("status") in ("done", "skipped"):  # снятая задача доступов не требует
             continue
         req = required_capability(t)
         if not req:

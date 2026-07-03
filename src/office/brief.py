@@ -44,6 +44,19 @@ def summary() -> str:
 _JUNK_GOALS = {"не знаю", "незнаю", "не знаю.", "-", "—", "нет", "хз", "?", ""}
 
 
+def is_junk_goal(goal: str) -> bool:
+    """Цель бессодержательна («не знаю», «-», пусто). Единый сигнал качества цели —
+    его читают и effective_goal (подмена целью из стратегии), и understanding
+    (мусорная цель не должна засчитываться как понятая — раньше индикатор давал
+    +10 за любую непустую строку, включая «не знаю»)."""
+    return (goal or "").strip().lower() in _JUNK_GOALS
+
+
+def has_meaningful_goal() -> bool:
+    """У брифа есть осмысленная цель компании (не «не знаю»/пусто)."""
+    return not is_junk_goal(get().get("goal") or "")
+
+
 def effective_goal() -> str:
     """
     Осмысленная цель компании для промптов (переехало из loop._goal — цель принадлежит
@@ -52,7 +65,7 @@ def effective_goal() -> str:
     реальную цель. Мусорная цель → берём её из стратегии.
     """
     g = (get().get("goal") or "").strip()
-    if g.lower() not in _JUNK_GOALS:
+    if not is_junk_goal(g):
         return g
     # Первая содержательная строка стратегии обычно и есть сформулированная цель.
     f = ctx.tenant_dir() / "strategy.md"

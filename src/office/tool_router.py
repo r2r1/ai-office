@@ -11,11 +11,11 @@ Tool Router (item 8): развязывает агентов от конкрет�
 («лендинг», «бот», «письмо»), которые человек формулирует не словами из API.
 
 Роутинг детерминированный (ключевые слова, без LLM) — дёшево и предсказуемо.
+Скоринг — единый скорер потребностей needs.py (BOS §5), общий со Skills.
 """
 
-import re
-
 from src.integrations import registry as integrations_registry
+from src.office import needs
 
 # Синонимы намерения → подсказки роутеру. Слова, которыми клиент/агент описывает
 # потребность, но которых нет в названиях действий. Привязка к (integration, action).
@@ -41,14 +41,6 @@ _INTENT_HINTS: dict[str, tuple[str, str]] = {
     "встреч": ("google_calendar", "create_event"),
 }
 
-_STOP = {"мне", "нужно", "нужен", "надо", "хочу", "для", "это", "что", "как", "the", "a", "to", "of", "in"}
-
-
-def _tokens(s: str) -> set[str]:
-    words = re.split(r"[^\wа-яё]+", (s or "").lower())
-    return {w for w in words if len(w) > 2 and w not in _STOP}
-
-
 def _capabilities() -> list[dict]:
     """Плоский каталог: каждое действие интеграции — отдельная способность."""
     caps = []
@@ -59,7 +51,7 @@ def _capabilities() -> list[dict]:
                 "integration": integ.name,
                 "action": action.name,
                 "title": integ.title,
-                "tokens": _tokens(text),
+                "tokens": needs.tokens(text),
                 "connected": integrations_registry.is_connected(integ),
             })
     return caps
@@ -70,14 +62,13 @@ def route(need: str, top: int = 3) -> list[dict]:
     Ранжирует способности по близости к свободному описанию потребности.
     Возвращает список кандидатов [{integration, action, title, score, connected}].
     """
-    need_tokens = _tokens(need)
     caps = _capabilities()
     by_key = {(c["integration"], c["action"]): c for c in caps}
 
     scored: dict[tuple[str, str], float] = {}
-    # 1) Совпадение по ключевым словам метаданных
+    # 1) Совпадение по ключевым словам метаданных (единый скорер needs)
     for c in caps:
-        overlap = len(need_tokens & c["tokens"])
+        overlap = needs.overlap(need, c["tokens"])
         if overlap:
             scored[(c["integration"], c["action"])] = float(overlap)
     # 2) Бонус за синонимы намерения (распознаём «лендинг», «письмо» и т.п.)
