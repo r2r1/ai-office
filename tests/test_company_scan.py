@@ -74,6 +74,44 @@ def test_build_brief_structured_without_scan_unaffected():
     assert "Автоскан" not in brief["summary"]
 
 
+def test_pain_points_speak_business_not_tech():
+    """Прод-фидбек (пользователь): «Нашёл WordPress» ничего не говорит владельцу
+    бизнеса — pain_points обязаны быть на языке пользы/потерь, а не техники."""
+    detected_bad = {
+        "has_cta": False, "has_form": False, "emails": [], "phones": [],
+        "response_ms": 2000, "has_reviews": False, "socials": {},
+        "meta_description": None, "https": False, "has_viewport": False,
+    }
+    points = company_scan._pain_points(detected_bad)
+    assert len(points) == 6  # обрезается до топ-6
+    joined = " ".join(points).lower()
+    assert "wordpress" not in joined and "cms" not in joined and "robots" not in joined
+    assert any("призыв" in p.lower() for p in points)
+
+
+def test_pain_points_empty_when_all_good():
+    detected_good = {
+        "has_cta": True, "has_form": True, "response_ms": 200,
+        "has_reviews": True, "socials": {"vk": "vk.com/x"},
+        "meta_description": "x", "https": True, "has_viewport": True,
+    }
+    assert company_scan._pain_points(detected_good) == []
+
+
+def test_scan_result_has_headline_and_pain_points_keys():
+    result = asyncio.run(company_scan.scan(""))
+    assert result["pain_points"] == []
+    assert result["headline"] == ""
+
+
+def test_ru_plural_agrees_with_number():
+    assert company_scan._ru_plural(1) == "точку роста"
+    assert company_scan._ru_plural(2) == "точки роста"
+    assert company_scan._ru_plural(5) == "точек роста"
+    assert company_scan._ru_plural(11) == "точек роста"
+    assert company_scan._ru_plural(21) == "точку роста"
+
+
 def test_understanding_domains_present_and_bounded():
     from src.office import understanding
     ctx.set_tenant("understanding_domains_unit")

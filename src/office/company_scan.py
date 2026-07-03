@@ -32,6 +32,28 @@ _CMS_MARKERS = {
 }
 _EMAIL_RE = re.compile(r"[\w.\-]+@[\w\-]+\.[a-zA-Zа-яё]{2,}", re.I)
 _PHONE_RE = re.compile(r"(?:\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}")
+_CTA_RE = re.compile(
+    r"(заказать|купить|оставить заявку|оставьте заявку|записаться|получить консультацию|"
+    r"узнать цену|рассчитать|order now|get started|book (a|now)|contact us|buy now|sign up)",
+    re.I,
+)
+_REVIEWS_RE = re.compile(r"(отзыв|testimonial|review)", re.I)
+_QUIZ_RE = re.compile(r"(квиз|quiz)", re.I)
+_FORM_RE = re.compile(r"<form\b", re.I)
+_VIEWPORT_RE = re.compile(r'name=["\']viewport["\']', re.I)
+
+
+def _ru_plural(n: int) -> str:
+    """«точку/точки/точек роста» (винительный падеж — «нашли N ...»)."""
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return "точек роста"
+    last = n % 10
+    if last == 1:
+        return "точку роста"
+    if 2 <= last <= 4:
+        return "точки роста"
+    return "точек роста"
 
 
 def _normalize_url(raw: str) -> str:
@@ -48,7 +70,7 @@ async def scan(url: str) -> dict:
     наружу — недоступный сайт тоже даёт полезный сигнал (findings об этом)."""
     url = _normalize_url(url)
     if not url:
-        return {"ok": False, "url": "", "findings": [], "detected": {}}
+        return {"ok": False, "url": "", "findings": [], "detected": {}, "pain_points": [], "headline": ""}
 
     detected: dict = {}
     findings: list[str] = []
@@ -62,7 +84,7 @@ async def scan(url: str) -> dict:
             return {
                 "ok": False, "url": url,
                 "findings": ["Сайт недоступен по этому адресу — уточним у клиента напрямую"],
-                "detected": {},
+                "detected": {}, "pain_points": [], "headline": "",
             }
 
         html = resp.text or ""
@@ -110,6 +132,12 @@ async def scan(url: str) -> dict:
         links_count = len(re.findall(r"<a\s", html, re.I))
         detected["links_on_page"] = links_count
 
+        detected["has_cta"] = bool(_CTA_RE.search(html))
+        detected["has_form"] = bool(_FORM_RE.search(html))
+        detected["has_reviews"] = bool(_REVIEWS_RE.search(html))
+        detected["has_quiz"] = bool(_QUIZ_RE.search(html))
+        detected["has_viewport"] = bool(_VIEWPORT_RE.search(html))
+
         favicon = bool(re.search(r'rel=["\'][^"\']*icon', html, re.I))
         detected["favicon"] = favicon
         if not favicon:
@@ -133,11 +161,43 @@ async def scan(url: str) -> dict:
             detected[key] = ok
             findings.append(f"{label}: {'найден' if ok else 'не найден'}")
 
-    return {"ok": True, "url": url, "findings": findings, "detected": detected}
+    pain_points = _pain_points(detected)
+    headline = f"Нашли {len(pain_points)} {_ru_plural(len(pain_points))} для вашего сайта" if pain_points \
+        else "Явных проблем не нашли — сайт в целом в порядке"
+    return {
+        "ok": True, "url": url, "findings": findings, "detected": detected,
+        "pain_points": pain_points, "headline": headline,
+    }
+
+
+# Технический факт → на что это влияет для ВЛАДЕЛЬЦА бизнеса, не для разработчика
+# (прод-находка: «Нашёл WordPress» ничего не говорит владельцу — важно не «что
+# стоит», а «что это стоит бизнесу»). Порядок — по убыванию важности для лидов.
+def _pain_points(detected: dict) -> list[str]:
+    points: list[str] = []
+    if not detected.get("has_cta"):
+        points.append("Нет чёткого призыва к действию — посетитель не понимает, что делать дальше")
+    if not detected.get("has_form") and not detected.get("emails") and not detected.get("phones"):
+        points.append("Не нашли способа оставить заявку или написать — часть посетителей просто уходит")
+    if detected.get("response_ms", 0) > 1500:
+        points.append("Сайт открывается медленно — часть посетителей закрывает вкладку, не дождавшись")
+    if not detected.get("has_reviews"):
+        points.append("На сайте нет отзывов — это снижает доверие к компании")
+    if not detected.get("socials"):
+        points.append("Не привязаны соцсети — сложнее возвращать посетителей и вести диалог")
+    if not detected.get("meta_description"):
+        points.append("Сайт слабо настроен для поиска — теряются бесплатные переходы из Google/Яндекс")
+    if not detected.get("https"):
+        points.append("Сайт без HTTPS — браузер может помечать его как небезопасный")
+    if not detected.get("has_viewport"):
+        points.append("Нет мобильной адаптации — доля мобильных посетителей уходит сразу")
+    return points[:6]
 
 
 def summary_line(scan_result: dict) -> str:
-    """Одна строка для брифа/памяти — кратко, для контекста воркеров."""
+    """Одна строка для брифа/памяти — кратко, для контекста воркеров. Включает
+    и технические факты (нужны разработчику/архитектору), и бизнес-боли
+    (нужны маркетингу/стратегу) — оба слоя читают один и тот же бриф."""
     if not scan_result or not scan_result.get("ok"):
         return ""
     d = scan_result.get("detected", {})
@@ -151,4 +211,8 @@ def summary_line(scan_result: dict) -> str:
     if d.get("phones"):
         bits.append("тел: " + d["phones"][0])
     url = scan_result.get("url", "")
-    return f"Автоскан сайта {url}: " + ("; ".join(bits) if bits else "минимум признаков, изучим детальнее")
+    line = f"Автоскан сайта {url}: " + ("; ".join(bits) if bits else "минимум признаков, изучим детальнее")
+    pain_points = scan_result.get("pain_points") or []
+    if pain_points:
+        line += ". Точки роста: " + "; ".join(pain_points)
+    return line

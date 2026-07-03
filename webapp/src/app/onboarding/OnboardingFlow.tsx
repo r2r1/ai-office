@@ -120,22 +120,38 @@ export function OnboardingFlow({ onDone }: Props) {
 
             {scanResult && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "left" }}>
-                <div style={{
-                  padding: "16px 18px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
-                  border: "1px solid var(--hairline-strong)", marginBottom: 16,
-                }}>
-                  {scanResult.ok ? (
-                    (scanResult.findings || []).map((f: string, i: number) => (
-                      <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.06 }}
-                        style={{ fontSize: 13, padding: "4px 0", color: "var(--text-dim)" }}>
-                        ✔ {f}
-                      </motion.div>
-                    ))
-                  ) : (
-                    <div style={{ fontSize: 13, color: "var(--muted)" }}>Не удалось изучить сайт — продолжим по вашим ответам.</div>
-                  )}
-                </div>
+                {scanResult.ok ? (
+                  <>
+                    <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>
+                      {scanResult.headline}
+                    </div>
+                    <div style={{
+                      padding: "16px 18px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
+                      border: "1px solid var(--hairline-strong)", marginBottom: 16,
+                    }}>
+                      {(scanResult.pain_points || []).length > 0 ? (
+                        scanResult.pain_points.map((f: string, i: number) => (
+                          <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: i * 0.06 }}
+                            style={{ fontSize: 13, padding: "5px 0", color: "var(--text-dim)" }}>
+                            ⚠ {f}
+                          </motion.div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
+                          Базовые проблемы не найдены — офис изучит остальное в работе.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{
+                    padding: "16px 18px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
+                    border: "1px solid var(--hairline-strong)", marginBottom: 16, fontSize: 13, color: "var(--muted)",
+                  }}>
+                    Не удалось изучить сайт — продолжим по вашим ответам.
+                  </div>
+                )}
                 <motion.button onClick={() => setPhase("mode")} whileTap={{ scale: 0.97 }}
                   style={{
                     width: "100%", padding: "12px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
