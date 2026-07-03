@@ -105,6 +105,20 @@ def _parse_economics(text: str) -> tuple[float | None, float | None]:
     return budget, avg
 
 
+# Ответ-отсылка вместо описания продукта: клиент поленился и написал «то же, что на
+# сайте». Прод-кейс: ниша «то же самое, что и на сайте» дошла до КАЖДОГО промпта,
+# воркеры не знали, что продаёт компания, и критик ВЫДУМАЛ бизнес («ремонт квартир
+# под ключ» для компании доходной недвижимости) — сайт продавал не то. При наличии
+# скана честный ответ есть в title/meta_description сайта клиента.
+_SELF_REF_MARKERS = ("то же", "тоже сам", "как на сайте", "см. сайт", "с сайта",
+                     "на сайте", "как у нас", "смотри сайт")
+
+
+def _is_self_referential(product: str) -> bool:
+    p = (product or "").strip().lower()
+    return not p or len(p) < 4 or any(m in p for m in _SELF_REF_MARKERS)
+
+
 def build_brief_structured(mode: str, answers: list[dict], scan_result: dict | None = None) -> dict:
     """
     Детерминированно собирает бриф из ответов интервью — БЕЗ вызова LLM.
@@ -121,6 +135,15 @@ def build_brief_structured(mode: str, answers: list[dict], scan_result: dict | N
     revenue = by_dim.get("revenue", "")
     goal = by_dim.get("goal", "")
     constraints = by_dim.get("constraints", "")
+
+    # Ленивый ответ «то же, что на сайте» → подставляем РЕАЛЬНОЕ описание бизнеса
+    # из автоскана (meta description информативнее title). Сырой ответ сохраняем
+    # рядом — вдруг клиент имел в виду что-то ещё.
+    if _is_self_referential(product) and scan_result and scan_result.get("ok"):
+        d = scan_result.get("detected") or {}
+        from_site = (d.get("meta_description") or d.get("title") or "").strip()
+        if from_site:
+            product = from_site if not product else f"{from_site} (клиент: «{product}»)"
 
     if mode == "idea":
         # Цель «идеи» — всегда вердикт о жизнеспособности (Research + Finance + Marketing).

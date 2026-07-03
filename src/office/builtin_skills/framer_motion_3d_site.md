@@ -2,7 +2,7 @@
 id: framer_motion_3d_site
 title: 3D-лендинг на Framer Motion
 description: Премиальный одностраничник с настоящими 3D-эффектами и физикой движения на React + framer-motion, без шага сборки (esm.sh).
-keywords: 3d, 3д, framer, фреймер, motion, анимаци, анимир, паралл, parallax, вау, премиальн, интерактивн, tilt
+keywords: 3d, 3д, framer, фреймер, react, реакт, motion, анимаци, анимир, паралл, parallax, вау, премиальн, интерактивн, tilt
 roles: designer, developer
 ---
 СКИЛЛ: премиальный 3D-лендинг с ЖИВЫМИ интерактивными эффектами.

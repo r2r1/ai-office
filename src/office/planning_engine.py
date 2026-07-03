@@ -45,6 +45,12 @@ CEO_REASSESS_EVERY = 3   # CEO пересматривает структуру �
 _last_leader_sig: dict[str, tuple[str, int]] = {}
 _LEADER_REPEAT_LIMIT = 3  # столько одинаковых решений подряд → пауза/эскалация
 
+# Анти-шум delegate: подпись доски отдела при ПОСЛЕДНЕМ обновлении цели CEO.
+# Прод-кейс: пока единственный исполнитель 40+ циклов занят одной задачей, CEO
+# каждый гейт «обновлял цель отдела» (28 раз за прогон) — LLM переформулировала
+# ту же мысль, состояние не менялось, лента и токены засорялись.
+_last_delegate_sig: dict[str, str] = {}
+
 
 def forget_tenant(tid: str) -> None:
     """Чистит анти-цикл состояние этого модуля (вызывается loop.forget_tenant)."""
@@ -52,6 +58,8 @@ def forget_tenant(tid: str) -> None:
     for k in [k for k in _last_leader_sig
               if k.startswith(prefix) or k.startswith(f"board:{tid}:")]:
         _last_leader_sig.pop(k, None)
+    for k in [k for k in _last_delegate_sig if k.startswith(prefix)]:
+        _last_delegate_sig.pop(k, None)
 
 
 async def _set_progress_note(note: str, publish) -> None:
@@ -481,8 +489,17 @@ async def apply_company_decision(decision: dict, publish) -> None:
         org.close_department(dept)
         await publish({"type": "system", "text": f"📁 CEO закрыл «{org.catalog()[dept]['name']}»"})
     elif action == "delegate" and dept in org.catalog():
-        org.set_objective(dept, decision.get("objective") or "")
-        await publish({"type": "system", "text": f"🎯 CEO обновил цель отдела «{org.catalog()[dept]['name']}»"})
+        # Обновление цели имеет смысл, только если состояние отдела ИЗМЕНИЛОСЬ с
+        # прошлого delegate (задача закрылась/провалилась/добавилась). Иначе это
+        # переформулировка того же — шум в ленте и потраченный вызов (см. _last_delegate_sig).
+        board_sig = plan.board_summary(dept) if plan.is_generated() else ""
+        sig_key = f"{ctx.get_tenant()}:delegate:{dept}"
+        if board_sig and _last_delegate_sig.get(sig_key) == board_sig:
+            pass  # доска не изменилась — «новая цель» ничего не меняет, молча пропускаем
+        else:
+            _last_delegate_sig[sig_key] = board_sig
+            org.set_objective(dept, decision.get("objective") or "")
+            await publish({"type": "system", "text": f"🎯 CEO обновил цель отдела «{org.catalog()[dept]['name']}»"})
 
     # Observability: фиксируем срез мира ПОСЛЕ применения решения и привязываем к нему.
     # world.diff(этот срез, предыдущий) = «что решение изменило в мире» — по нему

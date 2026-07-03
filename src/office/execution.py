@@ -35,6 +35,7 @@ MAX_TASK_ATTEMPTS = 3  # провалов приёмки до блокировк
 # ── Состояние живости в памяти процесса (ключ «tenant:agent_id», не голый id) ──
 _thinking_since: dict[str, float] = {}   # когда агент начал «думать» (watchdog)
 _agent_task: dict[str, str] = {}         # какую задачу плана он делает
+_agent_coro: dict[str, asyncio.Task] = {}  # корутина run_task — для отмены зомби watchdog'ом
 _model_fail_count: dict[str, int] = {}   # подряд ошибок «модель недоступна»
 _current_ms: dict[str, str] = {}         # tid -> id текущего этапа (для атрибуции результата)
 
@@ -59,7 +60,22 @@ def forget_tenant(tid: str) -> None:
     for d in (_thinking_since, _agent_task, _model_fail_count):
         for k in [k for k in d if k.startswith(prefix)]:
             d.pop(k, None)
+    for k in [k for k in _agent_coro if k.startswith(prefix)]:
+        t = _agent_coro.pop(k, None)
+        if t and not t.done():
+            t.cancel()
     _current_ms.pop(tid, None)
+
+
+def touch(agent_id: str) -> None:
+    """Отметка «агент реально работает» — вызывается из llm.run_agent после каждого
+    ответа API/инструмента (through agent_factory). Без неё watchdog считал ДОЛГУЮ
+    законную работу (цепочка правок сайта > MAX_THINK_SECS суммарно) зависанием,
+    сбрасывал агента и переназначал задачу — при живой старой корутине это давало
+    ДВУХ исполнителей, параллельно переписывающих site/ (реальный прод-кейс)."""
+    key = tk(agent_id)
+    if key in _thinking_since:
+        _thinking_since[key] = time.time()
 
 
 def engagement_needs_bot() -> bool:
@@ -318,7 +334,12 @@ async def assign(agent_id: str, role: str, task: str, publish, skill: str = "",
     _thinking_since[tk(agent_id)] = time.time()
     if task_id and plan.is_generated():
         _agent_task[tk(agent_id)] = task_id  # раньше ставили call-sites цикла перед assign
-    asyncio.create_task(run_task(agent_id, role, task, publish, skill, department, objective, task_id))
+    # Хэндл корутины сохраняем: watchdog обязан УБИТЬ зомби при сбросе агента, а не
+    # только пометить его idle — иначе старая корутина продолжает писать файлы и
+    # закрывать задачи параллельно с новым исполнителем (реальный прод-кейс: t2
+    # «принята» дважды, designer и developer затирали site/index.html друг друга).
+    _agent_coro[tk(agent_id)] = asyncio.create_task(
+        run_task(agent_id, role, task, publish, skill, department, objective, task_id))
 
 
 async def run_task(agent_id: str, role: str, task: str, publish, skill: str = "",
@@ -369,6 +390,10 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 from src.office import design_style
                 b = brief.get()
                 design_style.ensure_style_line(b.get("niche", ""), b.get("audience", ""))
+                # Та же механика для стека: без детерминированной подсказки сайт
+                # ВСЕГДА строился на vanilla HTML (жалоба владельца) — теперь ниша
+                # стабильно получает один из 4 стеков (vanilla/React/Vue/Alpine).
+                design_style.ensure_stack_line(b.get("niche", ""), b.get("audience", ""))
             ctx_task = task_with_context(role, task, skill, department=department, objective=objective)
             fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill,
                                       model=policy["model"])
@@ -492,6 +517,10 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
     finally:
         _thinking_since.pop(tk(agent_id), None)
         _agent_task.pop(tk(agent_id), None)
+        # Снимаем СВОЙ хэндл (identity-check): если watchdog уже переназначил задачу
+        # и под ключом лежит НОВАЯ корутина — её не трогаем.
+        if _agent_coro.get(tk(agent_id)) is asyncio.current_task():
+            _agent_coro.pop(tk(agent_id), None)
 
 
 async def heal_stuck_agents(publish) -> None:
@@ -517,6 +546,12 @@ async def heal_stuck_agents(publish) -> None:
         aid = key[len(prefix):]
         if now - since > MAX_THINK_SECS:
             _thinking_since.pop(key, None)
+            # Зомби-корутину ОТМЕНЯЕМ, а не просто «забываем»: иначе она продолжает
+            # писать файлы и закрывать задачи параллельно с новым исполнителем
+            # (llm.CALL_TIMEOUT ограничивает один вызов API, но не всю run_task).
+            zombie = _agent_coro.pop(key, None)
+            if zombie and not zombie.done():
+                zombie.cancel()
             registry.update_status(aid, "idle")
             state.save_last_run(aid)  # короткий cooldown перед повтором
             tid = _agent_task.pop(key, None)

@@ -834,6 +834,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         _code_exec_handlers = ({"execute_code": _handle_execute_code}
                                if workspace_module.code_execution_allowed() else {})
 
+        def _touch_liveness() -> None:
+            # Каждый ответ API/инструмента = «агент жив»: продлеваем watchdog, чтобы
+            # длинная ЗАКОННАЯ работа (десяток правок сайта) не считалась зависанием
+            # и не порождала второго исполнителя при живом первом.
+            try:
+                from src.office import execution
+                execution.touch(agent_id)
+            except Exception:
+                pass
+
         result = await llm.run_agent(
             system=system,
             user=task,
@@ -844,6 +854,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             use_search=True,
             publish=_publish_and_log,
             agent_id=agent_id,
+            on_activity=_touch_liveness,
             extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _ASK_COLLEAGUE_TOOL,
                          _RAISE_EVENT_TOOL, _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL,
                          _READ_OFFICE_CHAT_TOOL,

@@ -149,9 +149,19 @@ def task_context(role: str, task: str, skill: str = "",
     tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:3000]}\n" if tdd else ""
     lessons_section = lessons.context_block(role)
     knowledge_section = knowledge.context_block(task, department=department)
+    # Рекомендованный стек сайта — детерминированная ротация по нише (design_style):
+    # без неё designer/developer всегда сваливались в один и тот же vanilla-HTML путь
+    # («сайт всегда делается на html» — жалоба владельца). Формулировка стека
+    # попадает в keywords нужного скилла при use_skill.
+    stack_line = ""
+    if role in ("designer", "developer"):
+        from src.office import design_style
+        stack_line = (f"Рекомендованный стек сайта проекта: {design_style.pick_stack_for(niche, audience)}. "
+                      "Строишь/правишь сайт — вызови use_skill, НАЗВАВ этот стек, и работай по плейбуку. "
+                      "Существующий сайт на другом стеке НЕ переписывай ради смены стека.\n")
     return (
         f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
-        f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}"
+        f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}{stack_line}"
         f"Твоя задача от руководителя: {task}\n"
         f"{tdd_section}{knowledge_section}{lessons_section}\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "

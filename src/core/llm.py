@@ -161,6 +161,13 @@ def _fallback_model(failed: str) -> str:
     return "glm-4.5-flash" if failed != "glm-4.5-flash" else ""
 
 
+# Инструменты, у которых ПОВТОРНЫЙ идентичный вызов подряд не даёт новой информации.
+# Реальный прод-кейс: developer на дешёвой модели 8 раз подряд читал один и тот же
+# site/index.html (tok_in ~8k на каждый повтор) и сжёг итерации, не сделав правку.
+_IDEMPOTENT_TOOLS = frozenset({"read_file", "list_files", "list_integrations",
+                               "get_connection", "use_skill", "find_skills"})
+
+
 async def run_agent(
     system: str,
     user: str,
@@ -174,6 +181,7 @@ async def run_agent(
     max_iterations: int = 8,
     history: Optional[list[dict[str, str]]] = None,
     max_searches: int = 5,
+    on_activity: Optional[Callable[[], None]] = None,
 ) -> str:
     """
     Запускает агентный цикл: LLM думает, вызывает инструменты, отвечает.
@@ -182,6 +190,9 @@ async def run_agent(
     tool_handlers   — {имя_инструмента: async-функция(args)->str} для extra_tools.
     history         — предыдущие реплики диалога [{role, content}] для памяти.
     max_searches    — жёсткий лимит web_search за один запуск (экономия токенов/времени).
+    on_activity     — колбэк «агент жив» после каждого ответа API/инструмента: длинная
+                      ЗАКОННАЯ работа (цепочка правок сайта) продлевает watchdog, иначе
+                      он сбрасывал реально работающего агента как зависшего.
     """
     client = _client()
     model = model or DEFAULT_MODEL
@@ -198,6 +209,8 @@ async def run_agent(
     searches_done = 0
     fellback = False  # фолбэк на доступную модель делаем максимум один раз за запуск
     seen_queries: set[str] = set()  # анти-цикл: не искать одно и то же дважды
+    last_call_sig = ""   # анти-цикл: предыдущий tool-вызов (имя+аргументы)
+    dup_call_count = 0   # сколько раз подряд повторился идентичный вызов
     in_tokens = 0
     out_tokens = 0
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
@@ -260,9 +273,20 @@ async def run_agent(
                 except Exception:
                     pass
         msg = resp.choices[0].message
+        if on_activity:
+            try:
+                on_activity()
+            except Exception:
+                pass
 
         if msg.content and msg.content.strip():
-            final_text = msg.content
+            # Текст ВМЕСТЕ с tool-вызовами — реплика процесса («Давайте посмотрим…»),
+            # НЕ результат. Раньше она попадала в final_text, и при исчерпании итераций
+            # сдавалась как отчёт (прод-кейс: задача «сдана» текстом «Давайте посмотрим
+            # на структуру сайта», сайт опубликован с этой заметкой как описанием правки).
+            # Результат — только текст БЕЗ tool-вызовов; иначе сработает wrap-up ниже.
+            if not msg.tool_calls:
+                final_text = msg.content
             if publish:
                 snippet = msg.content[:150].replace("\n", " ").strip()
                 if snippet:  # не публикуем пустые «мысли» (дешёвые модели их плодят)
@@ -297,6 +321,26 @@ async def run_agent(
                     "role": "tool", "tool_call_id": tc.id,
                     "content": ("Файл НЕ сохранён: ответ оборвался по лимиту длины, content пустой. "
                                 "Напиши файл КОРОЧЕ или раздели на несколько файлов (CSS/JS отдельно)."),
+                })
+                continue
+
+            # Анти-цикл идентичных вызовов: тот же инструмент с теми же аргументами
+            # подряд (read_file одного файла 8 раз — реальный прод-кейс на дешёвой
+            # модели) — не выполняем повторно, а возвращаем короткое напоминание.
+            # Любой ДРУГОЙ вызов (в т.ч. write_file) сбрасывает счётчик — легитимный
+            # паттерн «read → write → read» не задет.
+            call_sig = f"{name}|{json.dumps(args, sort_keys=True, ensure_ascii=False)[:500]}"
+            if call_sig == last_call_sig:
+                dup_call_count += 1
+            else:
+                last_call_sig, dup_call_count = call_sig, 0
+            if name in _IDEMPOTENT_TOOLS and dup_call_count >= 1:
+                messages.append({
+                    "role": "tool", "tool_call_id": tc.id,
+                    "content": (f"Ты только что вызывал {name} с теми же аргументами — "
+                                "результат НЕ изменился. НЕ повторяй вызов: используй уже "
+                                "полученные данные и сделай следующий шаг (правка через "
+                                "write_file или итоговый отчёт о сделанном)."),
                 })
                 continue
 
@@ -339,6 +383,11 @@ async def run_agent(
                 "tool_call_id": tc.id,
                 "content": result[:2500],
             })
+            if on_activity:
+                try:
+                    on_activity()
+                except Exception:
+                    pass
 
     # Модель уложилась в max_iterations, ни разу не написав текст — только tool-calls
     # (реальный кейс: marketer/developer/integrator на нескольких прогонах сдавали

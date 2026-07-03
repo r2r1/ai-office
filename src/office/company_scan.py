@@ -221,6 +221,12 @@ def summary_line(scan_result: dict) -> str:
         return ""
     d = scan_result.get("detected", {})
     bits = []
+    # title/meta_description — САМЫЕ бизнес-значимые факты скана (что компания
+    # реально делает); без них воркеры знали CMS сайта, но не бизнес клиента.
+    if d.get("title"):
+        bits.append(f"заголовок сайта: «{d['title']}»")
+    if d.get("meta_description"):
+        bits.append(f"описание: {d['meta_description'][:160]}")
     if d.get("cms"):
         bits.append(d["cms"])
     if d.get("socials"):

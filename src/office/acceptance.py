@@ -18,10 +18,34 @@ Acceptance Layer — задача закрывается ТОЛЬКО приём
 Вердикт пишется в саму задачу (поле acceptance) — виден в UI и History.
 """
 
+import re
+
 from src.office import critic, workspace
 
 # Роли, чья сдача обязана проходить Build-проверку кода
 _CODING_ROLES = ("developer", "designer", "integrator")
+
+# Сдача-«реплика процесса» — модель отдала рассуждение вместо отчёта о сделанном
+# (прод-кейс: задачи закрывались текстами «Давайте посмотрим на структуру сайта…»,
+# «Теперь проверим файл offer.md…», «мне нужно уточнить у клиента…» — и сайт
+# публиковался с этим текстом как описанием правки). Защита в llm.run_agent
+# (преамбула ≠ результат) — первая линия; это — вторая, на случай если wrap-up
+# вызов тоже вернул болтовню.
+_PREAMBLE_RE = re.compile(
+    r"(давайте\s+(посмотр|провер|изуч|начн)|теперь\s+(посмотр|провер|давайте)|"
+    r"сейчас\s+(посмотрю|проверю|изучу)|мне нужно уточнить|для начала посмотр)",
+    re.IGNORECASE)
+
+
+def _is_process_chatter(result: str) -> bool:
+    """Сдача выглядит как реплика процесса, а не отчёт: обрывается на «:» (подводка
+    к так и не сделанному) или короткий текст с «давайте посмотрим/проверим»."""
+    r = (result or "").strip()
+    if not r:
+        return False
+    if r.endswith(":"):
+        return True
+    return len(r) < 400 and bool(_PREAMBLE_RE.search(r))
 
 
 def _site_touched_since(ts: float) -> bool:
@@ -74,6 +98,10 @@ def check(task_title: str, role: str, result: str,
     # L5 (базовый): пустая сдача — не результат (обрыв/только tool-calls)
     if not (result or "").strip():
         problems.append("пустая сдача — агент не вернул результат")
+        levels["acceptance"] = "fail"
+    elif _is_process_chatter(result):
+        problems.append("сдача — реплика процесса («давайте посмотрим…»/обрыв на «:»), "
+                        "а не отчёт: напиши, ЧТО сделано и в каких файлах")
         levels["acceptance"] = "fail"
 
     # L1 Specification: критерий готовности задачи сверяется с контрактом приёмки
