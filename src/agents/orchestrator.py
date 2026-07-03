@@ -2,7 +2,7 @@
 Orchestrator (CEO) — вершина иерархии офиса.
 
 Он НЕ делает работу руками и НЕ ставит задачи людям — задачи распределяет
-детерминированная маршрутизация плана (loop._run_leaders). Что осталось за CEO:
+детерминированная маршрутизация плана (planning_engine.run_leaders). Что осталось за CEO:
   • plan_milestones / plan_tasks — разбить путь к цели на этапы и план-граф;
   • decide_company — структура компании: открыть/закрыть отдел, цель отделу;
   • interpret_directive — триаж сообщений владельца (Intent → правки плана);
@@ -25,9 +25,10 @@ from src.office import models as models_module, org as org_module
 from src.office import prompt_builder
 
 # Документированный инвариант «на роль — один агент» (CLAUDE.md §3.2). Enforcement
-# живёт в call-sites: registry.has_role (_hire_leader), leaders.decide («уже в отделе»),
-# детерминированная маршрутизация loop._run_leaders. Прежний LLM-решатель уровня
-# агентов (decide) удалён как мёртвый код — plan-driven цикл его не вызывал.
+# живёт в call-sites: registry.has_role (planning_engine.hire_leader), leaders.decide
+# («уже в отделе»), детерминированная маршрутизация planning_engine.run_leaders.
+# Прежний LLM-решатель уровня агентов (decide) удалён как мёртвый код — plan-driven
+# цикл его не вызывал.
 MAX_PER_ROLE = 1
 
 

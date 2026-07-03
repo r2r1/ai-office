@@ -723,6 +723,65 @@ DoD: директива проходит propose→check→apply|reject, не п
 поведенческой регрессии в run_task/assign остаётся, но код перенесён дословно
 (diff — только имена: `_job`→`run_task`, `_tk`→`tk`, доступ к состоянию через модуль).
 
+## 🎯 2026-07-03 (Phase 6, шаг 3 — финал) — loop.py < 400: DoD достигнут
+
+Завершение расслоения. Вынесены маршрутизация лидеров, CEO-оркестрация и
+единоразовый bootstrap — последние крупные блоки бог-модуля.
+
+- **Новый `office/bootstrap.py`** — единоразовый запуск тенанта: `hire_initial`
+  (наём CEO+штаба), `run` (ресёрч→стратегия, был `_bootstrap`), `strategy_text`/
+  `save_strategy` (были `_strategy_text`/`_save_strategy`). Собственный
+  `BOOTSTRAP_STEP_TIMEOUT` (был в loop.py) — на него по-прежнему ссылается
+  архитектор-шаг, оставшийся в `_run_office` (`bootstrap.BOOTSTRAP_STEP_TIMEOUT`).
+- **`office/planning_engine.py` расширен** маршрутизацией и CEO-оркестрацией:
+  `orchestrate`/`apply_company_decision`/`run_leaders`/`hire_leader`/`hire_and_run`
+  (были `_orchestrate`/`_apply_company_decision`/`_run_leaders`/`_hire_leader`/
+  `_hire_and_run`) + `verify_and_fix_if_needed` (был `_verify_and_fix_if_needed` —
+  попутно убран мёртвый параметр `strategy`, нигде не читался в теле). Модуль
+  теперь владеет анти-цикл состоянием `_last_leader_sig`/`_LEADER_REPEAT_LIMIT`
+  (было в loop.py) — тот же класс SSOT-долга, что живость исполнения в
+  `execution.py` (engineering-principles №2, признано и отложено «после пятёрки
+  ядра» согласно BOS §13). Docstring модуля переписан честно: он больше не «только
+  чистые функции без побочных эффектов» — теперь два слоя (чистые помощники +
+  маршрутизация с publish/LLM), последняя тестируется только живым прогоном.
+- `_goal()` (тонкий алиас `brief.effective_goal()`) убран — инлайнен на местах
+  вызова (тот же приём, что уже применялся при выносе `execution.py`).
+- **`loop.py`: 764 → 324 строки. DoD `< 400` из дорожной карты выполнен.**
+  Импорты вычищены: из loop.py ушли `org/lessons/critic/workspace/sites/knowledge/
+  trust/decisions/autonomy/initiatives/board/models_module` и agent-модули
+  `researcher/strategist/leaders/agent_factory` — они были нужны только
+  перенесённому коду и теперь импортируются самими `bootstrap.py`/
+  `planning_engine.py`. loop.py импортирует три подсистемы одностороннее
+  (bootstrap/planning_engine/execution → ни одна из них не импортирует loop).
+- **Внешний потребитель обновлён**: `server.py` (`_steer_from_chat`) звал
+  `office_loop._strategy_text()` — переведён на `office_bootstrap.strategy_text()`.
+  Комментарии в `orchestrator.py`, ссылавшиеся на `loop._run_leaders`
+  (теперь неверно), поправлены на `planning_engine.run_leaders`.
+- **Новые тесты** в `tests/test_planning_engine.py`: `verify_and_fix_if_needed`
+  (дедуп fix-задачи + критичность через реальный `workspace`/`critic`, без LLM),
+  `hire_leader` (регистрация + анти-дубль), `forget_tenant` (чистит только свой
+  тенант). `orchestrate`/`run_leaders`/`apply_company_decision` НЕ покрыты юнитами
+  осознанно — вызывают `orchestrator.decide_company`/`leaders.decide` (LLM) и/или
+  планируют фоновый `execution.assign` (реальный LLM-вызов в фоне) — тестируются
+  только живым прогоном офиса.
+- **Итог по обоим тест-файлам: 11/11 проходят** (было 7/7 до этого среза).
+
+Проверено: py_compile всего дерева, импорт `server`+`loop`+`execution`+
+`planning_engine`+`bootstrap`, repo-wide grep на остаточные ссылки на все
+перенесённые приватные имена (`loop._run_leaders`/`_hire_leader`/`_orchestrate`/
+`_apply_company_decision`/`_bootstrap`/`_hire_initial`/`_hire_and_run`/
+`_verify_and_fix_if_needed`/`_strategy_text`/`_save_strategy`/`_last_leader_sig`) —
+только исправленные комментарии, кода не осталось. LLM не вызывался ($0).
+
+**Phase 6 закрыта. Дорожная карта (`docs/дорожная_карта.md`) пройдена целиком:
+Phase 0 → 0.5 → 1 → 2 → 3 → 4 → 5 → 6.** Осознанно отложенное (не входило в DoD
+ни одной фазы, зафиксировано ранее с обоснованием): `agent_id → worker_id`
+(терминологическая миграция схемы+фронта), перевод `decide_company` (структура
+отделов) через тот же `decision_engine`, что и директивы владельца (Phase 5 закрыла
+только путь директивы, оргрешения остаются прямой мутацией — низкий риск,
+кандидат на объединение в отдельном шаге), Phase X (Learning Engine) — по дизайну
+не реализуется сейчас.
+
 ---
 
 ## Запуск / проверка

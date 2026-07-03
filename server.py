@@ -15,7 +15,7 @@ from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.office import bus, registry, loop as office_loop, demo, chat, brief, state, progress, connections
+from src.office import bus, registry, loop as office_loop, bootstrap as office_bootstrap, demo, chat, brief, state, progress, connections
 from src.office import memory
 from src.office import threads as threads_module
 from src.office import questions as questions_module
@@ -1425,7 +1425,7 @@ async def _steer_from_chat(text: str) -> None:
         goal = b.get("goal", "") or brief.summary()
         niche = b.get("niche", "")
         audience = b.get("audience", "")
-        strategy = office_loop._strategy_text()
+        strategy = office_bootstrap.strategy_text()
         ms = milestones.all_stages()
         try:
             open_d = org.open_departments()

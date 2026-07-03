@@ -1,26 +1,63 @@
 """
 Planning Engine — планирование и маршрутизация как отдельная подсистема (BOS §12).
 
-Расслоение loop.py (Phase 6): чистые, детерминированные функции «есть ли ход»,
-«свободен ли работник», «готовность отдела» и детерминированный фолбэк-план вынесены
-из бог-модуля цикла. Здесь НЕТ мутабельного состояния живости (watchdog/futures) и
-НЕТ замыканий цикла — только чтение мира (plan/org/registry/state), поэтому модуль
-покрывается unit-тестами без поднятия полного офис-цикла.
+Расслоение loop.py (Phase 6). Два слоя внутри модуля:
+
+  1) ЧИСТЫЕ детерминированные функции чтения мира (без publish, без побочных
+     эффектов) — `fallback_plan`, `has_actionable_move`, `dept_actionable`,
+     `free_worker_of_role`, `has_orphan_tasks`. Покрыты unit-тестами без
+     поднятия офис-цикла.
+  2) МАРШРУТИЗАЦИЯ и CEO-оркестрация — `orchestrate`, `apply_company_decision`,
+     `run_leaders`, `hire_leader`, `hire_and_run`, `verify_and_fix_if_needed`.
+     Эти функции публикуют события и вызывают `execution.assign`/LLM-агентов —
+     поведенчески тестируются только живым прогоном (нет здесь моков LLM).
+     Владеют анти-цикл состоянием `_last_leader_sig` (повтор решения лидера) —
+     тот же признанный SSOT-долг, что у `execution._thinking_since`
+     (engineering-principles.md №2: вынос живости из памяти процесса — после
+     пятёрки ядра BOS).
 
   fallback_plan(goal)               — детерминированный план, когда LLM недоступна
   has_actionable_move()             — есть ли вообще ход у офиса на этом цикле
   dept_actionable(dept_id, now)     — есть ли ход у отдела
   free_worker_of_role(dept, role,…) — свободный работник роли
   has_orphan_tasks()                — есть ли задачи без обслуживающего отдела
+  orchestrate(...)                  — CEO-тир + лидер-тир одного цикла
+  apply_company_decision(...)       — применить решение CEO об отделах/вехах
+  run_leaders(...)                  — маршрутизация задач лидерами отделов
+  hire_leader/hire_and_run(...)     — наём лидера / наём + назначение работника
+  verify_and_fix_if_needed(...)     — финальная проверка сайта перед завершением
+  forget_tenant(tid)                — чистит анти-цикл состояние тенанта
 """
 
 import os
 import time
 
-from src.office import plan, org, registry, state
+from src.office import (plan, org, registry, state, milestones, critic, brief,
+                        initiatives, decisions, board, events as events_mod, execution)
+from src.agents import orchestrator, leaders
+from src.saas import context as ctx
 
 # Антидребезг живости работника (был в loop.py; сюда переехал вместе с потребителями).
 AGENT_COOLDOWN_SECS = int(os.getenv("AGENT_COOLDOWN_SECS", "25"))
+CEO_REASSESS_EVERY = 3   # CEO пересматривает структуру компании раз в N циклов (экономия токенов)
+
+# Анти-цикл: подпись последнего решения лидера и счётчик повторов (per tenant+dept).
+_last_leader_sig: dict[str, tuple[str, int]] = {}
+_LEADER_REPEAT_LIMIT = 3  # столько одинаковых решений подряд → пауза/эскалация
+
+
+def forget_tenant(tid: str) -> None:
+    """Чистит анти-цикл состояние этого модуля (вызывается loop.forget_tenant)."""
+    prefix = f"{tid}:"
+    for k in [k for k in _last_leader_sig
+              if k.startswith(prefix) or k.startswith(f"board:{tid}:")]:
+        _last_leader_sig.pop(k, None)
+
+
+async def _set_progress_note(note: str, publish) -> None:
+    payload = milestones.progress_payload()
+    payload["note"] = note
+    await publish({"type": "progress", **payload})
 
 
 def fallback_plan(goal: str) -> list[dict]:
@@ -122,3 +159,338 @@ def free_worker_of_role(dept_id: str, role: str, now: float):
             continue
         return a
     return None
+
+
+async def verify_and_fix_if_needed(publish) -> bool:
+    """Финальная верификация: если сайт есть и у него критические проблемы —
+    добавляем fix-задачу на доску вместо того чтобы объявить работу готовой.
+    Возвращает True если задача добавлена (офис продолжит работу)."""
+    problems = critic.check_site()
+    critical = [p for p in problems if critic.is_critical(p)]
+    if not critical:
+        return False
+    # Дедуп по НЕзакрытым fix-задачам: done не глушит новую попытку (иначе одна
+    # выполненная доработка навсегда маскировала бы оставшиеся критические
+    # проблемы); blocked глушит (ждём владельца, не плодим дубли). Бесконечный
+    # цикл исключён эскалацией приёмки: 3 провала → задача блокируется сама.
+    crit_text = "; ".join(critic.text_of(p) for p in critical[:2])
+    fix_title = "Исправить критические проблемы сайта: " + crit_text[:120]
+    if any("исправить критические" in (t.get("title", "").lower())
+           and t.get("status") in ("pending", "in_progress", "blocked")
+           for t in plan.all_tasks()):
+        return False  # доработка уже в очереди/в работе/у владельца — не дублируем
+    await publish({"type": "system",
+                   "text": f"🔍 Финальная проверка нашла проблемы: {crit_text[:100]} — "
+                           "добавляю задачу на исправление"})
+    plan.add_task(fix_title, "developer",
+                  "форма шлёт на /api/site-lead, сайт открывается без ошибок",
+                  requested_by="orchestrator_1")
+    return True
+
+
+async def hire_leader(dept_id: str, objective: str, publish) -> None:
+    role = org.lead_role(dept_id)
+    if registry.has_role(role):
+        return
+    agent_id = f"{role}_1"
+    rec = registry.register(agent_id, role, objective[:100],
+                            department=dept_id, manager="orchestrator_1")
+    if rec:
+        await publish({"type": "hired", "agent_id": agent_id, "role": role,
+                       "desk": rec.desk, "task": objective[:100]})
+
+
+async def hire_and_run(role: str, task: str, publish, skill: str = "",
+                       department: str = "", manager: str = "", task_id: str = "") -> None:
+    existing_count = sum(1 for a in registry.all_agents() if a.role == role)
+    agent_id = f"{role}_{existing_count + 1}"
+    full_task = f"[Скилл: {skill}] {task}" if skill else task
+    rec = registry.register(agent_id, role, full_task, department=department, manager=manager)
+    if rec:
+        await publish({"type": "hired", "agent_id": agent_id, "role": role,
+                       "desk": rec.desk, "task": full_task[:100], "skill": skill})
+        objective = org.state_of(department).get("objective", "") if department else ""
+        if task_id and plan.is_generated():
+            plan.assign(task_id, agent_id)
+        await execution.assign(agent_id, role, task, publish, skill=skill,
+                      department=department, objective=objective, task_id=task_id)
+    else:
+        await publish({"type": "system", "text": f"Не удалось зарегистрировать агента {agent_id}"})
+
+
+async def run_leaders(goal: str, ms: list, publish) -> None:
+    now = time.time()
+    for dept_id in org.open_departments():
+        lead = org.lead_id(dept_id)
+        if not lead or not dept_actionable(dept_id, now):
+            continue
+
+        objective = org.state_of(dept_id).get("objective", "")
+        ready = plan.ready_for_department(dept_id) if plan.is_generated() else []
+
+        # Лидер ОТСЛЕЖИВАЕТ доску своего отдела (видимо в ленте и в задаче лидера).
+        if plan.is_generated():
+            summary = plan.board_summary(dept_id)
+            sig_key = f"board:{ctx.get_tenant()}:{dept_id}"
+            if _last_leader_sig.get(sig_key, ("", 0))[0] != summary:
+                _last_leader_sig[sig_key] = (summary, 0)
+                await publish({"type": "speech", "agent_id": lead,
+                               "text": f"📋 Доска отдела: {summary}"})
+
+        # ---- ДЕТЕРМИНИРОВАННЫЙ ПУТЬ (без LLM) — главный ускоритель ----
+        # План даёт конкретные задачи отдела — маршрутизируем сами, не дёргая модель
+        # лидера каждый цикл (в логе CTO сделал 119 пустых вызовов «жду»).
+        if ready:
+            member_roles = org.member_roles(dept_id)
+            handled = False
+            # Мьютекс артефакта: пока одна сайт-задача в работе, вторую НЕ назначаем —
+            # параллельные designer/developer переписывали site/index.html целиком и
+            # затирали друг друга («последний победил», 3D-версия исчезала).
+            site_busy = plan.site_task_in_progress()
+            if site_busy:
+                ready = [t for t in ready if not plan.touches_site(t)]
+            # 1) Назначаем первую готовую задачу, под которую есть свободный работник.
+            for t in ready:
+                free = free_worker_of_role(dept_id, t.get("role", ""), now)
+                if free:
+                    task_txt = t.get("title", "")
+                    if t.get("done_criterion"):
+                        task_txt += f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}"
+                    if t.get("last_feedback"):
+                        # Повторная попытка после провала приёмки: исполнитель видит,
+                        # ЧТО именно не прошло, а не решает задачу вслепую заново.
+                        task_txt += f"\n{t['last_feedback']}"
+                    plan.assign(t["id"], free.agent_id)  # доска: взято в работу
+                    await execution.assign(free.agent_id, free.role, task_txt, publish,
+                                  department=dept_id, objective=objective, task_id=t["id"])
+                    handled = True
+                    break
+            if handled:
+                continue
+            # 2) Никто не свободен — нанимаем недостающую роль под готовую задачу.
+            present = {a.role for a in registry.members_of(dept_id)}
+            for t in ready:
+                role = t.get("role", "")
+                if role in member_roles and role not in present:
+                    crit = f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}" if t.get("done_criterion") else ""
+                    await hire_and_run(role, t.get("title", f"Задачи {role}") + crit,
+                                        publish, department=dept_id, manager=lead, task_id=t["id"])
+                    handled = True
+                    break
+            # 3) Все нужные роли есть, но заняты — детерминированный wait без LLM.
+            continue
+
+        # План — ЕДИНСТВЕННЫЙ источник работы. Если он сгенерирован, но готовых задач для
+        # отдела нет (всё сделано или ждут зависимостей) — отдел ПРОСТАИВАЕТ. Лидер НЕ
+        # выдумывает работу через LLM (раньше отсюда шли 128 пустых вызовов CTO и хаос:
+        # «придумай outreach», «собери 50 лидов» — недостижимые задачи по кругу).
+        if plan.is_generated():
+            continue
+
+        # ---- LLM-ПУТЬ — ТОЛЬКО пока план ещё не сгенерирован (ранний bootstrap) ----
+        members = registry.members_of(dept_id)
+        availability = {}
+        for a in members:
+            left = max(0, AGENT_COOLDOWN_SECS - (now - state.last_run_for(a.agent_id)))
+            availability[a.agent_id] = {"status": a.status, "on_cooldown": left > 0,
+                                        "cooldown_secs": int(left)}
+
+        decision = await leaders.decide(dept_id, goal, objective, ms, availability, publish,
+                                        suggested_task=None)
+
+        # Анти-цикл: если лидер N раз подряд принимает то же решение — пауза + эскалация к CEO.
+        sig = f"{decision.get('action')}|{decision.get('agent_id','')}|{decision.get('role','')}"
+        key = f"{ctx.get_tenant()}:{dept_id}"
+        prev_sig, cnt = _last_leader_sig.get(key, ("", 0))
+        cnt = cnt + 1 if sig == prev_sig else 1
+        _last_leader_sig[key] = (sig, cnt)
+        if cnt >= _LEADER_REPEAT_LIMIT and decision.get("action") != "assign":
+            await publish({"type": "system",
+                           "text": f"⚠ {lead}: решение повторяется {cnt}× — эскалация к CEO"})
+            _last_leader_sig[key] = (sig, 0)
+            continue  # пропускаем ход; CEO пересмотрит на следующем гейте
+
+        report = decision.get("report", "")
+        if report:
+            registry.update_status(lead, "idle", report)
+        thought = decision.get("thought", "")
+        if thought:
+            await publish({"type": "speech", "agent_id": lead, "text": f"👔 {thought}"})
+
+        action = decision.get("action", "wait")
+        if action == "hire":
+            role = decision.get("role", "")
+            task = decision.get("task", f"Выполни задачи {role}")
+            skill = decision.get("skill") or ""
+            await hire_and_run(role, task, publish, skill=skill, department=dept_id, manager=lead)
+        elif action == "assign":
+            agent_id = decision.get("agent_id", "")
+            task = decision.get("task", "")
+            rec = registry.get(agent_id)
+            if rec and task:
+                if (now - state.last_run_for(agent_id)) < AGENT_COOLDOWN_SECS:
+                    continue
+                if rec.status == "thinking":
+                    continue
+                await execution.assign(agent_id, rec.role, task, publish, department=dept_id, objective=objective)
+
+
+async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int = 0) -> None:
+    """
+    Двухуровневое управление:
+      1) CEO-тир — управляет ОТДЕЛАМИ (открыть/закрыть/цель). Вызывается по необходимости.
+      2) Лидер-тир — каждый открытый отдел сам распределяет работу между подчинёнными.
+    """
+    goal = brief.effective_goal()
+    ms = milestones.all_stages()
+
+    # ---- Висячие задачи: роль без отдела (analyst/researcher/неизвестная) не обслуживается
+    # отделами → авто-закрываем, чтобы офис не завис на недостижимой задаче и мог завершиться.
+    if plan.is_generated() and has_orphan_tasks():
+        servable = set()
+        for did in org.catalog():
+            servable |= set(org.member_roles(did))
+        for t in plan.all_tasks():
+            if t.get("status") in ("pending", "in_progress") and not t.get("department") \
+                    and t.get("role") not in servable:
+                # skipped, НЕ done: задача не выполнялась — done-прогресс не завышаем
+                # (раньше complete() зачитывал её как сделанную работу).
+                plan.mark(t["id"], "skipped")
+                await publish({"type": "system",
+                               "text": f"⏭ Задача {t['id']} ({t.get('role','?')}) снята — "
+                                       f"роль не входит в отделы, сдачу не блокирует"})
+
+    # ---- CEO-тир (гейт по необходимости — экономия токенов) ----
+    need_ceo = (not org.open_departments()) or (cycle % CEO_REASSESS_EVERY == 0)
+    if need_ceo:
+        company = await orchestrator.decide_company(goal, strategy, ms, publish)
+        await apply_company_decision(company, publish)
+
+    # ---- Блок 4: Инициативы из opportunity-событий ----
+    # CEO превращает наблюдённые возможности отделов в конкретные предложения
+    # с ROI-оценкой. Пользователь видит карточку и принимает или отклоняет.
+    try:
+        opp_events = [e for e in events_mod.pending() if e.get("kind") == "opportunity"]
+        for ev in opp_events[:2]:  # макс 2 инициативы за цикл
+            summary = ev.get("summary", "")
+            if not summary or initiatives.has_pending_similar(summary):
+                events_mod.mark_processed([ev["id"]])
+                continue
+            ini = await orchestrator.generate_initiative(goal, strategy, summary, publish)
+            if ini and ini.get("title"):
+                iid = initiatives.add(
+                    title=ini["title"],
+                    rationale=ini.get("rationale", summary),
+                    expected_outcome=ini.get("expected_outcome", ""),
+                    estimated_effort=ini.get("estimated_effort", "1-2 цикла"),
+                    tasks=ini.get("tasks", []),
+                    source="event",
+                )
+                await publish({"type": "initiative", "id": iid, "title": ini["title"],
+                               "expected_outcome": ini.get("expected_outcome", "")})
+                await publish({"type": "speech", "agent_id": "orchestrator_1",
+                               "text": f"💡 Новая инициатива: {ini['title']} → {ini.get('expected_outcome','')[:60]}"})
+            events_mod.mark_processed([ev["id"]])
+    except Exception as e:
+        await publish({"type": "error", "agent_id": "orchestrator_1",
+                       "text": f"Инициатива не сгенерирована: {str(e)[:100]}"})
+
+    # ---- Детерминированный автостарт ----
+    # Слабые модели порой возвращают wait и офис висит без единого отдела (как в логе).
+    # Если отделы ВООБЩЕ ни разу не открывались — стартуем технический: почти любой продукт
+    # начинается с него. Дальше структурой снова управляет CEO.
+    ever_opened = any(org.state_of(d) for d in org.catalog())
+    if not org.open_departments() and not ever_opened:
+        obj = (goal or "Подготовить продукт")[:140]
+        org.open_department("tech", reason="автостарт продукта", objective=obj)
+        await hire_leader("tech", obj, publish)
+        await publish({"type": "system", "text": "📂 Открыт «Технический отдел» (автостарт)"})
+
+    # ---- Параллелизм: открываем ВСЕ отделы, которых требует план задач ----
+    # (независимые ветки плана исполняются параллельно — как в реальной компании).
+    for dept_id in plan.departments_needed():
+        if dept_id not in org.open_departments():
+            obj = (goal or "")[:140]
+            org.open_department(dept_id, reason="нужен по плану задач", objective=obj)
+            await hire_leader(dept_id, obj, publish)
+            await publish({"type": "system",
+                           "text": f"📂 Открыт «{org.catalog()[dept_id]['name']}» (по плану задач)"})
+
+    # ---- Лидер-тир — по каждому открытому отделу с возможным ходом ----
+    await run_leaders(goal, ms, publish)
+
+
+async def apply_company_decision(decision: dict, publish) -> None:
+    action = decision.get("action", "wait")
+    thought = decision.get("thought", "")
+    # Не шумим речью CEO, когда он просто ждёт — это плодило спам «CEO не принял решение».
+    if thought and action != "wait":
+        await publish({"type": "speech", "agent_id": "orchestrator_1", "text": f"🧭 {thought}"})
+
+    # Блок 3: Логируем структурированное решение CEO (для UI «Почему?»)
+    did = ""
+    if action != "wait":
+        did = decisions.record(
+            action=action,
+            target=decision.get("department", decision.get("objective", ""))[:80],
+            thought=thought,
+            alternatives=decision.get("alternatives") or [],
+            confidence=decision.get("confidence", 60),
+            risks=decision.get("risks") or [],
+            expected_effect=decision.get("expected_effect", ""),
+            data_used=decision.get("data_used") or ["strategy", "milestones"],
+            made_by="orchestrator_1",
+            # prompt_id проставит Phase 1, когда CEO-промпт пойдёт через Prompt Builder
+            # (сейчас decide_company не логирует свой промпт) — цепочка станет полной.
+            prompt_id=decision.get("_prompt_id", ""),
+        )
+        await publish({"type": "decision_record", "decision_id": did, "action": action,
+                       "thought": thought, "confidence": decision.get("confidence", 60)})
+
+    # Блок 6: Совет директоров при антицикле (3+ wait подряд или блокеры)
+    if action == "wait":
+        board.record_wait()
+        if board.needs_session():
+            conflict = f"CEO заблокирован: {thought or 'нет прогресса'}"
+            await board.run_session(conflict, publish)
+    else:
+        board.reset_wait_streak()
+
+    # Бизнес-этапи (вехи) ведёт CEO
+    cur = decision.get("current_milestone")
+    if cur and milestones.get(cur):
+        execution.set_cur_ms(cur)
+        milestones.mark_active(cur)
+    done_id = decision.get("milestone_done")
+    if done_id and done_id not in (None, "null") and milestones.get(done_id):
+        milestones.set_status(done_id, "done")
+        summ = decision.get("milestone_summary") or ""
+        if summ and summ not in (None, "null"):
+            milestones.set_summary(done_id, summ)
+        await publish({"type": "system", "text": f"✅ Этап «{milestones.get(done_id)['title']}» завершён"})
+    await _set_progress_note(thought or "CEO управляет компанией", publish)
+
+    action = decision.get("action", "wait")
+    dept = decision.get("department", "")
+    if action == "open_department" and dept in org.catalog():
+        objective = decision.get("objective") or ""
+        org.open_department(dept, reason=thought, objective=objective)
+        await hire_leader(dept, objective, publish)
+        await publish({"type": "system", "text": f"📂 CEO открыл «{org.catalog()[dept]['name']}»"})
+    elif action == "close_department" and dept in org.catalog():
+        org.close_department(dept)
+        await publish({"type": "system", "text": f"📁 CEO закрыл «{org.catalog()[dept]['name']}»"})
+    elif action == "delegate" and dept in org.catalog():
+        org.set_objective(dept, decision.get("objective") or "")
+        await publish({"type": "system", "text": f"🎯 CEO обновил цель отдела «{org.catalog()[dept]['name']}»"})
+
+    # Observability: фиксируем срез мира ПОСЛЕ применения решения и привязываем к нему.
+    # world.diff(этот срез, предыдущий) = «что решение изменило в мире» — по нему
+    # Observability строит цепочку промпт → решение → diff (Phase 0.5, DoD).
+    if did:
+        try:
+            from src.office import world
+            snap = world.save_snapshot(reason=f"decision:{did}")
+            decisions.set_snapshot(did, snap.get("snapshot_id", ""))
+        except Exception:
+            pass  # журнал наблюдаемости не должен ронять цикл
