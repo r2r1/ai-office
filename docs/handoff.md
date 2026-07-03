@@ -659,6 +659,39 @@ DoD: директива проходит propose→check→apply|reject, не п
 
 ---
 
+## 🧱 2026-07-03 (Phase 6, шаг 1) — расслоение loop.py: Planning Engine
+
+Финальная фаза карты — расслоение бог-модуля `loop.py` (был 1404 строки). Самая
+рискованная (механическая экстракция + общее мутабельное состояние живости) и
+нижняя по User Value (⭐⭐⭐/❌). Делается безопасными срезами.
+
+**Шаг 1 (сделано):**
+- Новый `office/planning_engine.py` — чистые детерминированные функции планирования/
+  маршрутизации, вынесенные из loop: `fallback_plan`, `has_actionable_move`,
+  `dept_actionable`, `has_orphan_tasks`, `free_worker_of_role` + константа
+  `AGENT_COOLDOWN_SECS`. Нет замыканий цикла и мутабельной живости → **покрыт
+  unit-тестами без поднятия офис-цикла**.
+- Классификаторы ошибок провайдера `_is_quota_error`/`_is_model_unavailable_error`
+  → `core/llm.py` (`is_quota_error`/`is_model_unavailable_error`) — знание об ошибках
+  LLM живёт в Provider-слое, не в бизнес-цикле (audit #14 закрыт). `loop` импортирует.
+- **Первые тесты в проекте**: `tests/test_planning_engine.py` (runnable
+  `python tests/test_planning_engine.py`) — fallback детерминизм, orphan-задачи,
+  классификаторы. 3/3 проходят, $0.
+- `loop.py`: 1404 → 1288 строк. Импорт `server`+`loop` ок, алиас кулдауна сохранён.
+
+**Осталось для DoD `loop.py < 400` (следующие шаги, осознанно отложено):**
+- `office/execution.py` — жизненный цикл `_job` (Policy→бюджет→run_agent→приёмка→
+  эскалация). **Блокер:** `_job` — ВЛОЖЕННОЕ ЗАМЫКАНИЕ внутри `_assign`, захватывает
+  контекст цикла; чистая экстракция требует рефакторинга в объект-состояние, а живой
+  цикл нельзя протестировать здесь (нет LLM/прогона) — большой риск, отдельный шаг.
+- Остаток маршрутизации (`_run_leaders`/`_hire_leader`/`_orchestrate`/
+  `_apply_company_decision`) и bootstrap-оркестрация → `execution.py`/шедулер.
+- `agent_id → worker_id` (миграция схемы+фронта с deprecated-алиасом) — не начата.
+
+**Дальше:** довести расслоение (execution.py) отдельными безопасными срезами.
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

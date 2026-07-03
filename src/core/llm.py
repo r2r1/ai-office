@@ -25,6 +25,29 @@ from src.core.search import web_search
 load_dotenv()
 
 
+# ── Классификация ошибок провайдера (Provider-слой, BOS §6) ──────────────────
+# Знание об ошибках LLM-провайдера живёт здесь, а не в бизнес-цикле loop.py:
+# quota/недоступность модели — свойство провайдера, не офиса. loop импортирует эти
+# предикаты и решает, что делать (пауза при quota, смена модели при недоступности).
+def is_model_unavailable_error(err: str) -> bool:
+    """Модель/канал недоступен у провайдера (не транзиентная ошибка сети/таймаута) —
+    например ручное или expert-назначение указывает на несуществующий на шлюзе id.
+    Отличается от quota-ошибки: тут нужно сменить модель, а не остановить офис."""
+    low = (err or "").lower()
+    return "model_not_found" in low or "no available channel" in low
+
+
+def is_quota_error(err: str) -> bool:
+    """Ошибка нехватки баланса/квоты у LLM-провайдера."""
+    err = err or ""
+    low = err.lower()
+    return (
+        "insufficient" in low or "额度不足" in err or "余额不足" in err
+        or ("403" in err and ("quota" in low or "balance" in low or "额度" in err or "余额" in err))
+        or "预扣费" in err
+    )
+
+
 def _mask_old_observations(messages: list, keep_last: int = 3) -> None:
     """
     Observation masking: содержимое СТАРЫХ tool-результатов заменяем компактной ссылкой,

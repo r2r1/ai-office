@@ -15,6 +15,8 @@ import os
 import time
 
 from src.office import bus, registry, brief, state, milestones, org, plan, lessons, critic, workspace, sites, control, knowledge, trust, decisions, autonomy, initiatives, board, costs, models as models_module
+from src.office import planning_engine
+from src.core import llm
 from src.agents import researcher, strategist, orchestrator, architect, leaders
 from src.agents import agent_factory
 from src.saas import context as ctx
@@ -26,7 +28,7 @@ _LEADER_REPEAT_LIMIT = 3  # столько одинаковых решений �
 
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "10"))
 MANAGER_POLL = 5          # как часто менеджер ищет новых тенантов для запуска
-AGENT_COOLDOWN_SECS = int(os.getenv("AGENT_COOLDOWN_SECS", "25"))  # антидребезг (живость)
+AGENT_COOLDOWN_SECS = planning_engine.AGENT_COOLDOWN_SECS  # антидребезг живости (Planning Engine)
 CEO_REASSESS_EVERY = 3    # CEO пересматривает структуру компании раз в N циклов (экономия токенов)
 MAX_THINK_SECS = int(os.getenv("AGENT_MAX_THINK_SECS", "240"))  # дольше → считаем зависшим
 MAX_TASK_ATTEMPTS = 3     # провалов приёмки до блокировки задачи (эскалация вместо цикла)
@@ -79,48 +81,6 @@ def forget_tenant(tid: str) -> None:
         _last_leader_sig.pop(k, None)
     for d2 in (_current_ms, _first_cycle_done, _completion_announced):
         d2.pop(tid, None)
-
-
-def _fallback_plan(goal: str) -> list[dict]:
-    """Детерминированный план под типовой результат, когда LLM-генерация плана недоступна.
-    Гарантирует, что офис всегда plan-driven (а не уходит в LLM-хаос)."""
-    g = (goal or "").lower()
-    # ЯВНЫЙ запрос продукта (императив «сделай/нужен X»), а не упоминание X как продукта бизнеса.
-    wants_bot = any(p in g for p in ("нужен бот", "нужен телеграм", "сделай бот", "сделать бот",
-                                     "хочу бот", "бот для записи", "бот записи", "бот заявок",
-                                     "телеграм-бот", "telegram-бот", "запусти бот"))
-    wants_site = any(p in g for p in ("нужен сайт", "нужен лендинг", "сделай сайт", "сделай лендинг",
-                                      "сделать сайт", "сделать лендинг", "хочу сайт", "хочу лендинг",
-                                      "одностраничник", "landing page", "собери лендинг", "собери сайт"))
-    if not wants_bot and not wants_site:
-        # ПО УМОЛЧАНИЮ не строим вслепую: готовим план запуска + рекомендации и СПРАШИВАЕМ
-        # клиента, что делать первым. (Раньше тут всегда был лендинг — главная причина «глупости».)
-        return [
-            {"id": "t1",
-             "title": "На основе исследования и стратегии подготовить КОРОТКИЙ план запуска "
-                      "и рекомендации (позиционирование, оффер, первые 2-3 шага). В конце ОБЯЗАТЕЛЬНО "
-                      "через ask_user задать клиенту 1-2 вопроса: что строить первым (лендинг / бот / "
-                      "MVP / контент-план) и какие ресурсы есть. НЕ строй продукт, пока клиент не выбрал.",
-             "role": "marketer", "deps": [],
-             "done_criterion": "готов план запуска + клиенту задан вопрос, что делать дальше"},
-        ]
-    if wants_bot:
-        return [
-            {"id": "t1", "title": "Подготовить тексты, услуги и приветствие для бота",
-             "role": "marketer", "deps": [], "done_criterion": "готовы тексты и список услуг"},
-            {"id": "t2", "title": "Настроить и запустить Telegram-бота сбора заявок",
-             "role": "integrator", "deps": ["t1"], "done_criterion": "бот запущен через launch_bot"},
-        ]
-    # сайт/лендинг — основной кейс
-    return [
-        {"id": "t1", "title": "Подготовить оффер и продающие тексты для всех блоков лендинга",
-         "role": "marketer", "deps": [], "done_criterion": "готов копирайт: оффер, выгоды, FAQ, CTA"},
-        {"id": "t2", "title": "Собрать конверсионный многостраничный лендинг в site/ с формой заявки",
-         "role": "designer", "deps": ["t1"],
-         "done_criterion": "site/index.html + страницы опубликованы, форма шлёт на /api/site-lead"},
-        {"id": "t3", "title": "Проверить формы/CTA и довести лендинг до рабочего состояния",
-         "role": "developer", "deps": ["t2"], "done_criterion": "формы работают, сайт опубликован и собирает лиды"},
-    ]
 
 
 def _engagement_complete() -> bool:
@@ -233,7 +193,7 @@ async def _run_office(tid: str) -> None:
         except Exception as e:
             await publish({"type": "error", "agent_id": "orchestrator_1", "text": str(e)[:100]})
         if not tasks:
-            tasks = _fallback_plan(goal)
+            tasks = planning_engine.fallback_plan(goal)
             await publish({"type": "system",
                            "text": "📋 План собран по умолчанию (LLM-генерация недоступна)"})
         plan.set_tasks(tasks)
@@ -379,7 +339,7 @@ async def _run_office(tid: str) -> None:
             await asyncio.sleep(LOOP_INTERVAL)
             continue
         await _heal_stuck_agents(publish)  # самолечение: сбросить зависших
-        if not _has_actionable_move():
+        if not planning_engine.has_actionable_move():
             await asyncio.sleep(LOOP_INTERVAL)
             continue
         await publish({"type": "system", "text": f"=== Рабочий цикл #{cycle} ==="})
@@ -389,7 +349,7 @@ async def _run_office(tid: str) -> None:
         except Exception as e:
             err_str = str(e)
             import traceback
-            if _is_quota_error(err_str):
+            if llm.is_quota_error(err_str):
                 reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
                 control.pause(reason)
                 await publish({"type": "system", "text": reason})
@@ -590,53 +550,6 @@ async def _publish_site_auto(publish, note: str = "") -> bool:
     return True
 
 
-def _dept_actionable(dept_id: str, now: float) -> bool:
-    """Есть ли в отделе ход. Когда план сгенерирован — отдел активен ТОЛЬКО если у него
-    есть готовая задача (иначе простаивает, цикл не крутится вхолостую)."""
-    if plan.is_generated() and not plan.ready_for_department(dept_id):
-        return False
-    worker_roles = set(org.member_roles(dept_id))  # роли работников (без лидера)
-    members = registry.members_of(dept_id)
-    for a in members:
-        if a.role not in worker_roles:
-            continue  # лидер отдела — не работник
-        on_cooldown = (now - state.last_run_for(a.agent_id)) < AGENT_COOLDOWN_SECS
-        if a.status != "thinking" and not on_cooldown:
-            return True
-    existing = {a.role for a in members}
-    return any(r not in existing for r in worker_roles)
-
-
-def _has_actionable_move() -> bool:
-    # Нет открытых отделов — CEO должен открыть первый: даём циклу ход.
-    open_depts = org.open_departments()
-    if not open_depts:
-        return True
-    # Есть задача плана в ещё НЕ открытом отделе → нужен ход CEO, чтобы открыть его
-    # (иначе дедлок: открытые отделы доделали своё и спят, а новый отдел не открывается).
-    if plan.is_generated():
-        if any(d not in open_depts for d in plan.departments_needed()):
-            return True
-        # Есть неустранимые «висячие» задачи (роль без отдела) → нужен ход, чтобы их закрыть.
-        if _has_orphan_tasks():
-            return True
-    now = time.time()
-    return any(_dept_actionable(did, now) for did in open_depts)
-
-
-def _has_orphan_tasks() -> bool:
-    """Есть ли pending-задачи, которые НЕ обслуживает ни один отдел (роль без отдела —
-    например analyst/researcher). Такие нельзя выполнить через отделы → офис завис бы."""
-    servable = set()
-    for did in org.catalog():
-        servable |= set(org.member_roles(did))
-    for t in plan.all_tasks():
-        if t.get("status") in ("pending", "in_progress") and t.get("role") not in servable \
-                and not t.get("department"):
-            return True
-    return False
-
-
 async def _set_progress_note(note: str, publish) -> None:
     payload = milestones.progress_payload()
     payload["note"] = note
@@ -654,7 +567,7 @@ async def _orchestrate(strategy: str, publish, tech_design: str = "", cycle: int
 
     # ---- Висячие задачи: роль без отдела (analyst/researcher/неизвестная) не обслуживается
     # отделами → авто-закрываем, чтобы офис не завис на недостижимой задаче и мог завершиться.
-    if plan.is_generated() and _has_orphan_tasks():
+    if plan.is_generated() and planning_engine.has_orphan_tasks():
         servable = set()
         for did in org.catalog():
             servable |= set(org.member_roles(did))
@@ -817,22 +730,11 @@ async def _hire_leader(dept_id: str, objective: str, publish) -> None:
                        "desk": rec.desk, "task": objective[:100]})
 
 
-def _free_worker_of_role(dept_id: str, role: str, now: float):
-    """Свободный (idle, не в cooldown) работник нужной роли в отделе — или None."""
-    for a in registry.members_of(dept_id):
-        if a.role != role or a.status == "thinking":
-            continue
-        if (now - state.last_run_for(a.agent_id)) < AGENT_COOLDOWN_SECS:
-            continue
-        return a
-    return None
-
-
 async def _run_leaders(goal: str, ms: list, publish) -> None:
     now = time.time()
     for dept_id in org.open_departments():
         lead = org.lead_id(dept_id)
-        if not lead or not _dept_actionable(dept_id, now):
+        if not lead or not planning_engine.dept_actionable(dept_id, now):
             continue
 
         objective = org.state_of(dept_id).get("objective", "")
@@ -861,7 +763,7 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                 ready = [t for t in ready if not plan.touches_site(t)]
             # 1) Назначаем первую готовую задачу, под которую есть свободный работник.
             for t in ready:
-                free = _free_worker_of_role(dept_id, t.get("role", ""), now)
+                free = planning_engine.free_worker_of_role(dept_id, t.get("role", ""), now)
                 if free:
                     task_txt = t.get("title", "")
                     if t.get("done_criterion"):
@@ -944,24 +846,6 @@ async def _run_leaders(goal: str, ms: list, publish) -> None:
                 if rec.status == "thinking":
                     continue
                 await _assign(agent_id, rec.role, task, publish, department=dept_id, objective=objective)
-
-
-def _is_model_unavailable_error(err: str) -> bool:
-    """Модель/канал недоступен у провайдера (не транзиентная ошибка сети/таймаута) —
-    например ручное или expert-назначение указывает на несуществующий на шлюзе id.
-    Отличается от quota-ошибки: тут нужно сменить модель, а не остановить офис."""
-    low = err.lower()
-    return "model_not_found" in low or "no available channel" in low
-
-
-def _is_quota_error(err: str) -> bool:
-    """Определяет ошибку нехватки баланса у LLM-провайдера."""
-    low = err.lower()
-    return (
-        "insufficient" in low or "额度不足" in err or "余额不足" in err
-        or ("403" in err and ("quota" in low or "balance" in low or "额度" in err or "余额" in err))
-        or "预扣费" in err
-    )
 
 
 async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
@@ -1120,11 +1004,11 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
             if department:
                 trust.record_failure(department)
             # Quota/billing 403 → ставим офис на паузу, чтобы не сжигать остаток
-            if _is_quota_error(err_str):
+            if llm.is_quota_error(err_str):
                 reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
                 control.pause(reason)
                 await publish({"type": "system", "text": reason})
-            elif _is_model_unavailable_error(err_str):
+            elif llm.is_model_unavailable_error(err_str):
                 # Самолечение: назначенная модель недоступна у провайдера. Одной ошибки
                 # не трогаем (может быть временный глюк шлюза) — но повтор той же ошибки
                 # для того же агента означает, что это НЕ пройдёт само, и без вмешательства
