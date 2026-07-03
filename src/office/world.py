@@ -222,9 +222,10 @@ def context_block() -> str:
         lines.append("⛔ Блокеры: " + "; ".join(e["summary"][:60] for e in bs["blockers"]))
     if bs["open_questions"]:
         lines.append(f"Открытых вопросов клиенту: {bs['open_questions']}")
-    from src.office import projects
+    from src.office import projects, gap
     block = ("\n=== ГДЕ КОМПАНИЯ СЕЙЧАС (Business State) ===\n" + "\n".join(f"- {l}" for l in lines) + "\n")
-    return block + projects.context_block() + objectives.context_block()
+    # Разрывы до целей — CEO видит их наравне с блокерами (Gap Analysis, Phase 4).
+    return block + projects.context_block() + objectives.context_block() + gap.context_block()
 
 
 def reset() -> None:

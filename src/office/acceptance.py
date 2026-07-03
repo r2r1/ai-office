@@ -69,7 +69,7 @@ def check(task_title: str, role: str, result: str,
     problems: list[str] = []
     warnings: list[str] = []
     levels: dict[str, str] = {"specification": "skip", "build": "skip",
-                              "functional": "skip", "acceptance": "ok"}
+                              "functional": "skip", "business": "skip", "acceptance": "ok"}
 
     # L5 (базовый): пустая сдача — не результат (обрыв/только tool-calls)
     if not (result or "").strip():
@@ -106,6 +106,21 @@ def check(task_title: str, role: str, result: str,
         site_critical = [p for p in critic.check_site() if critic.is_critical(p)]
         levels["functional"] = "fail" if site_critical else "ok"
         problems += [f"сайт: {critic.text_of(p)}" for p in site_critical[:3]]
+
+    # L4 Business (BOS §8): двигает ли сдача к цели. ТОЛЬКО для задач-поставок
+    # (site/bot) и ТОЛЬКО информационно — попадание в цель оценивается по метрике,
+    # которая наполнится ПОСЛЕ сдачи, поэтому L4 не гейт («сделано» ≠ «цель закрыта»).
+    if any(a in artifacts for a in ("site", "bot")):
+        from src.office import gap
+        unmet_gaps = gap.unmet()
+        if unmet_gaps:
+            levels["business"] = "open"
+            warnings.append(
+                "цель ещё не достигнута (" + "; ".join(
+                    f"{g['title']}: {g['current']}/{g['desired']}" for g in unmet_gaps[:2])
+                + ") — работа сдана, но разрыв к цели открыт")
+        elif gap.compute():
+            levels["business"] = "ok"
 
     # Уверенность приёмки — модификатор от статуса контракта (не гейт): подтверждённая
     # владельцем спецификация без предупреждений → high; черновик или расхождение → ниже.

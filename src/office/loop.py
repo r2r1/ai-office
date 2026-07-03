@@ -307,6 +307,18 @@ async def _run_office(tid: str) -> None:
                     # Задача добавлена — офис продолжит работу, не засыпаем
                     await asyncio.sleep(LOOP_INTERVAL)
                     continue
+                # Gap-driven перепланирование (Phase 4, Bootstrapping→Steady State):
+                # план выполнен, но измеримая цель не достигнута → офис САМ создаёт
+                # следующую работу под конкретный разрыв, а не только «жду указаний».
+                from src.office import gap as gap_mod
+                gap_tasks = gap_mod.replan()
+                if gap_tasks:
+                    for gt in gap_tasks:
+                        await publish({"type": "system",
+                                       "text": f"🎯 Цель ещё не достигнута — офис ставит задачу "
+                                               f"под разрыв: {gt['title'][:70]}"})
+                    await asyncio.sleep(LOOP_INTERVAL)
+                    continue
                 _completion_announced[tid] = True
                 # ЧЕСТНО: помечаем выполненным только активный этап, НЕ фейкуем будущие.
                 for s in milestones.all_stages():

@@ -589,6 +589,37 @@ DoD: `/api/world` содержит непустой `metrics`; `objectives.measu
 
 ---
 
+## 🎯 2026-07-03 (Phase 4) — Gap Analysis + перепланирование + Acceptance L4
+
+Замыкает измерительный полукруг: система из честного Bootstrapping-режима
+переходит к Steady State (сама находит работу к цели).
+
+- Новый `office/gap.py`: `compute()` — для каждой `objectives.measurable()` сравнивает
+  текущую метрику (резолвер `measured_by`→`metrics.latest`, пока «заявки/лиды»→
+  `leads_7d`) с числом из `desired`. `gap = desired − current`, `met = gap≤0`.
+  Всё ВЫЧИСЛИМО, не «ощущение CEO». `unmet()`, `context_block()`, `replan()`.
+- `world.context_block()` получил раздел «РАЗРЫВЫ ДО ЦЕЛЕЙ» — CEO видит их наравне
+  с блокерами (подмешивается в `decide_company` через world.context_block).
+- **Перепланирование (Steady State)**: `loop` при выполненном плане, ДО «жду
+  указаний», зовёт `gap.replan()` — детерминированный маппинг разрыва в работу
+  («заявки»→задача marketer «усилить привлечение»). Дедуп `requested_by=gap:<oid>`
+  (одна авто-задача на цель — не спамит; endless-retry — горизонт Phase X). Есть
+  разрыв → офис ставит задачу и продолжает, а не засыпает.
+- **Acceptance L4 (Business)**: для задач-поставок (artifacts site/bot) вердикт
+  получает уровень `business` (ok|open|skip) + предупреждение «цель ещё не
+  достигнута (current/desired) — работа сдана, но разрыв открыт». Информационный,
+  НЕ гейт (попадание в цель наполняется метрикой ПОСЛЕ сдачи).
+- Эндпоинт `GET /api/gap`.
+
+DoD: тенант с закрытым планом и целью «10 заявок/неделю» при 3 фактических лидах
+получает задачу от CEO без владельца; Bootstrapping→Steady State воспроизводится.
+Смоук: gap 3/10=7 (не met); replan→1 задача marketer, идемпотентно; world содержит
+«Разрывы»; L4 business=open, passed не падает. LLM не вызывался ($0).
+
+**Дальше:** Phase 5 (Decision-as-diff + Sandbox) / Phase 6 (Execution Policy split).
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

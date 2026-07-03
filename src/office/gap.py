@@ -1,0 +1,106 @@
+"""
+Gap Analysis — разрыв между желаемым и действительным (см. дорожная_карта Phase 4, BOS §3).
+
+Замыкает измерительный полукруг кибернетического цикла: для каждой ИЗМЕРИМОЙ цели
+(objectives.measurable) сравнивает текущее значение метрики (из Measurement) с
+desired. Разница ВЫЧИСЛИМА, а не «ощущение CEO» — до этой фазы система была честным
+Bootstrapping-режимом (Intent→Plan→Execution→Acceptance) без обратной связи по цели.
+
+  compute()      — список разрывов [{objective, current, desired, gap, met}]
+  context_block()— блок «Разрывы» для промпта CEO (world.context_block)
+  replan()       — детерминированно создаёт работу под НЕзакрытый разрыв (Steady State)
+
+Резолвер метрики по objective.measured_by пока покрывает «заявки/лиды» (единственная
+измеримая цель, которую офис создаёт сам — objectives.ensure_leads_objective). Новая
+измеримая цель → новая ветка резолвера, а не «ощущение».
+"""
+
+import re
+
+
+def _first_number(text: str) -> float | None:
+    m = re.search(r"\d[\d\s]*\d|\d", (text or "").replace(" ", " "))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(" ", ""))
+    except ValueError:
+        return None
+
+
+def _current_value(objective: dict) -> float | None:
+    """Текущее значение метрики цели (из Measurement). None — метрика не резолвится
+    (тогда цель в gap-анализ не попадает, а не даёт ложный ноль)."""
+    from src.office import metrics
+    mb = (objective.get("measured_by") or "").lower()
+    if "leads" in mb or "заявк" in mb or "лид" in mb:
+        return float(metrics.latest("leads_7d") or 0)
+    return None
+
+
+def compute() -> list[dict]:
+    """Разрывы по всем измеримым целям. gap = desired − current; met = gap ≤ 0."""
+    from src.office import objectives
+    out: list[dict] = []
+    for o in objectives.measurable():
+        cur = _current_value(o)
+        des = _first_number(o.get("desired", ""))
+        if cur is None or des is None:
+            continue  # метрика/целевое число не резолвятся — разрыв не вычислим
+        gap = round(des - cur, 2)
+        out.append({
+            "objective_id": o["id"], "title": o["title"],
+            "current": cur, "desired": des, "gap": gap, "met": gap <= 0,
+            "source": "факт",  # current — из фактической метрики leads_7d
+        })
+    return out
+
+
+def unmet() -> list[dict]:
+    return [g for g in compute() if not g["met"]]
+
+
+def context_block() -> str:
+    """Блок «Разрывы» для CEO — наравне с блокерами (world.context_block)."""
+    gaps = compute()
+    if not gaps:
+        return ""
+    lines = []
+    for g in gaps:
+        mark = "✅ достигнута" if g["met"] else f"⚠ разрыв {g['gap']}"
+        lines.append(f"- {g['title']}: сейчас {g['current']} из {g['desired']} ({mark})")
+    return "\n=== РАЗРЫВЫ ДО ЦЕЛЕЙ (Gap Analysis) ===\n" + "\n".join(lines) + "\n"
+
+
+# Детерминированный маппинг «разрыв → работа» (тот же принцип, что _fallback_plan):
+# конкретный вид разрыва порождает конкретную роль+задачу. Не «CEO придумывает» —
+# правило зашито и проверяемо.
+def _work_for_gap(g: dict) -> tuple[str, str, str] | None:
+    """(role, title, done_criterion) для незакрытого разрыва — или None."""
+    title_low = (g.get("title") or "").lower()
+    if "заявк" in title_low or "лид" in title_low:
+        return ("marketer",
+                "Усилить привлечение заявок: доработать оффер и CTA лендинга, "
+                "предложить дополнительный канал трафика",
+                "рост числа заявок за неделю относительно текущего")
+    return None
+
+
+def replan() -> list[dict]:
+    """Steady State: под каждый НЕзакрытый разрыв создаёт работу БЕЗ владельца.
+    Дедуп по objective (requested_by=`gap:<oid>`) — одна авто-задача на цель, чтобы
+    офис не спамил одинаковыми задачами каждый цикл (endless-retry — горизонт Phase X)."""
+    from src.office import plan
+    created = []
+    existing = {t.get("requested_by", "") for t in plan.all_tasks()}
+    for g in unmet():
+        tag = f"gap:{g['objective_id']}"
+        if tag in existing:
+            continue  # авто-задача под этот разрыв уже ставилась
+        work = _work_for_gap(g)
+        if not work:
+            continue
+        role, title, crit = work
+        task = plan.add_task(title, role, crit, requested_by=tag)
+        created.append(task)
+    return created

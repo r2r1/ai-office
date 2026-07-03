@@ -1504,6 +1504,13 @@ async def get_metrics():
             "series": {r["metric_id"]: metrics_module.series(r["metric_id"]) for r in cur}}
 
 
+@app.get("/api/gap")
+async def get_gap():
+    """Gap Analysis (Phase 4): разрывы между желаемым (Objective) и метрикой."""
+    from src.office import gap as gap_module
+    return {"gaps": gap_module.compute()}
+
+
 @app.get("/api/objectives")
 async def get_objectives():
     """Objectives — измеримые цели компании (desired state)."""
