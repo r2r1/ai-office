@@ -526,6 +526,20 @@ async def brief_start(request: Request):
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
 
+@app.post("/api/onboarding/scan")
+async def onboarding_scan(request: Request):
+    """Instant Learning: клиент даёт URL сайта → офис изучает его за секунды,
+    БЕЗ единого вопроса и без LLM (company_scan.py). Вау-эффект первых секунд
+    онбординга — «мы уже кое-что знаем о вас»."""
+    data = await request.json()
+    url = (data.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"error": "пустой url"}, status_code=400)
+    from src.office import company_scan
+    result = await company_scan.scan(url)
+    return result
+
+
 @app.get("/api/onboarding/modes")
 async def onboarding_modes():
     """3 сценария входа + вопросы интервью по каждому (для онбординг-флоу)."""
@@ -547,9 +561,10 @@ async def onboarding_finish(request: Request):
     data = await request.json()
     mode = (data.get("mode") or "business").strip()
     answers = data.get("answers", [])
+    scan_result = data.get("scan") or None
     if not any((a.get("answer") or "").strip() for a in answers):
         return JSONResponse({"error": "нет ответов"}, status_code=400)
-    brief_data = onboarding.build_brief_structured(mode, answers)
+    brief_data = onboarding.build_brief_structured(mode, answers, scan_result=scan_result)
     # Сохраняем ответы интервью в память — слой USER для retrieval (knowledge.py)
     from src.office import memory as memory_module
     for a in answers:

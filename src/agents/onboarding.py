@@ -105,10 +105,13 @@ def _parse_economics(text: str) -> tuple[float | None, float | None]:
     return budget, avg
 
 
-def build_brief_structured(mode: str, answers: list[dict]) -> dict:
+def build_brief_structured(mode: str, answers: list[dict], scan_result: dict | None = None) -> dict:
     """
     Детерминированно собирает бриф из ответов интервью — БЕЗ вызова LLM.
     answers: [{"dimension": "...", "answer": "..."}, ...]
+    scan_result: результат company_scan.scan(url) (Instant Learning), если клиент
+    указал сайт — findings подмешиваются в constraints/summary, чтобы архитектор/
+    маркетинг видели их с первой задачи, не запрашивая заново.
     Это делает онбординг устойчивым к нехватке баланса.
     """
     mode = mode if mode in MODES else "business"
@@ -127,12 +130,18 @@ def build_brief_structured(mode: str, answers: list[dict]) -> dict:
             goal = f"Проверить жизнеспособность идеи и дать вердикт: {product[:120]}"
 
     niche = product[:120] or MODES[mode]["title"]
+
+    from src.office import company_scan
+    scan_line = company_scan.summary_line(scan_result) if scan_result else ""
+    if scan_line:
+        constraints = (constraints + "\n" + scan_line).strip() if constraints else scan_line
+
     summary_parts = []
     if product:     summary_parts.append(f"Продукт: {product}")
     if client:      summary_parts.append(f"Клиенты: {client}")
     if revenue:     summary_parts.append(f"Экономика: {revenue}")
     if goal:        summary_parts.append(f"Цель: {goal}")
-    if constraints: summary_parts.append(f"Ограничения: {constraints}")
+    if constraints: summary_parts.append(f"Ограничения: {constraints}")  # уже включает scan_line
     summary = " ".join(summary_parts) or product or MODES[mode]["title"]
 
     research_question = (
@@ -155,6 +164,7 @@ def build_brief_structured(mode: str, answers: list[dict]) -> dict:
         "constraints": constraints,
         "research_question": research_question,
         "summary": summary,
+        "scan": scan_result or None,
     }
 
 # Тексты онбординга — policies/onboarding_{questions,brief}.md. Слот Brief НЕ

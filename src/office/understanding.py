@@ -98,8 +98,26 @@ def payload() -> dict:
 
     score = min(100, score)
 
+    # Разбивка по доменам (Company Understanding Score по 5 измерениям) — тот же
+    # набор сигналов, сгруппированный иначе, чтобы клиент видел, ЧТО именно
+    # непонятно ("Продажи 12%" сильнее мотивирует подключить CRM, чем общий %).
+    has_scan = bool(b.get("scan") and b["scan"].get("ok"))
+    crm_connected = any(s.get("connected") for s in catalog if "crm" in s.get("name", "").lower()
+                        or "amo" in s.get("name", "").lower() or "bitrix" in s.get("name", "").lower())
+    domains = {
+        "business": 40 + (30 if b.get("summary") else 0) + (30 if has_scan else 0),
+        "marketing": 20 + (20 if has_scan else 0) + (20 if has_strategy else 0) +
+                     (20 if any(s.get("connected") for s in catalog if s.get("name", "").lower()
+                                in ("google sheets", "gmail")) else 0) + (20 if code_files else 0),
+        "sales": 10 + (60 if crm_connected else 0) + (20 if b.get("avg_check_usd") else 0),
+        "finance": 10 + (30 if b.get("budget_usd") or b.get("avg_check_usd") else 0),
+        "team": 5 + (15 if has_tech else 0),
+    }
+    domains = {k: min(100, v) for k, v in domains.items()}
+
     return {
         "score": score,
         "items": items,
         "missing": missing[:6],
+        "domains": domains,
     }

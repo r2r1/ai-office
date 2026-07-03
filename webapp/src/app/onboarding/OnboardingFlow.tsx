@@ -20,18 +20,29 @@ const DIM_LABEL: Record<string, string> = {
   product: "Продукт", client: "Клиент", revenue: "Экономика", goal: "Цель", constraints: "Ограничения",
 }
 
-type Phase = "mode" | "interview" | "building"
+type Phase = "scan" | "mode" | "interview" | "building"
 
 export function OnboardingFlow({ onDone }: Props) {
   const [modes, setModes] = useState<Mode[]>([])
-  const [phase, setPhase] = useState<Phase>("mode")
+  const [phase, setPhase] = useState<Phase>("scan")
   const [mode, setMode] = useState<Mode | null>(null)
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<string[]>([])
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
+  const [siteUrl, setSiteUrl] = useState("")
+  const [scanBusy, setScanBusy] = useState(false)
+  const [scanResult, setScanResult] = useState<any>(null)
 
   useEffect(() => { api.onboardingModes().then(d => setModes(d.modes || [])) }, [])
+
+  async function runScan() {
+    if (!siteUrl.trim()) { setPhase("mode"); return }
+    setScanBusy(true)
+    const res = await api.onboardingScan(siteUrl.trim()).catch(() => ({ ok: false, findings: [] }))
+    setScanResult(res)
+    setScanBusy(false)
+  }
 
   const total = mode?.questions.length || 5
   const studied = useMemo(() => Math.round((answers.filter(a => a && a.trim()).length / total) * 100), [answers, total])
@@ -59,7 +70,7 @@ export function OnboardingFlow({ onDone }: Props) {
     if (!mode) return
     setBusy(true)
     const payload = mode.questions.map((q, i) => ({ dimension: q.dimension, question: q.question, answer: finalAnswers[i] || "" }))
-    await api.onboardingFinish(mode.key, payload)
+    await api.onboardingFinish(mode.key, payload, scanResult && scanResult.ok ? scanResult : undefined)
     setBusy(false)
     setPhase("building")
   }
@@ -76,6 +87,67 @@ export function OnboardingFlow({ onDone }: Props) {
           "radial-gradient(48vw 48vw at 85% 80%, rgba(255,172,46,0.07), transparent 60%)" }} />
 
       <AnimatePresence mode="wait">
+        {phase === "scan" && (
+          <motion.div key="scan" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+            style={{ position: "relative", width: "100%", maxWidth: 560, textAlign: "center" }}>
+            <CeoBadge />
+            <h1 className="display" style={{ fontSize: 28, margin: "18px 0 8px", fontWeight: 600 }}>
+              Есть уже сайт?
+            </h1>
+            <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 24 }}>
+              Дайте ссылку — офис изучит его прямо сейчас, ещё до первого вопроса.
+            </p>
+
+            {!scanResult && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <input value={siteUrl} onChange={e => setSiteUrl(e.target.value)} autoFocus
+                  placeholder="например, marco-kmv.ru"
+                  onKeyDown={e => { if (e.key === "Enter") runScan() }}
+                  style={{
+                    flex: 1, padding: "13px 15px", fontSize: 14, borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)",
+                    color: "var(--text)", outline: "none",
+                  }} />
+                <motion.button onClick={runScan} disabled={scanBusy} whileTap={{ scale: 0.97 }}
+                  style={{
+                    padding: "10px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
+                    background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600, opacity: scanBusy ? 0.6 : 1,
+                  }}>
+                  {scanBusy ? "Изучаю…" : siteUrl.trim() ? "Изучить" : "Пропустить"}
+                </motion.button>
+              </div>
+            )}
+
+            {scanResult && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "left" }}>
+                <div style={{
+                  padding: "16px 18px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
+                  border: "1px solid var(--hairline-strong)", marginBottom: 16,
+                }}>
+                  {scanResult.ok ? (
+                    (scanResult.findings || []).map((f: string, i: number) => (
+                      <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.06 }}
+                        style={{ fontSize: 13, padding: "4px 0", color: "var(--text-dim)" }}>
+                        ✔ {f}
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: 13, color: "var(--muted)" }}>Не удалось изучить сайт — продолжим по вашим ответам.</div>
+                  )}
+                </div>
+                <motion.button onClick={() => setPhase("mode")} whileTap={{ scale: 0.97 }}
+                  style={{
+                    width: "100%", padding: "12px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
+                    background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
+                  }}>
+                  Продолжить →
+                </motion.button>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+
         {phase === "mode" && (
           <motion.div key="mode" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
             style={{ position: "relative", width: "100%", maxWidth: 720, textAlign: "center" }}>

@@ -103,7 +103,9 @@ export const api = {
   intents: () => getJSON<{ intents: any[] }>("/api/intents", { intents: [] }),
   unblockTask: (id: string) => postJSON<any>(`/api/task/${id}/unblock`, {}, null),
   onboardingModes: () => getJSON<any>("/api/onboarding/modes", { modes: [] }),
-  onboardingFinish: (mode: string, answers: any[]) => postJSON<any>("/api/onboarding/finish", { mode, answers }, null),
+  onboardingScan: (url: string) => postJSON<any>("/api/onboarding/scan", { url }, null),
+  onboardingFinish: (mode: string, answers: any[], scan?: any) =>
+    postJSON<any>("/api/onboarding/finish", { mode, answers, scan }, null),
   officeStatus: () => getJSON<any>("/api/office/status", { paused: false, reason: "" }),
   officePause: () => postJSON<any>("/api/office/pause", {}, null),
   officeResume: () => postJSON<any>("/api/office/resume", {}, null),
