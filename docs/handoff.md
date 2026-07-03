@@ -445,6 +445,35 @@ grep литералов `_*_SYSTEM` пуст. LLM не вызывался ($0).
 
 ---
 
+## 🧱 2026-07-03 (Phase 1a завершён) — Prompt Builder: остальные потребители
+
+Достроена миграция всех ручных системных промптов (шаг 1 — CEO — был выше):
+
+- **Лидеры** (`leaders._LEADER_SYSTEM`) → `policies/leader_decide.md`.
+  `company_system` получил параметры `fmt` (подстановка `{title}/{roles_desc}`,
+  JSON-скобки в .md удвоены `{{}}`) и `extra` (dept-хинты дописываются после Brief).
+  Лог идёт с реальной ролью лидера (`cto`/`cmo`/`sales_lead`).
+- **Сервисные роли**: `researcher._SYSTEM_QUICK/_DEEP` → `researcher_{quick,deep}.md`;
+  `strategist.SYSTEM_PROMPT` → `strategist.md`; `architect.SYSTEM_PROMPT` → `architect.md`.
+  У strategist/architect включён слот Brief — **закрыт латентный баг**: system стратега
+  упоминал «цель клиента», но `goal` в user НЕ передавался; теперь его приносит Brief-слот.
+- **Онбординг** (`_QUESTIONS_SYSTEM/_BRIEF_SYSTEM`) → `onboarding_{questions,brief}.md`,
+  `with_brief=False` (бриф ещё формируется).
+- **Критик** (`critic.review_site_llm` inline-`sys`) → `critic_site_review.md`,
+  `with_brief=False` (niche/audience/goal уже сериализуются вручную из аргументов;
+  литеральные `{niche}` и JSON `{"fixes":…}` в .md сохранены — `.format` не вызывается).
+
+**Итог Phase 1a:** `grep 'SYSTEM = """'` по `src/agents`+`src/office` пуст; все
+промпты (CEO, лидеры, сервисные, онбординг, критик) идут через `prompt_builder.
+company_system` и логируются в `prompts.jsonl` с ролью. 14 policy-файлов
+`policies/*.md`. Проверено: py_compile, импорт `server`+всех модулей, сборка всех
+14 политик, сохранность скобок критика/онбординга. LLM не вызывался ($0).
+
+**Дальше:** Phase 1b — Acceptance L1 (`specification.checklist()` → сверка
+`success_criteria` в приёмке).
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

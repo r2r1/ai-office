@@ -270,22 +270,10 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
     import json
     import re
 
-    sys = (
-        "Ты — придирчивый, но конструктивный ревьюер конверсионных лендингов. Тебе дают HTML "
-        "готового сайта, что бизнес клиента продаёт конечным покупателям (niche/audience) и "
-        "отдельно — цель ЭТОГО прогона офиса (не путай их!). Оцени, реально ли сайт достигает "
-        "цели: ясность оффера, заметность главного CTA, доверие, структура, качество текстов. "
-        "Найди КОНКРЕТНЫЕ значимые недочёты (не мелкие придирки). Если сайт уже хорош — верни "
-        "пустой список.\n"
-        "⚠️ ЖЁСТКОЕ ПРАВИЛО: сайт ВСЕГДА должен продавать конечному покупателю именно niche "
-        "(то, что реально продаёт бизнес), а НЕ формулировку из «цели прогона офиса». Если "
-        "HTML уже путает их — например называет себя услугой «упаковки бизнеса»/«брендинга» "
-        "вместо прямой продажи niche — это КРИТИЧЕСКАЯ ошибка позиционирования, и первым "
-        "пунктом в fixes должно быть «вернуть оффер к прямой продаже {niche}», а не «усилить "
-        "формулировки услуги упаковки». НЕ проси сделать сайт более похожим на цель прогона —"
-        " цель прогона не покупатель, покупатель видит только niche/audience.\n"
-        'Ответь ТОЛЬКО JSON: {"fixes": ["конкретное действие", ...]} — максимум 4 пункта, по-русски.'
-    )
+    # Текст ревью — policies/critic_site_review.md (собирается prompt_builder,
+    # логируется в prompts.jsonl). Слот Brief НЕ подмешиваем: niche/audience/goal
+    # уже сериализованы вручную в user из аргументов функции (единый путь, тестирован).
+    from src.office import prompt_builder
     biz_line = ""
     if niche:
         biz_line += f"Бизнес клиента — ЧТО он продаёт конечным покупателям (это ДОЛЖЕН продавать сайт): {niche}\n"
@@ -293,9 +281,11 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
         biz_line += f"Аудитория — КОМУ он продаёт: {audience}\n"
     user = (f"{biz_line}Цель ЭТОГО прогона офиса (служебная, покупатель её не видит, НЕ то, "
             f"что должен продавать сайт): {goal}\n\nHTML сайта (фрагмент):\n{html[:9000]}")
+    system, _pid = prompt_builder.company_system(
+        "critic_site_review", "orchestrator_1", "critic", user, with_brief=False)
     try:
         raw = await llm.run_agent(
-            system=sys, user=user, model=models_module.for_agent("orchestrator_1"),
+            system=system, user=user, model=models_module.for_agent("orchestrator_1"),
             max_tokens=500, use_search=False, agent_id="orchestrator_1",
         )
     except Exception:

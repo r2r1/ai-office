@@ -21,24 +21,8 @@ DEFAULT_QUESTION = (
     "Изучи кейсы, ниши, монетизацию, конкуренцию."
 )
 
-_SYSTEM_QUICK = """Ты — исследователь AI-офиса. Отвечай строго на основе данных из поиска.
-Сделай 1-2 целенаправленных запроса через web_search и сразу дай краткий конкретный ответ.
-Максимум 300 слов. Только факты и цифры — без воды. Не повторяй похожие запросы."""
-
-_SYSTEM_DEEP = """Ты — ведущий исследователь AI-офиса. Принимай решения строго на основе данных.
-
-Процесс:
-1. Сделай 3-5 целенаправленных запросов через web_search (не больше — не дублируй запросы).
-2. Охвати: тренды, кейсы, цифры, российский и мировой рынки.
-3. Синтезируй в структурированный отчёт.
-
-Формат отчёта:
-- Executive Summary (2-3 предложения)
-- Топ-3 варианта с оценкой потенциала
-- Рекомендованная стратегия (сроки оценивай для AI-офиса 24/7: часы/дни, а не месяцы)
-- Источники
-
-Пиши по-русски. Конкретные цифры, сроки, примеры."""
+# Тексты промптов ресёрчера — policies/researcher_{quick,deep}.md (собираются
+# prompt_builder.company_system, логируются в prompts.jsonl).
 
 _MAX_TOKENS = {"quick": 1000, "deep": 4000}
 _MAX_ITERS = {"quick": 3, "deep": 7}
@@ -52,7 +36,9 @@ async def run_async(
     agent_id: str = "researcher_1",
     save_report: bool = False,
 ) -> str:
-    system = _SYSTEM_QUICK if depth == "quick" else _SYSTEM_DEEP
+    from src.office import prompt_builder
+    policy_name = "researcher_quick" if depth == "quick" else "researcher_deep"
+    system, _pid = prompt_builder.company_system(policy_name, agent_id, "researcher", question)
 
     if publish:
         await publish({"type": "thinking", "agent_id": agent_id,

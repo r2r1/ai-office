@@ -116,29 +116,8 @@ def build_brief_structured(mode: str, answers: list[dict]) -> dict:
         "summary": summary,
     }
 
-_QUESTIONS_SYSTEM = """Ты — менеджер по работе с клиентами AI-офиса. Клиент прислал тебе
-свою идею / ссылки на соцсети / инструкции. Твоя задача — задать 3-5 КОРОТКИХ уточняющих
-вопросов, чтобы офис понял что делать.
-
-Спрашивай о главном: цель, ниша/продукт, целевая аудитория, бюджет, что уже есть,
-какой результат считается успехом. НЕ спрашивай про сроки — офис работает 24/7 и сам
-оценит реалистичное время достижения цели.
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{"questions": ["Вопрос 1?", "Вопрос 2?", "Вопрос 3?"]}"""
-
-_BRIEF_SYSTEM = """Ты — менеджер AI-офиса. На основе ввода клиента и его ответов на вопросы
-сформируй структурированный бриф, по которому будет работать весь офис.
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "niche": "ниша/сфера клиента",
-  "goal": "конкретная цель клиента",
-  "audience": "целевая аудитория",
-  "assets": "что уже есть у клиента (соцсети, продукт, бюджет)",
-  "research_question": "конкретный вопрос для агента-ресёрчера про тренды и тактику в этой нише",
-  "summary": "краткое резюме брифа в 3-4 предложениях для всех агентов офиса"
-}"""
+# Тексты онбординга — policies/onboarding_{questions,brief}.md. Слот Brief НЕ
+# подмешивается (with_brief=False): бриф здесь ещё только формируется.
 
 
 async def make_questions(
@@ -151,9 +130,13 @@ async def make_questions(
                        "text": "Изучаю ваш запрос, готовлю вопросы..."})
 
     from src.office import models as models_module
+    from src.office import prompt_builder
+    user = f"Ввод клиента:\n{client_input[:3000]}"
+    system, _pid = prompt_builder.company_system(
+        "onboarding_questions", "onboarding_1", "onboarding", user, with_brief=False)
     raw = await llm.run_agent(
-        system=_QUESTIONS_SYSTEM,
-        user=f"Ввод клиента:\n{client_input[:3000]}",
+        system=system,
+        user=user,
         model=models_module.get_default(),
         max_tokens=500,
         use_search=False,
@@ -184,8 +167,11 @@ async def build_brief(
                        "text": "Формирую бриф для офиса..."})
 
     from src.office import models as models_module
+    from src.office import prompt_builder
+    system, _pid = prompt_builder.company_system(
+        "onboarding_brief", "onboarding_1", "onboarding", user, with_brief=False)
     raw = await llm.run_agent(
-        system=_BRIEF_SYSTEM,
+        system=system,
         user=user,
         model=models_module.get_default(),
         max_tokens=800,

@@ -12,32 +12,11 @@ from typing import Optional, Callable, Awaitable
 
 from src.core import llm
 from src.office import registry, models as models_module, org as org_module
+from src.office import prompt_builder
 from src.agents.orchestrator import _parse_json
 
-_LEADER_SYSTEM = """Ты — руководитель отдела в автономной AI-компании ({title}). CEO поставил
-твоему отделу цель. Ты НЕ делаешь работу руками — ты управляешь подчинёнными: на каждом ходу
-принимаешь ОДНО решение — поручить задачу свободному работнику, нанять отсутствующего работника
-своего отдела или подождать.
-
-Работники твоего отдела и их зоны: {roles_desc}
-
-Принципы:
-- Двигай отдел к цели от CEO. Ставь конкретные, выполнимые задачи с измеримым результатом.
-- Не повторяй задачи, которые работник уже сделал или делает прямо сейчас.
-- ЕДИНАЯ ОТВЕТСТВЕННОСТЬ: на каждую роль ОДИН работник. Если нужный занят — wait, не клонируй.
-- Если нужной роли нет в отделе — найми (только из ролей своего отдела).
-- Все API-ключи доступны любому через get_connection — не выбирай работника «потому что у него ключ».
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{{
-  "thought": "краткая мысль (1 предложение, по-русски)",
-  "action": "assign" | "hire" | "wait",
-  "agent_id": "id работника для assign (например developer_1)",
-  "role": "роль для hire (одна из ролей отдела)",
-  "task": "конкретная задача (для assign или hire)",
-  "skill": "специализация при найме, иначе null",
-  "report": "краткий отчёт для CEO о состоянии отдела"
-}}"""
+# Текст промпта лидера — policies/leader_decide.md (собирается prompt_builder.
+# company_system с {title}/{roles_desc} и слотом Brief, логируется в prompts.jsonl).
 
 _ROLE_DESC = {
     "developer": "developer — КАСТОМНЫЙ код (НЕ нужен для обычного бота записи), сайты, автоматизации",
@@ -125,8 +104,14 @@ async def decide(
         f"Прими ОДНО решение: assign (поручить свободному), hire (нанять отсутствующую роль отдела) или wait."
     )
 
+    system, _pid = prompt_builder.company_system(
+        "leader_decide", lead_id or "orchestrator_1",
+        org_module.lead_role(dept_id) or "leader", user,
+        fmt={"title": title, "roles_desc": roles_desc},
+        extra=_DEPT_HINTS.get(dept_id, ""),
+    )
     raw = await llm.run_agent(
-        system=_LEADER_SYSTEM.format(title=title, roles_desc=roles_desc) + _DEPT_HINTS.get(dept_id, ""),
+        system=system,
         user=user,
         model=models_module.for_agent(lead_id or "orchestrator_1"),
         max_tokens=600,
