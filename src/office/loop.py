@@ -1016,13 +1016,20 @@ async def _assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                 verdict = acceptance.check(t_rec.get("title", task) or task, role, result or "",
                                            done_criterion=t_rec.get("done_criterion", ""),
                                            started_ts=_job_t0)
+                warns = verdict.get("warnings", [])
                 trace.log("acceptance", agent=agent_id, task_id=task_id,
                           passed=verdict["passed"], levels=str(verdict["levels"]),
-                          problems="; ".join(verdict["problems"])[:200])
+                          problems="; ".join(verdict["problems"])[:200],
+                          warnings="; ".join(warns)[:200])
                 if verdict["passed"]:
                     plan.complete(task_id, acceptance=verdict)
+                    note = " (приёмка пройдена)"
+                    if warns:
+                        # L1: работа принята, но вне согласованного контракта — не блок,
+                        # а сигнал владельцу/CEO (предупреждение живёт в вердикте задачи).
+                        note = " ⚠ принята с замечанием: " + "; ".join(warns)[:120]
                     await publish({"type": "system",
-                                   "text": f"✅ Задача {task_id} принята (приёмка пройдена)"})
+                                   "text": f"✅ Задача {task_id}{note}"})
                 else:
                     attempts = plan.revert(task_id)
                     fb = acceptance.feedback_text(verdict)

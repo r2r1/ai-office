@@ -474,6 +474,34 @@ company_system` и логируются в `prompts.jsonl` с ролью. 14 pol
 
 ---
 
+## ✅ 2026-07-03 (Phase 1b) — Acceptance L1 (сверка со спецификацией)
+
+Подключён `specification` к приёмке. DoD: задача, чей `done_criterion` расходится с
+контрактом (`success_criteria`), получает предупреждение в вердикте, даже если
+build/functional прошли — **мягкий сигнал, не жёсткий гейт** (подтверждение
+владельца в v1 опционально).
+
+- Новые `specification.covers(criterion)` (сверка: точное совпадение нормализованного
+  текста ИЛИ ≥60% перекрытие токенов через `needs.tokens`) и `specification.status()`.
+- `acceptance.check` получил уровень **L1 `specification`** (`ok`/`warn`/`skip`) +
+  список `warnings` + поле `confidence` (`high` при confirmed без замечаний, иначе
+  `normal`). `passed` по-прежнему считается только по жёстким уровням (build/
+  functional/acceptance) — L1 не проваливает задачу.
+- `loop`: при пройденной приёмке с замечанием L1 — сообщение «⚠ принята с
+  замечанием…», warnings пишутся в trace и в вердикт задачи (виден в UI/History).
+
+Спецификация формируется в bootstrap (`loop.py:256`, `specification.ensure()`),
+собирается из done_criterion задач плана — критерии ИСХОДНЫХ задач покрыты по
+построению; предупреждение ловит задачи, добавленные ПОЗЖЕ (делегирование/
+директива/инициатива/fix) вне согласованного объёма.
+
+Проверено: py_compile, импорт `server`, смоук L1 (совпадение→ok; расхождение→warn
+при passed=True; confirmed→confidence high). LLM не вызывался ($0).
+
+**Phase 1 (a+b) закрыт.** Дальше по карте — Phase 2 (Capability + Artifacts).
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

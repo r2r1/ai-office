@@ -67,6 +67,38 @@ def checklist() -> list[str]:
     return list(get().get("success_criteria", []))
 
 
+def covers(criterion: str) -> bool:
+    """Покрыт ли `criterion` (done_criterion задачи) контрактом приёмки
+    (success_criteria спецификации). Спецификация собирается из done_criterion
+    задач плана — критерий исходной задачи в ней есть по построению. Задача,
+    добавленная ПОЗЖЕ (делегирование/директива/инициатива/fix), может нести
+    критерий ВНЕ согласованного контракта — тогда приёмка помечает это
+    предупреждением (Acceptance L1, не жёсткий провал — v1).
+
+    Сверка: точное совпадение нормализованного текста ИЛИ высокое перекрытие
+    токенов (≥60% токенов критерия покрыты одним из success_criteria) — устойчиво
+    к мелким переформулировкам, не к смене сути работы."""
+    from src.office import needs
+    crit = " ".join((criterion or "").lower().split())
+    if not crit:
+        return True  # нет критерия — нечего сверять
+    crit_tokens = needs.tokens(criterion)
+    if not crit_tokens:
+        return True
+    for sc in get().get("success_criteria", []):
+        if " ".join((sc or "").lower().split()) == crit:
+            return True
+        common = len(crit_tokens & needs.tokens(sc))
+        if common >= max(1, int(len(crit_tokens) * 0.6)):
+            return True
+    return False
+
+
+def status() -> str:
+    """Статус контракта: 'draft' | 'confirmed' | '' (нет спецификации)."""
+    return get().get("status", "") if get().get("functions") else ""
+
+
 def context_block() -> str:
     """Блок спецификации для промптов (или '')."""
     spec = get()

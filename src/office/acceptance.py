@@ -71,12 +71,29 @@ def check(task_title: str, role: str, result: str,
     в ЗАГОЛОВКЕ проверяются по сайту всегда (явная ответственность).
     """
     problems: list[str] = []
-    levels: dict[str, str] = {"build": "skip", "functional": "skip", "acceptance": "ok"}
+    warnings: list[str] = []
+    levels: dict[str, str] = {"specification": "skip", "build": "skip",
+                              "functional": "skip", "acceptance": "ok"}
 
     # L5 (базовый): пустая сдача — не результат (обрыв/только tool-calls)
     if not (result or "").strip():
         problems.append("пустая сдача — агент не вернул результат")
         levels["acceptance"] = "fail"
+
+    # L1 Specification: критерий готовности задачи сверяется с контрактом приёмки
+    # (success_criteria). Расхождение — МЯГКОЕ предупреждение (не проваливает build/
+    # functional), т.к. подтверждение владельца в v1 опционально (BOS §8 L1). Сигналит
+    # работу вне согласованного контракта — задачи, добавленные после спецификации.
+    from src.office import specification
+    spec_status = specification.status()
+    if spec_status and (done_criterion or "").strip():
+        if specification.covers(done_criterion):
+            levels["specification"] = "ok"
+        else:
+            levels["specification"] = "warn"
+            warnings.append(
+                "критерий готовности задачи не совпадает с контрактом приёмки "
+                "(success_criteria спецификации) — работа вне согласованного объёма")
 
     # L2 Build: код обязан собираться (py + js/esm) — файлы, тронутые этой задачей
     if role in _CODING_ROLES and workspace.list_files():
@@ -94,7 +111,17 @@ def check(task_title: str, role: str, result: str,
         levels["functional"] = "fail" if site_critical else "ok"
         problems += [f"сайт: {p}" for p in site_critical[:3]]
 
-    return {"passed": not problems, "problems": problems, "levels": levels}
+    # Уверенность приёмки — модификатор от статуса контракта (не гейт): подтверждённая
+    # владельцем спецификация без предупреждений → high; черновик или расхождение → ниже.
+    if warnings or spec_status == "draft":
+        confidence = "normal"
+    elif spec_status == "confirmed":
+        confidence = "high"
+    else:
+        confidence = "normal"
+
+    return {"passed": not problems, "problems": problems, "warnings": warnings,
+            "levels": levels, "confidence": confidence}
 
 
 def feedback_text(verdict: dict) -> str:
