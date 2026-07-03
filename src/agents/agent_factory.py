@@ -825,6 +825,15 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         # кейс: marketer сдавал out_len=0 на 8 итерациях, задача перезапускалась с нуля).
         max_iter = 15 if role in ("developer", "designer") else 10
 
+        # execute_code исполняет процесс без изоляции от ФС хоста (security-долг,
+        # docs/audit-dd-2026-07.md §17) — выключен оператором по умолчанию. Инструмент
+        # прячем из каталога ЦЕЛИКОМ (не только блокируем вызов): модель не тратит
+        # токены/итерации на действие, которое ей всё равно откажут (workspace.
+        # execute_code вернул бы _DISABLED_MSG, но лучше вообще не предлагать выбор).
+        _code_exec_tools = [_EXECUTE_CODE_TOOL] if workspace_module.code_execution_allowed() else []
+        _code_exec_handlers = ({"execute_code": _handle_execute_code}
+                               if workspace_module.code_execution_allowed() else {})
+
         result = await llm.run_agent(
             system=system,
             user=task,
@@ -841,7 +850,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                          _LIST_INTEGRATIONS_TOOL, _USE_CAPABILITY_TOOL, _USE_INTEGRATION_TOOL,
                          _USE_SKILL_TOOL, _FIND_SKILLS_TOOL,
                          _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
-                         _EXECUTE_CODE_TOOL, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
+                         *_code_exec_tools, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
@@ -859,7 +868,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "read_file": _handle_read_file,
                 "list_files": _handle_list_files,
                 "verify_code": _handle_verify_code,
-                "execute_code": _handle_execute_code,
+                **_code_exec_handlers,
                 "delete_file": _handle_delete_file,
                 "configure_bot": _handle_configure_bot,
             },

@@ -23,6 +23,27 @@ async function postJSON<T>(url: string, body: unknown, fallback: T): Promise<T> 
   }
 }
 
+// Как postJSON, но читает JSON-тело даже при !ok (403 и т.п.) — эндпоинты вроде
+// /api/run и /api/terminal возвращают понятную причину отказа (например, «код
+// выполнения отключён оператором») в теле 403, а не только в статусе; обычный
+// postJSON эту причину теряет, подменяя её generic-фолбэком.
+async function postJSONReadBody<T>(url: string, body: unknown, fallback: T): Promise<T> {
+  try {
+    const r = await fetch(url, {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    try {
+      return (await r.json()) as T
+    } catch {
+      return fallback
+    }
+  } catch {
+    return fallback
+  }
+}
+
 // Для эндпоинтов, отдающих сырой текст (не JSON), например содержимое файла.
 async function getText(url: string): Promise<string> {
   try {
@@ -61,8 +82,8 @@ export const api = {
   // /api/file отдаёт СЫРОЙ текст — читаем как текст, не как JSON.
   fileContent: async (path: string) => ({ content: await getText(`/api/file?path=${encodeURIComponent(path)}`) }),
   rawUrl: (path: string) => `/api/raw/${path.split("/").map(encodeURIComponent).join("/")}`,
-  runFile: (path: string) => postJSON<any>("/api/run", { path }, { ok: false, output: "Ошибка запроса" }),
-  terminal: (cmd: string, cwd = "") => postJSON<any>("/api/terminal", { cmd, cwd }, { ok: false, output: "Ошибка запроса" }),
+  runFile: (path: string) => postJSONReadBody<any>("/api/run", { path }, { ok: false, output: "Ошибка запроса" }),
+  terminal: (cmd: string, cwd = "") => postJSONReadBody<any>("/api/terminal", { cmd, cwd }, { ok: false, output: "Ошибка запроса" }),
   models: () => getJSON<any>("/api/models", { default: "", presets: [], per_agent: {}, per_role: {} }),
   setModel: (model: string) => postJSON<any>("/api/model", { model }, null),
   digest: () => getJSON<any>("/api/digest", { items: [], count: 0, since: "", is_first: true }),

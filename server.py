@@ -1063,7 +1063,15 @@ async def get_raw_file(path: str):
 
 @app.post("/api/run")
 async def run_file(request: Request):
-    """Запустить файл из рабочей папки (.py / .js / .sh) и вернуть вывод."""
+    """Запустить файл из рабочей папки (.py / .js / .sh) и вернуть вывод.
+
+    ⚠️ Исполнение процесса не изолировано от файловой системы хоста
+    (docs/audit-dd-2026-07.md §17) — выключено по умолчанию оператором.
+    """
+    if not workspace_module.code_execution_allowed():
+        return JSONResponse(
+            {"ok": False, "error": "code_execution_disabled",
+             "output": workspace_module._DISABLED_MSG}, status_code=403)
     data = await request.json()
     path = (data.get("path") or "").strip()
     stdin = data.get("stdin") or ""
@@ -1076,7 +1084,16 @@ async def run_file(request: Request):
 
 @app.post("/api/terminal")
 async def terminal(request: Request):
-    """Терминал рабочей папки: выполняет команду в workspace тенанта (cwd — подпапка)."""
+    """Терминал рабочей папки: выполняет команду в workspace тенанта (cwd — подпапка).
+
+    ⚠️ shell=True не ограничивает саму команду (path traversal через `cat ../../
+    <tenant>/...`, чтение .env и т.п.) — docs/audit-dd-2026-07.md §17. Выключено
+    по умолчанию оператором до появления реальной песочницы исполнения.
+    """
+    if not workspace_module.code_execution_allowed():
+        return JSONResponse(
+            {"ok": False, "error": "code_execution_disabled",
+             "output": workspace_module._DISABLED_MSG}, status_code=403)
     data = await request.json()
     cmd = (data.get("cmd") or "").strip()
     cwd = (data.get("cwd") or "").strip()

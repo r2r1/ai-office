@@ -83,6 +83,9 @@ APP_BASE_URL=...                # для GitHub OAuth / Telegram webhook в пр
 APINET_ACCESS_TOKEN=...         # opt-in: автогенерация per-tenant LLM-ключа
 APINET_USER_ID=...
 APINET_TENANT_QUOTA=...
+ALLOW_CODE_EXECUTION=0          # 1 = разрешить execute_code/run_command (терминал);
+                                # без песочницы это исполнение БЕЗ изоляции от ФС
+                                # хоста — security-долг, docs/audit-dd-2026-07.md §17
 ```
 
 ### Минимальная проверка перед коммитом

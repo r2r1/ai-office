@@ -1,14 +1,40 @@
 """
 Рабочая папка проекта — агенты пишут реальный код. По тенанту:
 data/tenants/<tid>/workspace/. Защита от выхода за пределы каталога.
+
+⚠️ execute_code/run_command исполняют процесс (интерпретатор/shell) БЕЗ
+изоляции от файловой системы хоста — `_safe()` защищает только путь ФАЙЛА,
+который запускается, а не то, что делает запущенный код/команда. Python-скрипт
+или shell-команда внутри workspace могут прочитать `../../<чужой-tenant>/
+connections.json`, `.env` и т.д. с правами процесса сервера (реальная находка
+DD-аудита, docs/audit-dd-2026-07.md §17 — критический security-долг). Полная
+изоляция (контейнер/sandbox) — отдельная задача; v1-фикс: обе функции по
+умолчанию ВЫКЛЮЧЕНЫ (opt-in через ALLOW_CODE_EXECUTION=1), пока изоляция не
+построена. НЕ снимай это ограничение без контейнеризации исполнения.
 """
 
+import os
 import re
 from pathlib import Path
 
 from src.saas import context as ctx
 
 MAX_FILE_BYTES = 200_000
+
+# Единая точка правды: разрешено ли исполнение кода/shell-команд из workspace.
+# Читаем ЛЕНИВО (не на импорт модуля) — тесты и .env могут выставлять переменную
+# после старта процесса; редко вызываемая функция, не критично к производительности.
+def code_execution_allowed() -> bool:
+    return os.getenv("ALLOW_CODE_EXECUTION", "0") == "1"
+
+
+_DISABLED_MSG = (
+    "❌ Исполнение кода отключено оператором платформы (ALLOW_CODE_EXECUTION=0) — "
+    "критический security-риск без песочницы (см. docs/audit-dd-2026-07.md §17): "
+    "запущенный процесс не изолирован от файловой системы хоста и может прочитать "
+    "данные других клиентов. Проверяй код через verify_code (компиляция) или "
+    "перечитай файл глазами; включить исполнение может только оператор."
+)
 
 
 def _base() -> Path:
@@ -252,6 +278,9 @@ def execute_code(path: str, stdin_input: str = "") -> str:
     import subprocess
     import sys
 
+    if not code_execution_allowed():
+        return _DISABLED_MSG
+
     full = _safe(path)
     if full is None or not full.is_file():
         return f"Файл не найден: {path}"
@@ -336,6 +365,9 @@ def run_command(cmd: str, cwd_rel: str = "") -> str:
     Ограничения: таймаут 30 сек, рабочая директория — внутри workspace.
     """
     import subprocess
+
+    if not code_execution_allowed():
+        return _DISABLED_MSG
 
     cmd = (cmd or "").strip()
     if not cmd:
