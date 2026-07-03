@@ -38,10 +38,18 @@ def record(
     data_used: list | None = None,
     made_by: str = "orchestrator_1",
     prompt_id: str = "",
+    status: str = "applied",
+    plan_diff: dict | None = None,
+    checks: list | None = None,
+    reject_reason: str = "",
 ) -> str:
     """Сохранить решение CEO. Возвращает id записи. `prompt_id` — ссылка на
     промпт (prompt_builder.log_prompt), породивший решение: по нему Observability
-    строит цепочку промпт → решение → исполнение → diff мира."""
+    строит цепочку промпт → решение → исполнение → diff мира.
+
+    Поля решения-как-транзакции (BOS §14 п.3, Phase 5): `status` (applied|rejected),
+    `plan_diff` (предложенный diff плана/мира), `checks` (вердикты Sandbox-проверок),
+    `reject_reason` (почему отклонено) — отклонённое решение видно в /api/decisions."""
     did = f"d_{uuid.uuid4().hex[:8]}"
     items = _load()
     items.append({
@@ -58,6 +66,10 @@ def record(
         "data_used": data_used or [],
         "prompt_id": prompt_id or "",
         "snapshot_id": "",     # ставится world.save_snapshot после применения решения
+        "status": status,      # applied | rejected (решение-транзакция)
+        "plan_diff": plan_diff or {},
+        "checks": checks or [],
+        "reject_reason": (reject_reason or "")[:300],
         "confirmed_by": None,  # "user" | "auto" — кем подтверждено
         "result": None,
         "result_ts": None,

@@ -1450,34 +1450,26 @@ async def _steer_from_chat(text: str) -> None:
         intent_module.set_interpretation(_intent["id"], scope=scope, directive=directive,
                                          tasks_added=len(new_tasks))
 
+    rejected_reason = ""
     if scope == "steer":
         # приоритетная директива — её чтят CEO и лидеры в своих решениях
         memory.remember("Указание предпринимателя (приоритет)", directive or text)
 
-        for op in ops if isinstance(ops, list) else []:
-            try:
-                kind = (op.get("op") or "").strip()
-                if kind == "add" and op.get("title"):
-                    milestones.insert_business_stage(op["title"], op.get("after"))
-                    changes.append(f"новый этап «{op['title'][:40]}»")
-                elif kind == "retitle" and op.get("id") and op.get("title") and milestones.retitle(op["id"], op["title"]):
-                    changes.append(f"этап → «{op['title'][:40]}»")
-                elif kind == "focus" and op.get("id"):
-                    milestones.mark_active(op["id"]); changes.append("сдвинут фокус этапов")
-                elif kind == "note" and op.get("id") and op.get("text"):
-                    milestones.add_item(op["id"], op["text"], agent_id="orchestrator_1", role="orchestrator")
-            except Exception:
-                pass
-
-        for t in new_tasks if isinstance(new_tasks, list) else []:
-            role = (t.get("role") or "").strip()
-            title = (t.get("title") or "").strip()
-            if role in _STEER_ROLES and title:
-                plan_module.add_task(title, role, t.get("done_criterion", ""), requested_by="orchestrator_1")
-                changes.append(f"задача «{title[:36]}» → {role}")
-
-        if ops or new_tasks:
+        # Решение как ТРАНЗАКЦИЯ (BOS §14 п.3, Phase 5): директива → PlanDiff →
+        # Sandbox-проверки (бюджет/конфликт артефактов/вето Конституции) → apply|reject.
+        # Больше НЕ мутируем план/вехи напрямую — только через прошедший проверки diff.
+        from src.office import decision_engine
+        plan_diff = {
+            "add_tasks": new_tasks if isinstance(new_tasks, list) else [],
+            "milestone_ops": ops if isinstance(ops, list) else [],
+        }
+        outcome = decision_engine.decide(plan_diff, made_by="orchestrator_1",
+                                         thought=directive or text[:120])
+        changes = outcome["changes"]
+        if outcome["applied"]:
             office_loop.wake_tenant()  # офис мог быть в мониторинге — пусть переоценит
+        elif outcome["reason"] and not decision_engine.is_empty(plan_diff):
+            rejected_reason = outcome["reason"]
 
     # ответ CEO в общий чат (предприниматель видит, что его услышали)
     if reply:
@@ -1486,6 +1478,11 @@ async def _steer_from_chat(text: str) -> None:
                            "text": reply, "id": cmsg["id"]})
     if changes:
         await bus.publish({"type": "system", "text": "📌 План обновлён: " + "; ".join(changes[:6])})
+    if rejected_reason:
+        # Автономность — торговля, не молчаливый саботаж (BOS §2): показываем цену отказа.
+        await bus.publish({"type": "system",
+                           "text": f"⚖️ Решение по вашему запросу отклонено проверками: {rejected_reason}. "
+                                   f"Смотрите «Решения» — там причина. Уточните или снимите ограничение."})
 
 
 @app.get("/api/world")

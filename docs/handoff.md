@@ -620,6 +620,45 @@ DoD: тенант с закрытым планом и целью «10 заяво
 
 ---
 
+## ⚖️ 2026-07-03 (Phase 5) — Decision Engine как diff + Sandbox
+
+Решение владельца больше НЕ мутирует план напрямую — проходит транзакцию
+`propose → check → apply|reject` (BOS §14 п.3). Единственное серьёзное
+несоответствие инварианту закрыто.
+
+- Новый `office/sandbox.py` — **универсальный механизм** `run(subject, change,
+  checks) -> {ok, checks, vetoed_by}` (BOS §9, engineering-principles §7: механизм,
+  не сущность под каждый случай). Sandbox НЕ применяет change к миру — клонирует
+  срез, прогоняет проверки, выносит вердикт; merge/discard решает потребитель.
+- Новый `office/decision_engine.py` — первый потребитель Sandbox. `PlanDiff`
+  {add_tasks, milestone_ops, remove_tasks, dept_ops}; `decide(diff)` =
+  propose→check→apply|reject. Три ДЕТЕРМИНИРОВАННЫХ проверки-вето:
+  - **бюджет** (`costs.would_exceed` по сумме `estimate_cost` задач),
+  - **конфликт артефактов** (site-задача, пока site в работе — мьютекс Phase 2 по
+    декларации),
+  - **вето Конституции** (платный конструктор Tilda/BotsBox/… без одобрения ИЛИ
+    явное правило владельца «не …»). Раньше запрет жил только текстом в промпте
+    CEO — LLM могла проигнорировать; теперь код не может.
+- `decisions.record` расширен: `status` (applied|rejected), `plan_diff`, `checks`,
+  `reject_reason` — отклонённое решение видно в `/api/decisions`.
+- `server` (`/api/chat` steer-ветка): директива → PlanDiff → `decision_engine.decide`
+  вместо прямой мутации плана/вех. Отклонение показывается владельцу в ленте
+  («цену выбора», BOS §2: автономность — торговля, не саботаж).
+
+DoD: директива проходит propose→check→apply|reject, не пишет план напрямую;
+отклонённое (бюджет/Tilda) видно в /api/decisions с причиной. Смоук: обычная
+директива→applied+задача; Tilda→veto Конституции; крошечный лимит→veto бюджета;
+отклонённое в журнале со статусом+причиной; пустой diff — не решение. $0.
+
+**Осталось (осознанно):** `decide_company` меняет ОРГструктуру (open/close/delegate)
+напрямую — Phase 5 DoD про директиву владельца (сделано); оргрешения структурны и
+ниже риском, кандидат на ту же транзакцию в отдельном шаге. `remove_tasks`/`dept_ops`
+в PlanDiff зарезервированы (директивы их пока не порождают).
+
+**Дальше:** Phase 6 (Execution Policy на Capability + расслоение loop.py) — финал карты.
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt
