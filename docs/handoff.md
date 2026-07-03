@@ -413,6 +413,38 @@ Acceptance L1). Обе дёшевы и без внешних зависимос�
 
 ---
 
+## 🧱 2026-07-03 (Phase 1a, шаг 1/N) — Prompt Builder: миграция CEO
+
+Начало Phase 1 (полное покрытие Prompt Builder). Многофайловая миграция —
+делается по потребителю. **Шаг 1: orchestrator (CEO), 6 промптов.**
+
+- 6 литералов `orchestrator._*_SYSTEM` (`_COMPANY/_MILESTONES/_DIRECTIVE/_PLAN/
+  _BOARD/_INITIATIVE`) вынесены в файлы `office/policies/ceo_*.md`. В `orchestrator.py`
+  промпт-литералов больше нет.
+- Новый `prompt_builder.company_system(policy_name, agent_id, role, task,
+  with_brief=True) -> (system, prompt_id)`: политика (.md) + тот же слот **Brief**,
+  что у воркеров (единственный сериализатор goal≠niche — `brief_block`) + полный
+  лог в `prompts.jsonl`. Теперь в журнале есть записи `role="orchestrator"` наравне
+  с воркерами (раньше решения CEO отлаживались вслепую).
+- Хендлерные `user`-сообщения CEO очищены от ручной сериализации goal/niche —
+  их теперь несёт слот Brief в system (принцип №11 «один сериализатор»).
+- `decide_company` кладёт `_prompt_id` в результат → `loop` пишет его в
+  `decisions.record(prompt_id=…)` → **полная линковка Decision↔промпт из Phase 0.5
+  зажглась** (раньше сшивка была только по времени).
+
+Проверено: `py_compile`, импорт `server`+`orchestrator`, `company_system` собирает
+и логирует промпт (`role=orchestrator`, pid возвращается), все 6 политик грузятся,
+grep литералов `_*_SYSTEM` пуст. LLM не вызывался ($0).
+
+**Осталось в Phase 1a (следующие шаги):** `leaders._LEADER_SYSTEM` (нужен fmt-слот:
+{title}/{roles_desc}), `researcher/strategist/architect.SYSTEM_PROMPT`,
+`onboarding._QUESTIONS_SYSTEM/_BRIEF_SYSTEM`, `critic.review_site_llm`,
+`board/initiative` уже сделаны. Затем **Phase 1b — Acceptance L1**
+(`specification.checklist()` → сверка в приёмке). DoD Phase 1 (grep без литералов
+во всём `src/agents`+`src/office`) закрывается по завершении всех потребителей.
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

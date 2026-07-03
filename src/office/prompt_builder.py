@@ -74,6 +74,23 @@ def brief_block() -> str:
     return "\n\n=== БРИФ КЛИЕНТА (всегда держи в контексте) ===\n" + "\n".join(parts)
 
 
+def company_system(policy_name: str, agent_id: str, role: str, task: str,
+                   with_brief: bool = True) -> tuple[str, str]:
+    """Системный промпт для «штабных» ролей (CEO/лидеры/сервисные) из ЕДИНОГО места:
+    текст-политика (policies/<policy_name>.md) + тот же слот Brief, что у воркеров
+    (единственный сериализатор goal≠niche — brief_block). Промпт логируется целиком
+    в prompts.jsonl (раньше решения CEO отлаживались вслепую). Возвращает
+    (system, prompt_id) — prompt_id идёт в Decision для сшивки Observability.
+
+    Тексты промптов больше НЕ живут литералами в src/agents — только .md-политики
+    (engineering-principles §1 «бизнес-логика не в промптах-литералах», BOS §7)."""
+    system = policy(policy_name)
+    if with_brief:
+        system += brief_block()
+    pid = log_prompt(agent_id, role, system, task)
+    return system, pid
+
+
 def build(role: str, task: str, agent_id: str, skill: str = "") -> str:
     """Системный промпт воркера: Identity → Policies → Brief → Memory → Tools."""
     identity = roles.render(role)

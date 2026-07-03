@@ -9,6 +9,12 @@ Orchestrator (CEO) — вершина иерархии офиса.
   • board_decide / generate_initiative — совет директоров и инициативы.
 
 Работает через ядро llm.py, отвечает строгим JSON.
+
+Тексты системных промптов CEO живут файлами policies/ceo_*.md и собираются
+prompt_builder.company_system — с тем же слотом Brief (единственный сериализатор
+goal≠niche), что у воркеров, и с полным логом в prompts.jsonl (раньше решения CEO
+отлаживались вслепую). Литералов промптов в этом модуле нет — engineering-principles
+§1 «бизнес-логика не в промптах-литералах», BOS §7.
 """
 
 import json
@@ -16,109 +22,13 @@ from typing import Optional, Callable, Awaitable
 
 from src.core import llm
 from src.office import models as models_module, org as org_module
+from src.office import prompt_builder
 
 # Документированный инвариант «на роль — один агент» (CLAUDE.md §3.2). Enforcement
 # живёт в call-sites: registry.has_role (_hire_leader), leaders.decide («уже в отделе»),
 # детерминированная маршрутизация loop._run_leaders. Прежний LLM-решатель уровня
 # агентов (decide) удалён как мёртвый код — plan-driven цикл его не вызывал.
 MAX_PER_ROLE = 1
-
-_COMPANY_SYSTEM = """Ты — CEO автономной AI-компании. Ты НЕ делаешь работу руками и НЕ ставишь
-задачи отдельным сотрудникам — этим занимаются руководители отделов. Твоя задача — управлять
-СТРУКТУРОЙ компании: открывать отделы по необходимости, закрывать выполнившие свою цель и
-ставить отделам цели. Каждый ход — ОДНО решение.
-
-ОТДЕЛЫ (открывай только когда этого реально требует текущий этап):
-- tech (Технический отдел, лидер CTO): продукт, код, боты, сайты, автоматизации, интеграции.
-- marketing (Отдел маркетинга, лидер CMO): контент, соцсети, реклама, бренд, привлечение аудитории.
-- sales (Отдел продаж, лидер Head of Sales): поиск клиентов, переговоры, конверсия лидов, CRM.
-
-Принципы:
-- Если продукт (бот/сайт/код) ещё не создаётся, а цель/этап его требуют — СРАЗУ открой tech. Не тяни с wait.
-- Открывай отдел ТОЛЬКО при реальной потребности текущего этапа. Нет задачи на клиентов — не открывай продажи.
-- Не открывай уже открытый отдел. Если у открытого отдела выполнена цель — закрой его (close_department).
-- Если все нужные отделы открыты и работают — wait.
-- ПРИОРИТЕТ УКАЗАНИЙ ПОЛЬЗОВАТЕЛЯ: его решения главнее стратегии. Если в указаниях есть прямая
-  просьба (например «запусти бота») — НЕМЕДЛЕННО открой нужный отдел (бот/код/сайт → tech).
-
-Ты также ведёшь бизнес-этапы (вехи): помечай текущий и завершённый этап.
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "thought": "краткая мысль CEO (1 предложение, по-русски)",
-  "action": "open_department" | "close_department" | "delegate" | "wait",
-  "department": "tech | marketing | sales (для open/close/delegate)",
-  "objective": "конкретная цель отдела (для open_department/delegate), иначе null",
-  "done_reason": "почему отдел закрывается (для close_department), иначе null",
-  "current_milestone": "id текущего этапа",
-  "milestone_done": "id этапа, если ТОЛЬКО ЧТО завершён, иначе null",
-  "milestone_summary": "что достигнуто на завершённом этапе, иначе null",
-  "alternatives": [{"action": "...", "reason": "почему не выбрано"}],
-  "confidence": 75,
-  "risks": ["риск 1"],
-  "expected_effect": "что произойдёт после этого решения",
-  "data_used": ["strategy", "events", "user_directives"]
-}"""
-
-_MILESTONES_SYSTEM = """Ты — директор автономного AI-офиса. Раздели путь к ЦЕЛИ КЛИЕНТА на
-3-5 этапов, ведущих к ГОТОВОМУ РАБОЧЕМУ РЕЗУЛЬТАТУ — тому, что клиент попросил.
-
-🎯 Этапы должны заканчиваться СДАЧЕЙ результата клиенту, а не выдуманным ростом бизнеса.
-Для «лендинг, который приводит звонки» правильные этапы: подготовка контента/оффера →
-сборка лендинга → проверка и публикация → результат сдан (мониторинг заявок). НЕ добавляй
-этапы вроде «сбор 50 лидов», «первые продажи», «масштабирование до 1М», если клиент об
-этом НЕ просил — это уводит офис в бесконечные недостижимые задачи.
-
-Последний этап — всегда «результат готов / сдан» (после него офис мониторит, а не выдумывает работу).
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{"stages": [{"id": "content", "title": "Контент и оффер"}, {"id": "build", "title": "Сборка"}, {"id": "delivered", "title": "Результат готов"}]}
-
-id — короткий латиницей, title — по-русски. 3-5 этапов."""
-
-_DIRECTIVE_SYSTEM = """Ты — CEO автономного AI-офиса. Владелец бизнеса (предприниматель) написал
-тебе в общий чат. Твоя работа — ПОНЯТЬ запрос и ОРГАНИЧНО вписать его в текущую работу офиса:
-сориентировать команду, при необходимости подправить этапы и поставить новые задачи.
-
-Сначала определи характер сообщения (scope):
-- "steer"     — указание/просьба/новая цель, влияющая на работу (делаем X, добавь Y, поменяй приоритет).
-- "question"  — предприниматель что-то спрашивает (статус, «что сделано?»). Работу НЕ меняем.
-- "smalltalk" — благодарность/реплика без задачи. Работу НЕ меняем.
-
-Ответь предпринимателю КОРОТКО и по-деловому от первого лица (1–3 предложения, по-русски):
-что понял и что именно изменишь в работе. Не выдумывай уже выполненную работу.
-
-Если scope="steer" — сформулируй directive (суть указания одной фразой для команды) и при
-РЕАЛЬНОЙ необходимости:
-• milestone_ops — правки этапов (вех):
-    {"op":"add","title":"...","after":"<id этапа|null>"}   — добавить бизнес-этап
-    {"op":"retitle","id":"<id>","title":"..."}             — переименовать
-    {"op":"focus","id":"<id>"}                             — сделать этап текущим
-    {"op":"note","id":"<id>","text":"..."}                 — заметка-обоснование
-• new_tasks — НОВЫЕ задачи на доску, если запрос требует новой работы. Роль строго одна из:
-  developer, designer, integrator, marketer, salesman.
-    {"title":"...","role":"developer","done_criterion":"как проверить готовность"}
-
-Не дублируй уже идущую работу. Не плоди задачи, которых предприниматель не просил.
-Если ничего менять не нужно (question/smalltalk или указание уже учтено) — массивы пустые.
-
-⚠️ ЕСЛИ предприниматель указывает на КОНКРЕТНЫЙ ДЕФЕКТ в уже сданной работе (сайт неверно
-что-то продаёт, форма не работает, текст не соответствует бизнесу и т.п.) — это ВСЕГДА
-new_tasks с ролью designer/developer, даже если все задачи на доске "done". Правка этапов
-(milestone_ops) сама по себе НИЧЕГО не чинит — файл никто не тронет, если не поставить
-задачу. Реальный кейс бага: CEO ответил предпринимателю "скорректирую фокус лендинга",
-сдвинул этап через milestone_ops, но new_tasks оставил пустым — сайт остался
-неисправленным, потому что "фокус этапа" не заставляет никого редактировать файл.
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "reply": "ответ предпринимателю от лица CEO (1–3 предложения)",
-  "scope": "steer" | "question" | "smalltalk",
-  "directive": "нормализованная суть указания одной фразой (пусто если не steer)",
-  "milestone_ops": [],
-  "new_tasks": [],
-  "priority": "now" | "normal"
-}"""
 
 
 async def interpret_directive(
@@ -144,14 +54,9 @@ async def interpret_directive(
     ms_text = "\n".join(
         f"- {m.get('id')}: {m.get('title')} [{m.get('status')}]" for m in milestone_list
     ) or "(этапов ещё нет)"
-    biz_line = ""
-    if niche:
-        biz_line += f"Бизнес клиента — что он продаёт конечным покупателям: {niche}\n"
-    if audience:
-        biz_line += f"Аудитория — кому продаёт: {audience}\n"
+    # niche/audience/goal сериализует слот Brief в системном промпте (единый
+    # сериализатор), здесь — только оперативный контекст этого хода.
     user = (
-        f"{biz_line}Цель ЭТОГО прогона офиса (не то, что продаёт компания конечным "
-        f"покупателям): {goal}\n\n"
         f"Стратегия (кратко):\n{strategy[:500]}\n\n"
         f"Этапы сейчас:\n{ms_text}\n\n"
         f"Отделы:\n{departments_text or '(отделов пока нет)'}\n\n"
@@ -159,8 +64,10 @@ async def interpret_directive(
         f"=== СООБЩЕНИЕ ПРЕДПРИНИМАТЕЛЯ ===\n{message}\n\n"
         f"Пойми запрос и впиши его в текущую работу."
     )
+    system, _pid = prompt_builder.company_system(
+        "ceo_directive", "orchestrator_1", "orchestrator", user)
     raw = await llm.run_agent(
-        system=_DIRECTIVE_SYSTEM,
+        system=system,
         user=user,
         model=models_module.for_agent("orchestrator_1"),
         max_tokens=600,
@@ -196,9 +103,11 @@ async def plan_milestones(
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Разбиваю путь к цели на этапы..."})
 
-    user = f"Цель клиента: {goal}\n\nСтратегия:\n{strategy[:2500]}\n\nРаздели путь на этапы."
+    user = f"Стратегия:\n{strategy[:2500]}\n\nРаздели путь на этапы."
+    system, _pid = prompt_builder.company_system(
+        "ceo_milestones", "orchestrator_1", "orchestrator", user)
     raw = await llm.run_agent(
-        system=_MILESTONES_SYSTEM,
+        system=system,
         user=user,
         model=models_module.for_agent("orchestrator_1"),
         max_tokens=500,
@@ -219,46 +128,6 @@ async def plan_milestones(
     return stages[:6]
 
 
-_PLAN_SYSTEM = """Ты — операционный директор автономной AI-компании. На вход — цель клиента,
-стратегия и ТЗ. Составь граф задач, который ВЕДЁТ К ГОТОВОМУ РЕЗУЛЬТАТУ, который просил клиент.
-
-Доступные роли (ТОЛЬКО эти — у каждой есть отдел-исполнитель):
-- developer — кастомный код, скрипты, автоматизации
-- designer — красивые многостраничные сайты/лендинги (HTML/CSS/JS)
-- integrator — подключение внешних сервисов, запуск готового Telegram-бота записи
-- marketer — контент, тексты, офферы для САМОГО результата (например тексты лендинга)
-- salesman — поиск клиентов, офферы, карточки на картах, переговоры
-НЕ используй другие роли (analyst/researcher/architect) в задачах — их некому исполнять в отделах.
-
-🎯 ГЛАВНОЕ: задачи = только то, что нужно, чтобы ВЫПОЛНИТЬ ЗАПРОС КЛИЕНТА и довести до
-рабочего состояния. Это КОНЕЧНЫЙ набор задач — когда они сделаны, цель достигнута и офис
-останавливается. НЕ добавляй недостижимую/бесконечную работу, которую клиент не просил:
-«собрать 50 B2B-лидов», «холодный outreach», «продать лендинг другим компаниям»,
-«масштабирование» — НЕЛЬЗЯ, если клиент об этом прямо не просил. Для «лендинга под звонки»
-задачи: тексты/оффер (marketer) → сборка лендинга (designer) → проверка и публикация. Точка.
-
-🚫 НЕ ВЫДУМЫВАЙ ПРОДУКТ. Если клиент НЕ просил конкретный артефакт (сайт/лендинг/бот/приложение),
-а сформулировал стратегическую цель («открыть бизнес», «внедрять ИИ», «выйти на рынок») — НЕ
-строй лендинг по умолчанию. Тогда ПЕРВАЯ И ЕДИНСТВЕННАЯ задача: marketer готовит план запуска
-и рекомендации на основе стратегии и через ask_user СПРАШИВАЕТ клиента, что строить первым.
-Стройте продукт только когда клиент его явно выбрал. Упоминание продукта как услуги бизнеса
-клиента (напр. «продаю ботов») — это НЕ просьба построить такой продукт для него.
-
-Правила:
-- 3–7 задач, каждая — самостоятельный измеримый результат, ведущий к сдаче.
-- Указывай зависимости (deps) ТОЛЬКО когда задача реально требует результата другой.
-- Независимые задачи (без общих deps) офис делает ПАРАЛЛЕЛЬНО — используй это.
-- done_criterion — как проверить, что задача выполнена (конкретно).
-
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "tasks": [
-    {"id": "t1", "title": "...", "role": "designer", "deps": [], "done_criterion": "..."},
-    {"id": "t2", "title": "...", "role": "salesman", "deps": [], "done_criterion": "..."}
-  ]
-}"""
-
-
 async def plan_tasks(
     strategy: str,
     goal: str,
@@ -269,10 +138,12 @@ async def plan_tasks(
     if publish:
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Раскладываю цель на граф задач..."})
-    user = (f"Цель клиента: {goal}\n\nСтратегия:\n{strategy[:2000]}\n\n"
+    user = (f"Стратегия:\n{strategy[:2000]}\n\n"
             f"ТЗ (кратко):\n{tech_design[:1200]}\n\nСоставь граф задач.")
+    system, _pid = prompt_builder.company_system(
+        "ceo_plan", "orchestrator_1", "orchestrator", user)
     raw = await llm.run_agent(
-        system=_PLAN_SYSTEM,
+        system=system,
         user=user,
         model=models_module.for_agent("orchestrator_1"),
         max_tokens=900,
@@ -293,6 +164,8 @@ async def decide_company(
     """
     Решение CEO на уровне КОМПАНИИ: какой отдел открыть/закрыть/что ему поручить.
     Возвращает dict с action: open_department | close_department | delegate | wait.
+    Ключ `_prompt_id` в результате — ссылка на залогированный промпт для сшивки
+    Observability (Decision ← промпт, который его вызвал).
     """
     ms_lines = [f"- [{m['status']}] {m['id']}: {m['title']}" for m in milestones]
     ms_text = "\n".join(ms_lines) or "этапы ещё не заданы"
@@ -344,8 +217,8 @@ async def decide_company(
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Решаю, какие отделы нужны компании сейчас..."})
 
+    # goal сериализует слот Brief в системном промпте (единый сериализатор goal≠niche).
     user = (
-        f"Цель компании: {goal}\n\n"
         f"Стратегия (кратко):\n{strategy[:1500]}\n"
         f"{directives_section}\n"
         f"Этапы пути:\n{ms_text}\n\n"
@@ -355,8 +228,10 @@ async def decide_company(
         f"или wait."
     )
 
+    system, pid = prompt_builder.company_system(
+        "ceo_company", "orchestrator_1", "orchestrator", user)
     raw = await llm.run_agent(
-        system=_COMPANY_SYSTEM,
+        system=system,
         user=user,
         model=models_module.for_agent("orchestrator_1"),
         max_tokens=400,
@@ -383,19 +258,9 @@ async def decide_company(
             return {"action": "wait", "thought": f"Отдел {dept} уже открыт — жду"}
         if action in ("close_department", "delegate") and not org_module.is_open(dept):
             return {"action": "wait", "thought": f"Отдел {dept} не открыт — нечего {action}"}
+    # prompt_id решения → в Decision (loop читает decision["_prompt_id"]) для сшивки.
+    decision["_prompt_id"] = pid
     return decision
-
-
-_BOARD_SYSTEM = """Ты — CEO автономной AI-компании. Только что прошло заседание совета директоров.
-Ты выслушал позиции лидеров отделов. Прими итоговое решение по спорному вопросу.
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "conclusion": "финальное решение CEO (2-3 предложения, по-русски)",
-  "action_plan": ["шаг 1", "шаг 2"],
-  "confidence": 80,
-  "risks": ["остаточный риск"],
-  "expected_effect": "что изменится после выполнения плана"
-}"""
 
 
 async def board_decide(
@@ -416,8 +281,10 @@ async def board_decide(
         f"Позиции лидеров отделов:\n{pos_text}\n\n"
         "Прими финальное решение совета директоров."
     )
+    system, _pid = prompt_builder.company_system(
+        "ceo_board", "orchestrator_1", "orchestrator", user)
     raw = await llm.run_agent(
-        system=_BOARD_SYSTEM,
+        system=system,
         user=user,
         model=models_module.for_agent("orchestrator_1"),
         max_tokens=500,
@@ -431,20 +298,6 @@ async def board_decide(
     return result
 
 
-_INITIATIVE_SYSTEM = """Ты — CEO автономной AI-компании. На основе текущей ситуации
-предложи одну конкретную инициативу с оценкой эффекта и готовыми задачами.
-Ответь ТОЛЬКО валидным JSON без markdown:
-{
-  "title": "Краткое название инициативы",
-  "rationale": "Почему сейчас это важно (1-2 предложения, конкретные данные)",
-  "expected_outcome": "Конкретный ожидаемый результат (например: +15% конверсии)",
-  "estimated_effort": "1-2 цикла",
-  "tasks": [
-    {"title": "Задача 1", "role": "designer", "done_criterion": "..."}
-  ]
-}"""
-
-
 async def generate_initiative(
     goal: str,
     strategy: str,
@@ -453,13 +306,14 @@ async def generate_initiative(
 ) -> dict:
     """CEO генерирует проактивную инициативу на основе наблюдаемой возможности."""
     user = (
-        f"Цель компании: {goal}\n\n"
         f"Стратегия (кратко):\n{strategy[:800]}\n\n"
         f"Наблюдаемая возможность: {opportunity_summary}\n\n"
         "Сформулируй инициативу с конкретными задачами."
     )
+    system, _pid = prompt_builder.company_system(
+        "ceo_initiative", "orchestrator_1", "orchestrator", user)
     raw = await llm.run_agent(
-        system=_INITIATIVE_SYSTEM,
+        system=system,
         user=user,
         model=models_module.for_agent("orchestrator_1"),
         max_tokens=500,
