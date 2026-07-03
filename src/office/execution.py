@@ -25,7 +25,7 @@ import time
 from src.core import llm
 from src.office import (registry, state, plan, costs, control, knowledge, lessons,
                         trust, autonomy, critic, workspace, sites, brief, milestones,
-                        models as models_module)
+                        models as models_module, needs)
 from src.agents import researcher, strategist, agent_factory
 from src.saas import context as ctx
 
@@ -67,12 +67,12 @@ def engagement_needs_bot() -> bool:
     факт наличия bot.py — иначе случайно созданный агентом bot.py заставлял критик
     требовать «почини бота» на чисто сайтовом проекте (реальный баг из прода)."""
     b = brief.get()
-    hay = " ".join(str(b.get(k, "")) for k in ("goal", "summary", "niche")).lower()
-    if any(w in hay for w in ("бот", "bot", "telegram", "телеграм")):
+    hay = " ".join(str(b.get(k, "")) for k in ("goal", "summary", "niche"))
+    if needs.is_bot_reference(hay):
         return True
     try:
         for t in plan.all_tasks():
-            if any(w in (t.get("title", "").lower()) for w in ("бот", "bot", "telegram", "телеграм")):
+            if needs.is_bot_reference(t.get("title", "")):
                 return True
     except Exception:
         pass
@@ -214,7 +214,7 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
 
     # --- Верификация Telegram-бота ---
     # ВАЖНО: бот-проверку запускаем ТОЛЬКО если бот реально в задаче/цели клиента.
-    bot_related = any(w in task_l for w in ("бот", "bot", "telegram", "телеграм"))
+    bot_related = needs.is_bot_reference(task_l)
     if (bot_related or engagement_needs_bot()) and any(p in ("bot.py", "main.py") for p in files):
         bot_problems = critic.check_bot()
         if bot_problems:

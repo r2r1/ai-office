@@ -16,6 +16,8 @@ task.artifacts). Нехватка способности — не строка �
 Хранилища собственного нет: реестр вычисляется поверх plan + integrations.registry.
 """
 
+from src.office import needs
+
 # Каталог способностей: id → чем закрывается.
 #   backed_by: "platform" (встроено, всегда есть) | имя интеграции (нужно подключение)
 _CATALOG: dict[str, dict] = {
@@ -36,8 +38,9 @@ _CATALOG: dict[str, dict] = {
 # Слова задачи → capability_id. ЕДИНАЯ точка вывода required_capabilities (как
 # _derive_artifacts в plan.py): вывод делается ОДИН раз при генерации плана и
 # хранится в задаче; потребители читают декларацию, а не парсят заголовок заново.
+# «бот»/«bot» НЕ входят сюда голой подстрокой — needs.is_bot_reference (ниже)
+# матчит их отдельно с защитой от «работать/доработать» (см. needs.py).
 _NEED_WORDS: dict[str, tuple[str, ...]] = {
-    "telegram_bot": ("телеграм", "telegram", "бот", "bot", "aiogram"),
     "email":        ("письм", "email", "рассылк", "gmail"),
     "spreadsheet":  ("таблиц", "sheets"),
     "repo":         ("репозитор", "github", "git push"),
@@ -51,6 +54,8 @@ def derive_required(task: dict) -> list[str]:
     важны внешние доступы, которых может не быть."""
     title = (task.get("title") or "").lower()
     out = []
+    if needs.is_bot_reference(title):
+        out.append("telegram_bot")
     for cap, words in _NEED_WORDS.items():
         if any(w in title for w in words):
             out.append(cap)

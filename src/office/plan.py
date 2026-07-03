@@ -12,7 +12,7 @@
 import time
 
 from src.saas import context as ctx
-from src.office import org
+from src.office import org, needs
 
 _FILE = "plan.json"
 
@@ -47,7 +47,8 @@ def _valid_role(role: str) -> str:
 # Платформа имеет готовый движок записи (bot_engine) — его настраивает и запускает
 # integrator (launch_bot), кастомный код developer тут не нужен. Бот с НЕСТАНДАРТНОЙ
 # логикой (постинг в группу, парсинг, рассылка) — исключение, остаётся у developer.
-_BOT_WORDS = ("telegram", "телеграм", "бот", "aiogram", "chatbot", "чат-бот")
+# Детектор «бот» — needs.is_bot_reference (единая точка; НЕ голая подстрока «бот»,
+# см. предупреждение в needs.py про «работать/доработать»).
 _BOOKING_WORDS = ("запис", "бронир", "лид", "заяв", "букинг", "booking")
 _CUSTOM_BOT_WORDS = ("постинг", "парс", "групп", "кастом", "рассылк", "нестандарт")
 
@@ -59,7 +60,7 @@ def _route_role(role: str, title: str) -> str:
     if role not in ("developer", "designer", "integrator"):
         return role
     t = (title or "").lower()
-    is_bot = any(w in t for w in _BOT_WORDS)
+    is_bot = needs.is_bot_reference(t)
     if is_bot and any(w in t for w in _BOOKING_WORDS) \
             and not any(w in t for w in _CUSTOM_BOT_WORDS):
         return "integrator"
@@ -81,7 +82,7 @@ def _derive_artifacts(role: str, title: str) -> list[str]:
     """Тип артефакта задачи по роли+заголовку (единая точка вывода). LLM-план может
     задать `artifacts` явно — тогда вывод не нужен (см. set_tasks)."""
     t = (title or "").lower()
-    if any(w in t for w in _BOT_WORDS):
+    if needs.is_bot_reference(t):
         return ["bot"]
     if role in ("designer", "developer"):
         # designer/developer по умолчанию пишут в site/ (тот же инвертированный
