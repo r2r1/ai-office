@@ -19,6 +19,7 @@ loop импортирует все три (одностороннее напра
 
 import asyncio
 import os
+import time
 
 from src.office import bus, registry, brief, state, milestones, plan, control, costs
 from src.office import planning_engine, execution, bootstrap
@@ -29,6 +30,10 @@ from src.saas import store as saas_store
 
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "10"))
 MANAGER_POLL = 5          # как часто менеджер ищет новых тенантов для запуска
+# Как часто повторять «жду разблокировки X», пока офис простаивает из-за блокера —
+# не на каждом цикле (10с), иначе спам; не никогда (было реальным багом: офис молча
+# замирал навсегда, пока владелец не додумывался открыть «Проект → Задачи» сам).
+BLOCKED_HEARTBEAT_SECS = int(os.getenv("BLOCKED_HEARTBEAT_SECS", "600"))
 # Маршрутизация/CEO-оркестрация — в planning_engine.py; исполнение задачи (watchdog,
 # состояние живости, MAX_THINK_SECS/MAX_TASK_ATTEMPTS) — в execution.py; bootstrap
 # (ресёрч→стратегия, BOOTSTRAP_STEP_TIMEOUT) — в bootstrap.py.
@@ -38,6 +43,7 @@ MANAGER_POLL = 5          # как часто менеджер ищет новы
 _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый цикл
 _office_tasks: dict[str, asyncio.Task] = {}
 _completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
+_last_blocked_heartbeat: dict[str, float] = {}  # tid -> ts последнего напоминания о блокере
 
 
 def wake_tenant() -> None:
@@ -59,8 +65,34 @@ def forget_tenant(tid: str) -> None:
         task.cancel()
     execution.forget_tenant(tid)       # живость исполнения (thinking/agent_task/model_fail/current_ms)
     planning_engine.forget_tenant(tid)  # анти-цикл маршрутизации (_last_leader_sig)
-    for d2 in (_first_cycle_done, _completion_announced):
+    for d2 in (_first_cycle_done, _completion_announced, _last_blocked_heartbeat):
         d2.pop(tid, None)
+
+
+async def _heartbeat_if_blocked(publish) -> None:
+    """Пока has_actionable_move()==False (офису реально нечего делать) и есть
+    заблокированные задачи — периодически напоминаем владельцу, а не молчим
+    навсегда (реальный прод-инцидент: офис остановился без единого сообщения,
+    владелец решил, что всё зависло, хотя система корректно ждала его решения
+    по BOS §10 — просто никак об этом не сообщала после первого уведомления).
+    Не зовёт LLM — чистое чтение доски + троттлинг по времени, $0."""
+    if not plan.is_generated():
+        return
+    blocked = plan.blocked_tasks()
+    if not blocked:
+        return
+    tid = ctx.get_tenant()
+    now = time.time()
+    last = _last_blocked_heartbeat.get(tid, 0.0)
+    if now - last < BLOCKED_HEARTBEAT_SECS:
+        return
+    _last_blocked_heartbeat[tid] = now
+    titles = "; ".join(f"«{t.get('title','')[:60]}»" for t in blocked[:3])
+    more = f" и ещё {len(blocked) - 3}" if len(blocked) > 3 else ""
+    await publish({"type": "system",
+                   "text": f"⏸ Офис ждёт вашего решения по {len(blocked)} заблокированной(ым) "
+                           f"задаче(ам){more}: {titles}. Другой работы сейчас нет — "
+                           f"разблокируйте во вкладке «Проект → Задачи», чтобы продолжить."})
 
 
 def _engagement_complete() -> bool:
@@ -304,6 +336,7 @@ async def _run_office(tid: str) -> None:
             continue
         await execution.heal_stuck_agents(publish)  # самолечение: сбросить зависших
         if not planning_engine.has_actionable_move():
+            await _heartbeat_if_blocked(publish)
             await asyncio.sleep(LOOP_INTERVAL)
             continue
         await publish({"type": "system", "text": f"=== Рабочий цикл #{cycle} ==="})

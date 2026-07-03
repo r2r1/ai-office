@@ -55,13 +55,29 @@ async def interpret_directive(
     ms_text = "\n".join(
         f"- {m.get('id')}: {m.get('title')} [{m.get('status')}]" for m in milestone_list
     ) or "(этапов ещё нет)"
+    # Заблокированные задачи — с ПРИЧИНОЙ, не только счётчиком «⛔N» из board_summary.
+    # Раньше CEO видел лишь число и не мог связать вопрос владельца («а зачем нам
+    # бот?») с конкретным блокером — отвечал уклончиво вместо «вот эта задача
+    # заблокирована по такой-то причине» (реальный кейс, см. handoff).
+    from src.office import plan as plan_module
+    blocked = plan_module.blocked_tasks()
+    blocked_section = ""
+    if blocked:
+        lines = [f"- «{t.get('title','')[:100]}» ({t.get('role','')}): {t.get('blocked_reason','')[:200]}"
+                 for t in blocked[:5]]
+        blocked_section = (
+            "\n=== ЗАБЛОКИРОВАННЫЕ ЗАДАЧИ (ждут твоего решения) ===\n" + "\n".join(lines) +
+            "\nЕсли вопрос предпринимателя касается одной из них — назови её прямо и объясни причину "
+            "блокировки, не уходи в общие фразы.\n"
+        )
     # niche/audience/goal сериализует слот Brief в системном промпте (единый
     # сериализатор), здесь — только оперативный контекст этого хода.
     user = (
         f"Стратегия (кратко):\n{strategy[:500]}\n\n"
         f"Этапы сейчас:\n{ms_text}\n\n"
         f"Отделы:\n{departments_text or '(отделов пока нет)'}\n\n"
-        f"Доска задач: {board_summary or '(пусто)'}\n\n"
+        f"Доска задач: {board_summary or '(пусто)'}\n"
+        f"{blocked_section}\n"
         f"=== СООБЩЕНИЕ ПРЕДПРИНИМАТЕЛЯ ===\n{message}\n\n"
         f"Пойми запрос и впиши его в текущую работу."
     )
