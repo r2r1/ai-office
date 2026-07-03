@@ -52,8 +52,9 @@ export function roleIcon(role: string): string  { return ROLE_ICONS[role] || "�
 export function roleDesc(role: string): string  { return ROLE_DESC[role] || "" }
 export function roleSkills(role: string): string[] { return ROLE_SKILLS[role] || [] }
 
-// developer_2 → Разработчик 2
-export function agentDisplayName(agentId: string, role: string): string {
-  const m = agentId.match(/_(\d+)$/)
+// developer_2 → Разработчик 2 (BOS §12 п.4: agentId → workerId, agentDisplayName →
+// workerDisplayName; терминология агента как контрактного имени уходит из фронта)
+export function workerDisplayName(workerId: string, role: string): string {
+  const m = workerId.match(/_(\d+)$/)
   return roleName(role) + (m && m[1] !== "1" ? ` ${m[1]}` : "")
 }

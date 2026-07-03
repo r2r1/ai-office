@@ -5,7 +5,7 @@ import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
 import { AgentDetailModal } from "../components/AgentDetailModal"
-import type { Agent } from "../types"
+import type { Worker } from "../types"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
@@ -129,7 +129,7 @@ const PulsingAvatar = memo(function PulsingAvatar({ emoji, status }: { emoji: st
 })
 
 // ── Карточка агента ──────────────────────────────────────────────────────────
-function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDetail }: { agent: Agent; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[]; onOpenDetail?: () => void }) {
+function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDetail }: { agent: Worker; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[]; onOpenDetail?: () => void }) {
   const [model, setModel]       = useState(initialModel)
   const [editModel, setEditModel] = useState(false)
   const [saving, setSaving]     = useState(false)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { useOffice } from "../../data/OfficeProvider"
-import type { Agent } from "../types"
+import type { Worker } from "../types"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
@@ -36,7 +36,7 @@ const ROLE_HOME: Record<string, [number, number]> = {
 }
 const MEETING: [number, number] = [80, 75]
 
-function homeFor(agent: Agent, idx: number): [number, number] {
+function homeFor(agent: Worker, idx: number): [number, number] {
   const base = ROLE_HOME[agent.role]
   if (base) return base
   // неизвестная роль — раскидываем по свободным столам

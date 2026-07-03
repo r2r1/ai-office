@@ -1,7 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react"
 import { api } from "./api"
-import { roleName, roleIcon, agentDisplayName } from "./roles"
-import type { Agent, AgentStatus } from "../app/types"
+import { roleName, roleIcon, workerDisplayName } from "./roles"
+import type { Worker, WorkerStatus } from "../app/types"
+
+// BOS §12 п.4: backend отдаёт worker_id рядом с deprecated agent_id (см. office/bus.py,
+// server.py `_with_worker_id`). Читаем предпочтительно worker_id, agent_id — фолбэк
+// на переходный период (в т.ч. для уже сохранённой на диске истории старых прогонов).
+function wid(o: any): string { return o?.worker_id ?? o?.agent_id ?? "" }
 
 export interface FeedItem { id: number; icon: string; who: string; text: string; kind: "" | "system" | "done" | "error" }
 export interface ProgressState { percent: number; note: string; stages: any[]; current: string }
@@ -13,7 +18,7 @@ export interface OfficeState {
   connected: boolean
   ready: boolean | null
   workspace: { id: string; name: string; plan: string } | null
-  agents: Record<string, Agent>
+  agents: Record<string, Worker>
   feed: FeedItem[]
   progress: ProgressState
   cost: number
@@ -54,14 +59,14 @@ function roleFromId(id: string): string {
   return m ? m[1] : id
 }
 
-function upsertAgent(state: OfficeState, id: string, patch: Partial<Agent>): Record<string, Agent> {
+function upsertAgent(state: OfficeState, id: string, patch: Partial<Worker>): Record<string, Worker> {
   const prev = state.agents[id]
   const role = patch.role || prev?.role || roleFromId(id) || "unknown"
-  const next: Agent = {
+  const next: Worker = {
     id, role,
-    name: agentDisplayName(id, role),
+    name: workerDisplayName(id, role),
     emoji: roleIcon(role),
-    status: (patch.status || prev?.status || "idle") as AgentStatus,
+    status: (patch.status || prev?.status || "idle") as WorkerStatus,
     lastMessage: patch.lastMessage ?? prev?.lastMessage ?? "",
   }
   return { ...state.agents, [id]: next }
@@ -88,11 +93,12 @@ function reducer(state: OfficeState, action: Action): OfficeState {
       return { ...state, threadsSeen }
     }
     case "agents": {
-      const agents: Record<string, Agent> = {}
+      const agents: Record<string, Worker> = {}
       for (const a of action.list) {
-        agents[a.agent_id] = {
-          id: a.agent_id, role: a.role, name: agentDisplayName(a.agent_id, a.role),
-          emoji: roleIcon(a.role), status: (a.status || "idle") as AgentStatus, lastMessage: a.last_message || "",
+        const id = wid(a)
+        agents[id] = {
+          id, role: a.role, name: workerDisplayName(id, a.role),
+          emoji: roleIcon(a.role), status: (a.status || "idle") as WorkerStatus, lastMessage: a.last_message || "",
         }
       }
       return { ...state, agents }
@@ -100,22 +106,23 @@ function reducer(state: OfficeState, action: Action): OfficeState {
     case "event": {
       const e = action.e
       const hist = !!e.historical
+      const eid = wid(e)
       switch (e.type) {
         case "hired": {
-          const agents = upsertAgent(state, e.agent_id, { role: e.role, status: e.status || "idle", lastMessage: e.last_message || "" })
+          const agents = upsertAgent(state, eid, { role: e.role, status: e.status || "idle", lastMessage: e.last_message || "" })
           return { ...state, agents, feed: hist ? state.feed : feed(state, "👋", "", `${roleName(e.role)} нанят`, "system") }
         }
         case "speech": case "thinking": {
-          const agents = upsertAgent(state, e.agent_id, { status: "thinking", lastMessage: e.text })
-          const a = agents[e.agent_id]
+          const agents = upsertAgent(state, eid, { status: "thinking", lastMessage: e.text })
+          const a = agents[eid]
           return { ...state, agents, feed: hist ? state.feed : feed(state, roleIcon(a.role), a.name, e.text, "") }
         }
         case "task_done": {
-          const agents = upsertAgent(state, e.agent_id, { status: "done", lastMessage: (e.summary || "").slice(0, 80) })
-          return { ...state, agents, feed: hist ? state.feed : feed(state, "✅", agents[e.agent_id].name, e.summary || "задача выполнена", "done") }
+          const agents = upsertAgent(state, eid, { status: "done", lastMessage: (e.summary || "").slice(0, 80) })
+          return { ...state, agents, feed: hist ? state.feed : feed(state, "✅", agents[eid].name, e.summary || "задача выполнена", "done") }
         }
         case "error": {
-          const a = state.agents[e.agent_id]
+          const a = state.agents[eid]
           return { ...state, feed: hist ? state.feed : feed(state, "⚠️", a?.name || "", e.text, "error") }
         }
         case "progress":
@@ -126,7 +133,7 @@ function reducer(state: OfficeState, action: Action): OfficeState {
           // Вопрос/сообщение агента в личный чат. Без этого кейса вопросы агентов
           // не показывались (feed.length не менялся → чат не перезагружался).
           if (hist || e.from === "user") return state
-          const a = state.agents[e.agent_id]
+          const a = state.agents[eid]
           const who = a?.name || ""
           const isQ = e.kind === "question"
           return { ...state, feed: feed(state, isQ ? "❓" : "💬", who,

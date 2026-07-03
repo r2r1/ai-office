@@ -15,8 +15,16 @@ _subs: dict[str, list[asyncio.Queue]] = defaultdict(list)
 
 
 async def publish(event: dict[str, Any]) -> None:
+    # Терминология BOS §12 п.4 (agent_id → worker_id): «агент» — допустимый внутренний
+    # код-термин (bos-architecture.md, глоссарий Worker), но НЕ должен утекать во внешний
+    # контракт как единственное имя. Зеркалим worker_id здесь — в ЕДИНОЙ точке, через
+    # которую проходят ВСЕ ~40 мест кода, публикующих события — вместо правки каждого
+    # publish()-вызова по отдельности. agent_id остаётся deprecated-алиасом на переходный
+    # период (1-2 релиза), значения идентичны.
+    if event.get("agent_id") and "worker_id" not in event:
+        event = {**event, "worker_id": event["agent_id"]}
     tid = ctx.get_tenant()
-    state.record(event)      # пользовательская лента (фильтрованные типы)
+    state.record(event)      # пользовательская лента (фильтрованные типы) — уже с worker_id
     _trace_event(event)      # детальный системный трейс (ВСЕ типы + время)
     for q in list(_subs.get(tid, [])):
         await q.put(event)

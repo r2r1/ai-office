@@ -48,9 +48,10 @@ export const api = {
   files: () => getJSON<{ files: any[] }>("/api/files", { files: [] }),
   connections: () => getJSON<{ connections: any[] }>("/api/connections", { connections: [] }),
   threads: () => getJSON<{ threads: Record<string, any> }>("/api/threads", { threads: {} }),
-  thread: (id: string) => getJSON<{ agent_id: string; messages: any[] }>(`/api/thread/${id}`, { agent_id: id, messages: [] }),
+  thread: (id: string) => getJSON<{ agent_id: string; worker_id: string; messages: any[] }>(`/api/thread/${id}`, { agent_id: id, worker_id: id, messages: [] }),
   // ВАЖНО: бэкенд /api/ask читает поле `message`, а /api/chat — поле `text`.
-  ask: (agentId: string, text: string) => postJSON<any>("/api/ask", { agent_id: agentId, message: text }, null),
+  // worker_id — предпочтительное имя (BOS §12 п.4); бэкенд принимает и deprecated agent_id.
+  ask: (workerId: string, text: string) => postJSON<any>("/api/ask", { worker_id: workerId, message: text }, null),
   chatGet: () => getJSON<{ messages: any[] }>("/api/chat", { messages: [] }),
   chatPost: (message: string) => postJSON<any>("/api/chat", { text: message }, null),
   agentDetail: (id: string) => getJSON<any>(`/api/agent/${id}`, {}),

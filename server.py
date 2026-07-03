@@ -54,6 +54,18 @@ load_dotenv()
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 
+def _with_worker_id(payload):
+    """Зеркалит worker_id рядом с agent_id в исходящем JSON (BOS §12 п.4:
+    agent_id → worker_id, agent_id остаётся deprecated-алиасом на переходный
+    период). Работает и на одном dict, и на списке dict — тем местам ответа,
+    которые НЕ идут через bus.publish (там зеркалирование уже единое, см.
+    office/bus.py) и формируются server.py напрямую из registry/state/costs."""
+    if isinstance(payload, dict):
+        return {**payload, "worker_id": payload["agent_id"]} if "agent_id" in payload else payload
+    return [{**d, "worker_id": d["agent_id"]} if isinstance(d, dict) and "agent_id" in d else d
+            for d in payload]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # БД SaaS-слоя (пользователи/тенанты). Данные офиса теперь per-tenant (ленивые,
@@ -398,6 +410,7 @@ async def events(request: Request):
                     snapshot = {
                         "type": "hired",
                         "agent_id": agent.agent_id,
+                        "worker_id": agent.agent_id,  # BOS §12 п.4: agent_id deprecated-алиас
                         "role": agent.role,
                         "desk": agent.desk,
                         "task": agent.task,
@@ -464,7 +477,7 @@ async def rename_workspace(request: Request):
 
 @app.get("/api/agents")
 async def get_agents():
-    return [
+    return _with_worker_id([
         {
             "agent_id": a.agent_id,
             "role": a.role,
@@ -474,7 +487,7 @@ async def get_agents():
             "task": a.task,
         }
         for a in registry.all_agents()
-    ]
+    ])
 
 
 @app.get("/api/brief/status")
@@ -669,7 +682,7 @@ async def get_observability_decision(decision_id: str):
 @app.get("/api/deliverables")
 async def get_deliverables():
     """Готовые результаты работы агентов — пользователь может посмотреть и скопировать."""
-    return {"deliverables": state.deliverables()}
+    return {"deliverables": _with_worker_id(state.deliverables())}
 
 
 @app.get("/api/progress")
@@ -701,12 +714,13 @@ async def get_agent_detail(agent_id: str):
         return JSONResponse({"error": "агент не найден"}, status_code=404)
     return {
         "agent_id": rec.agent_id,
+        "worker_id": rec.agent_id,  # BOS §12 п.4: agent_id deprecated-алиас
         "role": rec.role,
         "status": rec.status,
         "task": rec.task,
         "current": rec.last_message or rec.task,
-        "done": state.deliverables_for(agent_id),
-        "activity": state.events_for(agent_id),
+        "done": _with_worker_id(state.deliverables_for(agent_id)),
+        "activity": _with_worker_id(state.events_for(agent_id)),
         "model": models_module.for_agent(agent_id),
         "model_custom": agent_id in models_module.assignments(),
         "cost": costs_module.for_agent(agent_id),
@@ -1090,7 +1104,8 @@ async def get_understanding():
 @app.get("/api/costs")
 async def get_costs():
     """Расход токенов и стоимость по агентам и суммарно (ROI-панель)."""
-    return costs_module.payload()
+    payload = costs_module.payload()
+    return {**payload, "agents": _with_worker_id(payload.get("agents", []))}
 
 
 @app.get("/api/apinet/balance")
@@ -1240,7 +1255,8 @@ async def set_agent_model(agent_id: str, request: Request):
     data = await request.json()
     model = (data.get("model") or "").strip()
     models_module.set_for_agent(agent_id, model)
-    return {"ok": True, "agent_id": agent_id, "model": models_module.for_agent(agent_id)}
+    return {"ok": True, "agent_id": agent_id, "worker_id": agent_id,
+            "model": models_module.for_agent(agent_id)}
 
 
 @app.post("/api/role/{role}/model")
@@ -1280,7 +1296,8 @@ async def get_threads():
 @app.get("/api/thread/{agent_id}")
 async def get_thread(agent_id: str):
     """Полная переписка пользователя с конкретным агентом."""
-    return {"agent_id": agent_id, "messages": threads_module.recent(agent_id)}
+    return {"agent_id": agent_id, "worker_id": agent_id,
+            "messages": threads_module.recent(agent_id)}
 
 
 @app.post("/api/ask")
@@ -1291,11 +1308,13 @@ async def ask_agent(request: Request):
     (разблокирует ожидающую задачу). Иначе — это обычная беседа с агентом.
     """
     data = await request.json()
-    agent_id = data.get("agent_id", "")
+    # worker_id — предпочтительное имя (BOS §12 п.4); agent_id принимается как
+    # deprecated-алиас на переходный период, чтобы старые клиенты не сломались.
+    agent_id = data.get("worker_id") or data.get("agent_id", "")
     message = (data.get("message") or "").strip()
 
     if not agent_id or not message:
-        return JSONResponse({"error": "agent_id и message обязательны"}, status_code=400)
+        return JSONResponse({"error": "worker_id и message обязательны"}, status_code=400)
 
     if registry.get(agent_id) is None:
         return JSONResponse({"error": "агент не найден"}, status_code=404)
@@ -1311,7 +1330,7 @@ async def ask_agent(request: Request):
         await bus.publish({"type": "question_answered", "question_id": qid, "agent_id": agent_id})
         await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "user",
                            "kind": "msg", "text": message})
-        return {"agent_id": agent_id, "answered": True}
+        return {"agent_id": agent_id, "worker_id": agent_id, "answered": True}
 
     # 2) Иначе — обычный диалог с агентом. Сообщение пользователя агенту тоже считаем
     # директивой (например «запусти бота») — иначе автономный цикл его не увидит.
@@ -1331,7 +1350,7 @@ async def ask_agent(request: Request):
         threads_module.post(agent_id, "agent", reply)
         await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
                            "kind": "msg", "text": reply})
-        return {"agent_id": agent_id, "reply": reply}
+        return {"agent_id": agent_id, "worker_id": agent_id, "reply": reply}
     except Exception as e:
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
