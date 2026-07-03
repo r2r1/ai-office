@@ -690,6 +690,39 @@ DoD: директива проходит propose→check→apply|reject, не п
 
 **Дальше:** довести расслоение (execution.py) отдельными безопасными срезами.
 
+## 🧱 2026-07-03 (Phase 6, шаг 2) — Execution вынесен из loop.py
+
+Продолжение расслоения. Вынесен весь жизненный цикл ИСПОЛНЕНИЯ одной задачи.
+
+- Новый `office/execution.py` — машина состояний исполнения: `assign`, `run_task`
+  (Policy→бюджетный гейт→run_agent→приёмка→эскалация), `heal_stuck_agents`
+  (watchdog), `review_and_maybe_fix`, `publish_site_auto`, `task_with_context`,
+  `attribute_result`, `engagement_needs_bot`. Владеет состоянием живости
+  (`_thinking_since`/`_agent_task`/`_model_fail_count`/`_current_ms`) — теперь оно в
+  ОДНОМ месте, а не размазано по циклу.
+- **Ключевое: `_job` (вложенное замыкание в `_assign`) чисто рефакторено в модульную
+  `run_task(agent_id, role, task, …)`** — оно захватывало только параметры `_assign`,
+  скрытых локалей не было, поэтому конверсия в функцию с явными параметрами
+  безопасна. Привязка `_agent_task` перенесена внутрь `assign` (call-sites цикла
+  больше её не трогают).
+- `loop` импортирует `execution` (одностороннее направление; `execution` НЕ импортирует
+  `loop`). Циклы разорваны: `_goal→brief.effective_goal()` инлайн, `set_cur_ms`/
+  `forget_tenant` — вызовы в execution.
+- `tests/test_execution.py` — 4 теста (tk-изоляция, current_ms, forget_tenant чистит
+  живость, engagement_needs_bot). Оба тест-файла: **7/7 проходят**, $0.
+- **`loop.py`: 1288 → 764 строки** (суммарно с шага 1: 1404 → 764, вынесено 640).
+
+**Осталось до DoD `loop.py < 400`:** ещё вынести маршрутизацию лидеров
+(`_run_leaders`/`_hire_leader`), CEO-оркестрацию (`_orchestrate`/
+`_apply_company_decision`) и bootstrap (`_bootstrap`/`_hire_initial`/`_hire_and_run`)
+— в `planning_engine`/отдельный `bootstrap`-модуль. `_run_office` (главный цикл ~180
+строк) остаётся ядром шедулера. `agent_id → worker_id` — не начата.
+
+Проверено: py_compile всего дерева, импорт server+loop+execution, оба тест-файла,
+смоук помощников execution. Живой офис-цикл здесь не гоняется (нет LLM) — риск
+поведенческой регрессии в run_task/assign остаётся, но код перенесён дословно
+(diff — только имена: `_job`→`run_task`, `_tk`→`tk`, доступ к состоянию через модуль).
+
 ---
 
 ## Запуск / проверка
