@@ -84,46 +84,15 @@ def estimate_cost(role: str, model: str) -> float:
 
 
 # ─────────────────── capability-гейт планирования ───────────────────
-
-# Слова задачи → интеграция, которая должна быть подключена (детерминированно).
-# website в списке нет: он без кредов и подключён всегда.
-_TASK_CAPABILITY = [
-    (("телеграм", "telegram", "бот", "bot"), "telegram", "токен Telegram-бота (@BotFather)"),
-    (("письм", "email", "рассылк", "gmail"), "gmail", "подключение Gmail (OAuth в «Доступы»)"),
-    (("таблиц", "sheets"), "google_sheets", "подключение Google Sheets (OAuth в «Доступы»)"),
-    (("репозитор", "github", "git push"), "github", "GitHub (OAuth или PAT в «Доступы»)"),
-    (("календар", "calendar"), "google_calendar", "подключение Google Calendar (OAuth)"),
-]
-
-
-def required_capability(task: dict) -> tuple[str, str] | None:
-    """(имя интеграции, подсказка) для задачи — или None, если внешний доступ не нужен."""
-    title = (task.get("title") or "").lower()
-    for words, integration, hint in _TASK_CAPABILITY:
-        if any(w in title for w in words):
-            return integration, hint
-    return None
+# Потребность задачи во внешней способности теперь ДЕКЛАРИРУЕТСЯ
+# (task.required_capabilities, BOS §5) и живёт в реестре office/capability.py —
+# здесь тонкий делегат (единый вход для loop-гейта). Прежний словесный
+# _TASK_CAPABILITY и re-парсинг заголовка убраны — вывод потребности делается один
+# раз при генерации плана (capability.derive_required).
 
 
 def missing_for_plan() -> list[dict]:
-    """Каких способностей не хватает под НЕвыполненные задачи плана.
-    [{task_id, title, capability, hint}] — по одной записи на интеграцию."""
-    from src.office import plan
-    from src.integrations import registry as integrations_registry
-    seen: set[str] = set()
-    out: list[dict] = []
-    for t in plan.all_tasks():
-        if t.get("status") in ("done", "skipped"):  # снятая задача доступов не требует
-            continue
-        req = required_capability(t)
-        if not req:
-            continue
-        name, hint = req
-        if name in seen:
-            continue
-        integ = integrations_registry.get(name)
-        if integ and not integrations_registry.is_connected(integ):
-            seen.add(name)
-            out.append({"task_id": t["id"], "title": t.get("title", "")[:80],
-                        "capability": name, "hint": hint})
-    return out
+    """Каких способностей не хватает под НЕвыполненные задачи плана — как РЕШЕНИЕ
+    приобрести (§5). [{capability, label, required_by:[task_ids], acquire}]."""
+    from src.office import capability
+    return capability.missing()

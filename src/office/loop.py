@@ -265,12 +265,14 @@ async def _run_office(tid: str) -> None:
     # упрётся в середине задачи. Не блокирует: событие CEO + сообщение в ленту.
     from src.office import execution_policy, events as events_mod2
     for miss in execution_policy.missing_for_plan():
+        hint = (miss.get("acquire") or {}).get("hint", "")
+        label = miss.get("label", miss.get("capability", ""))
         events_mod2.raise_event(
             "problem",
-            f"Для задачи «{miss['title'][:60]}» нет доступа: {miss['capability']}",
-            detail=f"Нужно: {miss['hint']}", from_role="orchestrator")
+            f"Для способности «{label}» нет доступа ({miss['capability']})",
+            detail=f"Нужно: {hint}", from_role="orchestrator")
         await publish({"type": "system",
-                       "text": f"🔌 Для «{miss['title'][:60]}» понадобится {miss['hint']} — "
+                       "text": f"🔌 Понадобится способность «{label}»: {hint} — "
                                f"подключите заранее в «Доступы», чтобы команда не ждала"})
 
     # ---- ЦИКЛЫ ----

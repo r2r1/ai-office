@@ -112,7 +112,7 @@ export default function App() {
       api.get("/api/autonomy").then(a => { if (a?.level) setAutonomyLevel(a.level) }).catch(() => {})
       api.get("/api/health").then(h => { if (h?.company !== undefined) setHealth({ company: h.company, status: h.status }) }).catch(() => {})
       api.get("/api/trust").then(t => { if (t?.company !== undefined) setTrust({ company: t.company, streak: t.streak || 0 }) }).catch(() => {})
-      api.get("/api/capabilities").then(c => {
+      api.get("/api/quality-modes").then(c => {
         const m = (c?.modes || []).find((x: any) => x.id === c?.mode)
         if (m) setQualityMode({ icon: m.icon, label: m.label })
       }).catch(() => {})

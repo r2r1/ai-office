@@ -101,6 +101,16 @@ def artifacts_of(task: dict) -> list[str]:
     return _derive_artifacts(task.get("role", ""), task.get("title", ""))
 
 
+def _required_caps(t: dict) -> list[str]:
+    """Требуемые способности задачи: явные из LLM-плана или выведенные
+    (capability.derive_required — единая точка). Lazy-импорт: capability читает plan."""
+    explicit = [c for c in (t.get("required_capabilities") or []) if c]
+    if explicit:
+        return explicit
+    from src.office import capability
+    return capability.derive_required(t)
+
+
 def _save(d: dict) -> None:
     ctx.write_json(_FILE, d)
 
@@ -134,6 +144,8 @@ def set_tasks(tasks: list[dict]) -> None:
             "tier": (t.get("tier") or "").strip().lower(),
             # Декларация артефактов (BOS §12): явная из LLM-плана или выведенная
             "artifacts": [a for a in (t.get("artifacts") or []) if a] or _derive_artifacts(role, t.get("title") or ""),
+            # Декларация требуемых способностей (BOS §5): внешние доступы под задачу
+            "required_capabilities": _required_caps(t),
         })
     # Чистим deps от ссылок на НЕсуществующие id: LLM иногда генерит зависимость на
     # опечатанный/выдуманный id, и такая задача (и всё, что от неё зависит) НИКОГДА не
@@ -175,6 +187,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "status": "pending", "assignee": "", "requested_by": requested_by,
         "project": projects.ensure_active()["id"],
         "artifacts": _derive_artifacts(role, title),
+        "required_capabilities": _required_caps({"title": title}),
     }
     tasks.append(task)
     d["tasks"] = tasks

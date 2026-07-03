@@ -252,16 +252,16 @@ function IntellectTab() {
 
   useEffect(() => {
     api.models().then(m => { setModel(m.default || ""); setPresets(m.presets || []) })
-    api.get("/api/capabilities").then(c => c && setCaps(c))
+    api.get("/api/quality-modes").then(c => c && setCaps(c))
   }, [])
   function flash() { setSaved(true); setTimeout(() => setSaved(false), 1600) }
 
   function pickMode(mode: string) {
     setCaps((c: any) => ({ ...c, mode }))
-    api.post("/api/capabilities", { mode }).then(c => { if (c) setCaps(c); flash() })
+    api.post("/api/quality-modes", { mode }).then(c => { if (c) setCaps(c); flash() })
   }
   function setExpert(cap: string, m: string) {
-    api.post("/api/capabilities", { expert: { [cap]: m } }).then(c => { if (c) setCaps(c); flash() })
+    api.post("/api/quality-modes", { expert: { [cap]: m } }).then(c => { if (c) setCaps(c); flash() })
   }
 
   return (

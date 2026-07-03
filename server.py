@@ -1650,20 +1650,27 @@ async def get_health(request: Request):
 
 @app.get("/api/capabilities")
 async def get_capabilities(request: Request):
+    """Реестр способностей компании (BOS §5): что умеем / чего не хватает под план /
+    что можно подключить. НЕ режимы качества моделей — те на /api/quality-modes."""
+    from src.office import capability
+    return capability.registry()
 
+
+@app.get("/api/quality-modes")
+async def get_quality_modes(request: Request):
+    """Режимы качества выбора модели (🟣 Экономия → ⚫ Эксперт)."""
     return quality_modes_module.payload()
 
 
-@app.post("/api/capabilities")
-async def post_capabilities(request: Request):
-
+@app.post("/api/quality-modes")
+async def post_quality_modes(request: Request):
     data = await request.json()
     mode = data.get("mode")
     if mode:
         if mode not in quality_modes_module.QUALITY_MODES:
             return JSONResponse({"error": "Неизвестный режим"}, status_code=400)
         quality_modes_module.set_mode(mode)
-    # Эксперт-режим: точечные оверрайды по capability.
+    # Эксперт-режим: точечные оверрайды по типу задачи (capability-типу модели).
     for cap, model in (data.get("expert") or {}).items():
         quality_modes_module.set_expert(cap, model)
     return {"ok": True, **quality_modes_module.payload()}

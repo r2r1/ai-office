@@ -502,6 +502,49 @@ build/functional прошли — **мягкий сигнал, не жёстки
 
 ---
 
+## 🧩 2026-07-03 (Phase 2) — Capability + Artifacts
+
+Начата Phase 2. Сделаны 2a-i (Artifacts) и 2b (Capability); 2a-ii (структурная
+тяжесть критика) осознанно отложена внутри фазы.
+
+### 2a-i — Artifacts-декларации (коммит отдельно)
+`task.artifacts` (site/bot/integration/doc) — единый источник для мьютекса и
+приёмки вместо словесных эвристик в момент потребления. `plan._derive_artifacts`
+(единая точка вывода), `artifacts_of()`, `touches_site` читает декларацию; удалён
+`_NON_SITE_WORDS`. `acceptance._is_site_task/_is_bot_task` читают декларацию;
+удалены `_SITE_WORDS/_BOT_WORDS`. Закрыт QA-баг (developer-задача без site-слов).
+
+### 2b — Capability registry
+- Новый `office/capability.py`: реестр «умеем/не хватает под план/можно
+  подключить». Каталог способностей (landing_site — платформенная; telegram_bot/
+  email/spreadsheet/repo/calendar — за интеграциями). Статус = have/missing/
+  available из пересечения `plan` (декларации) ∩ `integrations.registry`. `missing()`
+  — нехватка как РЕШЕНИЕ приобрести (метод: connect_integration/ask_user), а не
+  строка в ленте.
+- `task.required_capabilities` — декларация (явная из LLM-плана или
+  `capability.derive_required`, единая точка). `plan._required_caps`.
+- `execution_policy.missing_for_plan` теперь тонкий делегат к `capability.missing()`;
+  удалены дублирующие `_TASK_CAPABILITY`/`required_capability`. `loop`-гейт обновлён.
+- **Эндпоинты**: `/api/capabilities` теперь отдаёт РЕЕСТР способностей (не режимы
+  качества); режимы качества переехали на `/api/quality-modes` (GET+POST). Фронт
+  (`App.tsx`, `CompanyView.tsx`) перенаправлен + **пересобран** (`static/webapp`,
+  bundle `index-BFuTqMk5.js`) — служимое приложение не сломано.
+
+Проверено: py_compile, tsc (0 ошибок), npm build, импорт `server`, смоук реестра
+(telegram_bot→missing/connect_integration; landing_site→have) и `missing_for_plan`.
+DoD-grep `_NON_SITE_WORDS|_SITE_WORDS|_TASK_CAPABILITY` пуст. LLM не вызывался ($0).
+
+### Отложено внутри Phase 2 (для следующей сессии)
+**2a-ii — структурная тяжесть критика**: `critic.check_site()` → `list[{code,
+severity,text}]`, удалить `_CRITICAL_MARKERS`, `is_critical` по severity. Отложено
+осознанно: инвазивно (≥8 call-sites + 3 функции-производителя проблем
+`check_site`/`review_site_visual`/`review_site_llm` мержат строковые списки +
+`critique_text`), а payload низкий (структура тяжести) — отдельный сфокусированный
+коммит. `plan._BOT_WORDS` остаётся (единая точка вывода артефактов/маршрутизации —
+это не consumption-эвристика).
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt
