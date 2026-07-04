@@ -200,13 +200,15 @@ async def publish_site_auto(publish, note: str = "") -> bool:
 
 async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
                                department: str, objective: str, publish,
-                               result: str = "") -> None:
+                               result: str = "", started_ts: float = 0.0) -> None:
     """
     Приёмка результата сайта: программные проверки → при проблемах ОДНА доработка.
     Уроки сохраняются в память, выполненная задача плана отмечается готовой.
 
     `result` — отчёт агента о том, ЧТО он сделал: используется как «что изменилось»
     в журнале ревизий сайта (понятная правка вместо «новый сайт»).
+    `started_ts` — момент старта задачи: гейт синтаксиса JS/HTML проверяет только
+    файлы, тронутые ЭТОЙ задачей (workspace.verify(changed_since=...)).
     """
     from src.office import trace
     task_l = (task or "").lower()
@@ -250,6 +252,33 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     has_index = any(p == "index.html" or p.endswith("/index.html") for p in files)
     if not (site_related or has_index):
         return  # не сайтовая задача — критик не применим (задачу закроет run_task)
+
+    # --- Гейт синтаксиса JS/HTML ДО публикации (реальный прод-баг) ---
+    # Раньше сайт публиковался на ЖИВОЙ URL безусловно, а синтаксис JS проверялся
+    # только ПОСЛЕ, зрячим headless-браузером (ниже) — реальный кейс: designer на
+    # дешёвой модели написал сырой JSX («<div>») вместо React.createElement вопреки
+    # явному запрету скилла framer_motion_3d_site.md, site/app.js не парсился
+    # браузером («Unexpected token '<'»), а сломанная версия была ЖИВОЙ на публичном
+    # URL ~17 минут и несколько циклов правок, пока ошибку не поймал визуальный critic.
+    # node --check (workspace.verify) ловит это мгновенно и БЕЗ LLM — гейтим публикацию им.
+    v = workspace.verify(changed_since=started_ts)
+    if not v.get("ok"):
+        for e in v["errors"]:
+            lessons.add(role, f"Синтаксис: {e}")
+        feedback = ("⚠ Синтаксические ошибки JS/HTML — сайт НЕ публикуется, пока не исправлено:\n"
+                    + "\n".join(f"- {e}" for e in v["errors"][:3]))
+        await publish({"type": "speech", "agent_id": agent_id, "text": feedback[:200]})
+        fix_task = (f"{task}\n\n{feedback}\n\nИсправь синтаксис в файлах. "
+                    f"Прочитай файл через read_file, найди ошибку, перепиши через write_file.")
+        ctx_task = task_with_context(role, fix_task, skill, department=department, objective=objective)
+        fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+        await fn()
+        v = workspace.verify(changed_since=started_ts)
+        if not v.get("ok"):
+            await publish({"type": "system",
+                           "text": "⛔ Сайт НЕ опубликован: остались синтаксические ошибки JS/HTML "
+                                   "после попытки правки — команда попробует снова в следующем цикле."})
+            return  # НЕ публикуем синтаксически битый код
 
     # Сайт всегда публикуем САМИ — не ждём, пока агент вызовет publish_site.
     await publish_site_auto(publish, note=note)
@@ -405,7 +434,8 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
             # ---- Приёмка качества (критик) для сайтов: дизайнер/разработчик ----
             if role in ("designer", "developer"):
                 await review_and_maybe_fix(role, agent_id, task, skill, department,
-                                           objective, publish, result=result or "")
+                                           objective, publish, result=result or "",
+                                           started_ts=_job_t0)
         registry.update_status(agent_id, "done")
         state.save_last_run(agent_id)
         trace.log("agent_done", agent=agent_id, role=role,
