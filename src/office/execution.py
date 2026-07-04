@@ -394,6 +394,10 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 # ВСЕГДА строился на vanilla HTML (жалоба владельца) — теперь ниша
                 # стабильно получает один из 4 стеков (vanilla/React/Vue/Alpine).
                 design_style.ensure_stack_line(b.get("niche", ""), b.get("audience", ""))
+                # Готовая CSS-шкала оттенков акцента (50-900) вместо того, чтобы
+                # designer/developer придумывали hover/active-цвета на глаз —
+                # несогласованно между файлами одной и той же страницы.
+                design_style.ensure_design_tokens(b.get("niche", ""), b.get("audience", ""))
             ctx_task = task_with_context(role, task, skill, department=department, objective=objective)
             fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill,
                                       model=policy["model"])
