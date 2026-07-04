@@ -131,8 +131,21 @@ def list_dir(rel: str = "") -> list[dict]:
     out = []
     for p in sorted(root.rglob("*")):
         if p.is_file():
-            out.append({"path": p.relative_to(root).as_posix(), "size": p.stat().st_size})
+            rel_posix = p.relative_to(root).as_posix()
+            if _ignored(rel_posix):
+                continue
+            out.append({"path": rel_posix, "size": p.stat().st_size})
     return out
+
+
+# Служебные папки, которые НЕ являются исходниками проекта: зависимости и кеши
+# сборки. Обязаны быть исключены из листинга — иначе появление npm-проекта
+# (node_modules = тысячи файлов) кладёт критика/verify/дерево файлов агента.
+_IGNORED_DIRS = {"node_modules", ".git", "__pycache__", ".vite", ".cache", ".npm"}
+
+
+def _ignored(rel_posix: str) -> bool:
+    return any(seg in _IGNORED_DIRS for seg in rel_posix.split("/")[:-1])
 
 
 def list_files() -> list[dict]:
@@ -140,9 +153,11 @@ def list_files() -> list[dict]:
     out = []
     for p in sorted(base.rglob("*")):
         if p.is_file():
+            rel = p.relative_to(base).as_posix()
+            if _ignored(rel):
+                continue
             st = p.stat()
-            out.append({"path": p.relative_to(base).as_posix(), "size": st.st_size,
-                        "mtime": st.st_mtime})
+            out.append({"path": rel, "size": st.st_size, "mtime": st.st_mtime})
     return out
 
 
@@ -208,6 +223,10 @@ def verify(changed_since: float = 0.0) -> dict:
     files = list_files()
     if changed_since > 0:
         files = [f for f in files if f.get("mtime", 0) >= changed_since]
+    # Выход сборки (dist/…) валидирует сама сборка — гонять node --check по
+    # минифицированным бандлам бессмысленно и медленно (ленивый импорт от цикла).
+    from src.office import site_builder
+    files = [f for f in files if not site_builder.is_built_output(f["path"])]
     py_files = [f for f in files if f["path"].endswith(".py")]
     js_files = [f for f in files if f["path"].endswith((".js", ".mjs"))]
     html_files = [f for f in files if f["path"].endswith(".html")]

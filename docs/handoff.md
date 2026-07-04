@@ -1646,6 +1646,62 @@ token '<'`». Между rev 1 (08:51) и rev 6 (09:08) — **17 минут и 5
 
 ---
 
+## 🏗 2026-07-03 — Site Builder: рендер сайтов любого стека (статика → Vite/React)
+
+Раньше публикация хостила папку site/ как статику — рендерились только сайты без
+шага сборки. Теперь офис собирает и полноценные фреймворки: агент кладёт проект
+с package.json в site/, платформа детерминированно прогоняет npm install +
+npm run build и публикует ВЫХОД сборки (dist/), не исходники.
+
+- **Новый `office/site_builder.py`**: `detect()` (static|build|none — build =
+  package.json со scripts.build в site/ или корне), `ensure_built()` (async,
+  npm через asyncio.to_thread, per-tenant asyncio.Lock от параллельных сборок,
+  кеш `site_build.json` по отпечатку исходников — без изменений npm не
+  запускается), `published_root()`/`cached_problem()` (sync-читатели кеша для
+  критика/приёмки — они не имеют права собирать), `is_built_output()`.
+  Для vite форсится `-- --base=./` (сайт живёт под /site/{tid}/{slug}/ —
+  абсолютные /assets не резолвятся); vite детектится по deps/scripts.
+- **Security-гейт**: сборка = исполнение чужого кода (npm postinstall) без
+  изоляции — тот же класс, что execute_code (DD §17). `ALLOW_SITE_BUILD`
+  (default наследует `ALLOW_CODE_EXECUTION`). При выключенном — build-проект
+  получает critical-фидбек «собери статику или esm.sh» → офис деградирует в
+  статику, а не молча замирает.
+- **Врезки**: `workspace.list_files/list_dir` игнорируют
+  node_modules/.git/__pycache__/.vite (иначе критик/verify/дерево агента
+  умирают на тысячах файлов); `workspace.verify` пропускает выход сборки;
+  `critic.site_dir()` для build-проектов → dist актуальной сборки;
+  `critic.check_site()` — build-провал/отключённость идёт ПЕРВОЙ critical-
+  проблемой с хвостом лога; SPA-поправки критика: форма ищется в JS-бандле
+  (`/api/site-lead` в js_blob, читается БЕЗ 200KB-лимита read_file — иначе
+  хвост бандла терялся), шелл `<div id=root>` не считается stub_page,
+  node --check не гоняется по built-бандлам (обрезка 200KB давала бы ложную
+  синтакс-ошибку); `execution.publish_site_auto` → ensure_built перед
+  публикацией; `acceptance._site_touched_since/_is_site_task` понимают
+  исходники build-проекта (иначе провал сборки не доходил до виновной задачи).
+- **Скилл `builtin_skills/vite_react_site.md`** (designer/developer): когда
+  брать (настоящее приложение) и когда НЕ брать (лендинг → статика/esm.sh),
+  структура site/ + vite.config с base './', форма на /api/site-lead,
+  «не запускай npm сам — платформа соберёт», путь деградации при отключённой
+  сборке.
+- **Тесты `tests/test_site_builder.py` (6)**: detect, ignore node_modules,
+  отпечаток игнорирует dist и lock-файлы, гейт даёт actionable-проблему,
+  статика — no-op (прежнее поведение не сломано), критик смотрит на dist.
+- **Живой смоук с реальным npm**: Vite+React проект собран (install+build
+  25.8с, пересборка 2.5с, кеш-хит 0.48с), критик принял собранный SPA (только
+  cosmetic), опубликован и отдан по HTTP: index с `<base>`-инжектом +
+  относительный бандл `./assets/index-*.js` → 200, 143KB. Смоук-тенант удалён.
+- **Пойманный смоуком баг**: npm install генерит package-lock.json в папке
+  исходников → отпечаток «рос» → кеш мгновенно устаревал → каждая публикация
+  пересобирала заново. Фикс: lock-файлы (`package-lock.json`/`yarn.lock`/
+  `pnpm-lock.yaml`) исключены из отпечатка как производные.
+
+Все 11 тест-файлов (71 тест) проходят; py_compile всего дерева чист. LLM не
+вызывался ($0). Известное ограничение v1: SSR-фреймворки (Next в server-режиме)
+не поддержаны — только статический выход сборки (vite build / next export);
+это осознанно — платформа хостит статику, серверного рантайма для сайтов нет.
+
+---
+
 ## Запуск / проверка
 ```bash
 pip install -r requirements.txt

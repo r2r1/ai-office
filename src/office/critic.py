@@ -33,7 +33,16 @@ def _find_site_dir() -> str | None:
 
 
 def site_dir() -> str | None:
-    """Публичный доступ: папка собранного сайта (для авто-публикации офисом)."""
+    """Публичный доступ: папка ГОТОВОГО К ПУБЛИКАЦИИ сайта. Для статики — папка с
+    index.html; для проектов со сборкой (package.json+build) — выходная папка
+    АКТУАЛЬНОЙ успешной сборки (dist/), а не исходники: index.html Vite-проекта —
+    это entry со <script src="/src/main.jsx">, публиковать/критиковать его как
+    сайт бессмысленно. Сборки нет/устарела → None (publish_site_auto сначала
+    вызовет site_builder.ensure_built). Ленивый импорт — от цикла."""
+    from src.office import site_builder
+    d = site_builder.detect()
+    if d["kind"] == "build":
+        return site_builder.published_root()
     return _find_site_dir()
 
 
@@ -72,7 +81,20 @@ def check_site() -> list[dict]:
     HTML, целостность ссылок, рабочесть форм на каждой странице, синтаксис JS (реальный
     node --check), дубли/заглушки, базовую доступность. Возвращает список проблем.
     """
-    site_dir = _find_site_dir()
+    # Проект со сборкой: критикуем ВЫХОД сборки (dist/), не исходники — index.html
+    # Vite-проекта это entry со <script src="/src/main.jsx">, как сайт он «пустой».
+    # Сборка не прошла/отключена → это и есть главная проблема сайта (с логом).
+    from src.office import site_builder
+    is_built_spa = site_builder.detect()["kind"] == "build"
+    if is_built_spa:
+        bp = site_builder.cached_problem()
+        if bp is not None:
+            # critical (failed/disabled) — блокирующая проблема; cosmetic (pending —
+            # офис ещё не собирал эти исходники) — мягкая, без ложного «создай index».
+            return [_p(bp["code"], bp["severity"], bp["text"])]
+        site_dir = site_builder.published_root()
+    else:
+        site_dir = _find_site_dir()
     if site_dir is None:
         return [_p("no_index", "critical",
                    "Не найден index.html — сайт ещё не собран. Создай site/index.html через write_file.")]
@@ -90,8 +112,13 @@ def check_site() -> list[dict]:
     existing_names = {_basename(p) for p in in_dir}
     low = html.lower()
 
-    # Общий JS всех страниц (fetch формы часто в отдельном script.js).
-    js_blob = "\n".join(_read(p).lower() for p in js_files)
+    # Общий JS всех страниц (fetch формы часто в отдельном script.js). Читаем
+    # БЕЗ лимита read_file (200KB): минифицированный бандл собранного SPA больше,
+    # и «/api/site-lead» в его хвосте терялся бы за срезом → ложный «нет формы».
+    def _read_full(p: str) -> str:
+        raw = workspace.read_bytes(p)
+        return raw.decode("utf-8", errors="replace") if raw else ""
+    js_blob = "\n".join(_read_full(p).lower() for p in js_files)
 
     # 1. Внешние картинки часто не грузятся (Unsplash и т.п.) — требуем локальные/SVG.
     ext_imgs = re.findall(r'<img[^>]+src=["\']https?://[^"\']+', html, re.IGNORECASE)
@@ -117,8 +144,11 @@ def check_site() -> list[dict]:
                     "эндпоинт скоро", "заглушк", "todo", "coming soon")
     pages_with_form = [p for p in html_pages if "<form" in _read(p).lower()]
     if not pages_with_form:
-        problems.append(_p("no_form", "critical",
-            "Нет формы заявки ни на одной странице — сайт не собирает лиды."))
+        # SPA (собранный React/Vue): <form> рендерится из JS и в HTML отсутствует.
+        # Признак живой лид-формы там — отправка на /api/site-lead в JS-бандле.
+        if "/api/site-lead" not in js_blob:
+            problems.append(_p("no_form", "critical",
+                "Нет формы заявки ни на одной странице — сайт не собирает лиды."))
     for p in pages_with_form:
         page_low = _read(p).lower()
         sends = "/api/site-lead" in page_low or "/api/site-lead" in js_blob
@@ -174,6 +204,10 @@ def check_site() -> list[dict]:
         text_only = re.sub(r"<[^>]+>", "", c)
         if len(c) < 500 or "lorem ipsum" in c.lower() or "текст-заглушка" in c.lower() \
                 or len(text_only.strip()) < 200:
+            # Шелл собранного SPA легитимно «пуст»: <div id="root"> + бандл,
+            # весь контент рендерит JS — это не заглушка (проверит Playwright-рендер).
+            if is_built_spa and js_files:
+                continue
             problems.append(_p("stub_page", "critical",
                 f"{_basename(p)}: страница-заглушка/пустая — доделай или удали."))
     dup = _near_duplicate_pages(html_pages)
@@ -187,6 +221,11 @@ def check_site() -> list[dict]:
     # React/framer-motion прямо в index.html, а не в отдельный app.js — раньше такой
     # код никто не проверял вообще).
     for p in js_files:
+        # Выход сборки уже провалидирован самой сборкой; к тому же _read обрезает
+        # файл до 200KB — node --check на ОБРЕЗАННОМ бандле дал бы гарантированную
+        # ложную «синтаксическую ошибку».
+        if site_builder.is_built_output(p):
+            continue
         code = _read(p)
         is_module = bool(re.search(r"^\s*(import|export)\s", code, re.M))
         err = workspace._js_syntax_error(code, as_module=is_module)

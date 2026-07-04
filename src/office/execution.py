@@ -121,6 +121,14 @@ async def publish_site_auto(publish, note: str = "") -> bool:
     `note` — краткое «что изменилось» в этой правке (из отчёта агента). Идёт в журнал
     ревизий сайта и в сообщение, чтобы каждая публикация читалась как понятная правка.
     """
+    # Проект со сборкой (package.json+build): сначала собираем — публикуется ВЫХОД
+    # сборки (dist/), не исходники. Кеш по отпечатку исходников: без изменений —
+    # мгновенный no-op, npm не запускается. Провал сборки → сайт не публикуем,
+    # исполнитель получит лог через критика/приёмку (site_builder.cached_problem).
+    from src.office import site_builder
+    built = await site_builder.ensure_built(publish)
+    if built.get("kind") == "build" and not built.get("ok"):
+        return False
     sdir = critic.site_dir()
     if sdir is None:
         return False

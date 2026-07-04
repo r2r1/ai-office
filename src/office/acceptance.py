@@ -49,10 +49,18 @@ def _is_process_chatter(result: str) -> bool:
 
 
 def _site_touched_since(ts: float) -> bool:
-    """Менялись ли файлы папки сайта после метки времени (агент реально трогал сайт)."""
-    sdir = critic.site_dir()
-    if sdir is None:
-        return False
+    """Менялись ли ИСХОДНИКИ сайта после метки времени (агент реально трогал сайт).
+    Для проекта со сборкой смотрим папку исходников (site_builder.detect), а не
+    critic.site_dir(): тот для несобранного build-проекта возвращает None, и
+    провал сборки никогда не доходил бы до приёмки виновной задачи."""
+    from src.office import site_builder
+    d = site_builder.detect()
+    if d["kind"] == "build":
+        sdir = d["root"]
+    else:
+        sdir = critic.site_dir()
+        if sdir is None:
+            return False
     prefix = f"{sdir}/" if sdir else ""
     for f in workspace.list_files():
         if (not prefix or f["path"].startswith(prefix)) and f.get("mtime", 0) >= ts:
@@ -70,7 +78,8 @@ def _is_site_task(artifacts: list[str], started_ts: float = 0.0) -> bool:
         return False
     if started_ts > 0:
         return _site_touched_since(started_ts)
-    return critic.site_dir() is not None
+    from src.office import site_builder
+    return critic.site_dir() is not None or site_builder.detect()["kind"] == "build"
 
 
 def _is_bot_task(artifacts: list[str]) -> bool:
