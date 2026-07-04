@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { marked } from "marked"
 import { api } from "../../data/api"
 import { Empty, ViewBody } from "./ui"
 
@@ -34,6 +35,9 @@ function buildTree(files: FileItem[]): TreeNode {
 
 const RUNNABLE = /\.(py|js|mjs|sh)$/i
 const isHtml = (p: string) => /\.html?$/i.test(p)
+const isMd = (p: string) => /\.md$/i.test(p)
+
+marked.setOptions({ breaks: true, gfm: true })
 
 export function FileExplorer({ files }: { files: FileItem[] }) {
   const [selected, setSelected] = useState<string | null>(null)
@@ -53,7 +57,7 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
   }, [files.length]) // eslint-disable-line
 
   async function openFile(path: string) {
-    setSelected(path); setRunOut(""); setMode(isHtml(path) ? "preview" : "code")
+    setSelected(path); setRunOut(""); setMode(isHtml(path) || isMd(path) ? "preview" : "code")
     const d = await api.fileContent(path)
     setContent(d.content || "")
   }
@@ -82,6 +86,7 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
   )
 
   const selHtml = selected && isHtml(selected)
+  const selMd = selected && isMd(selected)
   const selRun = selected && RUNNABLE.test(selected)
 
   return (
@@ -101,14 +106,16 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
                 borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
                 <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)", flex: 1,
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected}</span>
-                {selHtml && (
+                {(selHtml || selMd) && (
                   <>
                     <ToolBtn active={mode === "preview"} onClick={() => setMode("preview")}>Превью</ToolBtn>
                     <ToolBtn active={mode === "code"} onClick={() => setMode("code")}>Код</ToolBtn>
-                    <a href={api.rawUrl(selected)} target="_blank" rel="noreferrer"
-                      style={{ textDecoration: "none" }}>
-                      <ToolBtn>↗ Открыть</ToolBtn>
-                    </a>
+                    {selHtml && (
+                      <a href={api.rawUrl(selected)} target="_blank" rel="noreferrer"
+                        style={{ textDecoration: "none" }}>
+                        <ToolBtn>↗ Открыть</ToolBtn>
+                      </a>
+                    )}
                   </>
                 )}
                 {selRun && (
@@ -122,6 +129,8 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
                 {selHtml && mode === "preview" ? (
                   <iframe title="preview" src={api.rawUrl(selected)}
                     style={{ flex: 1, border: "none", background: "#fff", width: "100%" }} />
+                ) : selMd && mode === "preview" ? (
+                  <MarkdownView content={content} />
                 ) : (
                   <pre style={{ flex: 1, overflow: "auto", margin: 0, padding: "16px 20px",
                     fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-dim)",
@@ -190,6 +199,16 @@ function TreeView({ nodes, depth, selected, expanded, onToggle, onOpen }: {
         )
       })}
     </>
+  )
+}
+
+// ── Рендер .md-файлов, которые пишут агенты (offer.md, tech_design.md, strategy.md…) —
+// раньше показывались сырым текстом с "#"/"**" вместо форматирования.
+function MarkdownView({ content }: { content: string }) {
+  const html = useMemo(() => marked.parse(content || "") as string, [content])
+  return (
+    <div className="md-preview" style={{ flex: 1, overflow: "auto", padding: "20px 28px" }}
+      dangerouslySetInnerHTML={{ __html: html }} />
   )
 }
 
