@@ -30,6 +30,7 @@ class AgentRecord:
     task: str = ""
     department: str = ""   # id отдела ('' = штаб CEO)
     manager: str = ""      # agent_id руководителя ('' = подчиняется CEO)
+    paused: bool = False   # поставлен на паузу вручную (см. pause()/resume())
 
 
 def _load() -> dict:
@@ -44,7 +45,7 @@ def _rec(d: dict) -> AgentRecord:
     return AgentRecord(agent_id=d["agent_id"], role=d.get("role", ""), desk=d.get("desk", 0),
                        status=d.get("status", "idle"), last_message=d.get("last_message", ""),
                        task=d.get("task", ""), department=d.get("department", ""),
-                       manager=d.get("manager", ""))
+                       manager=d.get("manager", ""), paused=d.get("paused", False))
 
 
 def register(agent_id: str, role: str, task: str = "",
@@ -66,6 +67,31 @@ def update_status(agent_id: str, status: str, message: str = "") -> None:
         if message:
             agents[agent_id]["last_message"] = message[:200]
         _save(agents)
+
+
+def pause(agent_id: str) -> bool:
+    """Ставит ОДНОГО сотрудника на паузу (в отличие от office/control.py —
+    это пауза всей компании). Пока агент на паузе, лидер отдела не должен
+    предлагать ему новых задач (см. planning_engine.free_worker_of_role)."""
+    agents = _load()
+    if agent_id not in agents:
+        return False
+    agents[agent_id]["paused"] = True
+    _save(agents)
+    return True
+
+
+def resume(agent_id: str) -> bool:
+    agents = _load()
+    if agent_id not in agents:
+        return False
+    agents[agent_id]["paused"] = False
+    _save(agents)
+    return True
+
+
+def is_paused(agent_id: str) -> bool:
+    return bool(_load().get(agent_id, {}).get("paused", False))
 
 
 def reset_stuck_statuses() -> list[str]:

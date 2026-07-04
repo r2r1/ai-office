@@ -10,6 +10,7 @@ import { DashboardView } from "./views/DashboardView"
 import { CompanyView } from "./views/CompanyView"
 import { ChatsView } from "./views/ChatsView"
 import { TeamView } from "./views/TeamView"
+import { ScenarioView } from "./views/ScenarioView"
 import { ResultsView } from "./views/ResultsView"
 import { AccountView } from "./views/AccountView"
 import { useOfficeSelector, useUnread } from "../data/OfficeProvider"
@@ -275,6 +276,7 @@ export default function App() {
                 {view === "dashboard"   && <DashboardView onNavigate={changeView} />}
                 {view === "project"     && <ProjectView />}
                 {view === "team"        && <TeamView onOpenChat={openChat} />}
+                {view === "scenario"    && <ScenarioView onOpenChat={openChat} />}
                 {view === "results"     && <ResultsView />}
                 {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
                 {view === "company"     && <CompanyView />}

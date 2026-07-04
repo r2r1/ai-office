@@ -110,6 +110,12 @@ export const api = {
   officeStatus: () => getJSON<any>("/api/office/status", { paused: false, reason: "" }),
   officePause: () => postJSON<any>("/api/office/pause", {}, null),
   officeResume: () => postJSON<any>("/api/office/resume", {}, null),
+  // ── Сценарии: живая диаграмма оргструктуры (docs/scenario-graph-tab-spec.md) ──
+  orgGraph: () => getJSON<{ nodes: any[]; edges: any[] }>("/api/org-graph", { nodes: [], edges: [] }),
+  pauseAgent: (id: string) => postJSON<any>(`/api/agent/${id}/pause`, {}, null),
+  resumeAgent: (id: string) => postJSON<any>(`/api/agent/${id}/resume`, {}, null),
+  reassignTask: (taskId: string, agentId: string) =>
+    postJSONReadBody<any>(`/api/task/${taskId}/reassign`, { agent_id: agentId }, { ok: false, error: "Ошибка запроса" }),
   // ── авторизация ──
   devLogin: (email: string) => postJSON<any>("/auth/dev-login", { email }, null),
   githubDeviceStart: () => postJSON<any>("/auth/github/device/start", {}, null),

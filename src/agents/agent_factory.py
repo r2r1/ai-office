@@ -55,12 +55,12 @@ _ASK_COLLEAGUE_TOOL = {
         "description": "Задать КОНКРЕТНЫЙ вопрос коллеге нужной роли и СРАЗУ получить ответ "
                        "(он отвечает на основе своей работы и контекста). Используй, когда тебе "
                        "нужен вход другого специалиста: текст/оффер у marketer, данные у analyst, "
-                       "оценка дизайна у designer, тех-проверка у developer, проектное решение у architect. "
+                       "дизайн и тех-проверка сайта у developer, проектное решение у architect. "
                        "Это не передача задачи — это короткая консультация по делу.",
         "parameters": {
             "type": "object",
             "properties": {
-                "role": {"type": "string", "description": "Роль коллеги: marketer, designer, developer, "
+                "role": {"type": "string", "description": "Роль коллеги: marketer, developer, "
                          "analyst, architect, integrator, salesman, researcher"},
                 "question": {"type": "string", "description": "Конкретный вопрос (одно-два предложения)"},
             },
@@ -105,7 +105,7 @@ _DELEGATE_TASK_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "role": {"type": "string", "description": "Роль исполнителя (developer, designer, "
+                "role": {"type": "string", "description": "Роль исполнителя (developer, "
                          "marketer, analyst, integrator, salesman)"},
                 "title": {"type": "string", "description": "Что нужно сделать (конкретно)"},
                 "done_criterion": {"type": "string", "description": "Когда задача считается выполненной"},

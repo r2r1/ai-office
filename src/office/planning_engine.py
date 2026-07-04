@@ -98,15 +98,19 @@ def fallback_plan(goal: str) -> list[dict]:
             {"id": "t2", "title": "Настроить и запустить Telegram-бота сбора заявок",
              "role": "integrator", "deps": ["t1"], "done_criterion": "бот запущен через launch_bot"},
         ]
-    # сайт/лендинг — основной кейс
+    # сайт/лендинг — основной кейс. ОДНА production-задача (роль developer владеет
+    # визуалом И кодом end-to-end) — раньше здесь были designer→developer как два
+    # последовательных шага на один и тот же сайт, и developer систематически
+    # пересобирал уже готовый сайт заново вместо точечной проверки (реальный кейс:
+    # два полных прохода одного скилла на один лендинг за прогон).
     return [
         {"id": "t1", "title": "Подготовить оффер и продающие тексты для всех блоков лендинга",
          "role": "marketer", "deps": [], "done_criterion": "готов копирайт: оффер, выгоды, FAQ, CTA"},
-        {"id": "t2", "title": "Собрать конверсионный многостраничный лендинг в site/ с формой заявки",
-         "role": "designer", "deps": ["t1"],
-         "done_criterion": "site/index.html + страницы опубликованы, форма шлёт на /api/site-lead"},
-        {"id": "t3", "title": "Проверить формы/CTA и довести лендинг до рабочего состояния",
-         "role": "developer", "deps": ["t2"], "done_criterion": "формы работают, сайт опубликован и собирает лиды"},
+        {"id": "t2", "title": "Собрать конверсионный многостраничный лендинг в site/ с формой заявки, "
+                             "проверить формы/CTA перед сдачей",
+         "role": "developer", "deps": ["t1"],
+         "done_criterion": "site/index.html + страницы опубликованы, форма шлёт на /api/site-lead, "
+                           "формы работают и сайт собирает лиды"},
     ]
 
 
@@ -121,7 +125,7 @@ def dept_actionable(dept_id: str, now: float) -> bool:
         if a.role not in worker_roles:
             continue  # лидер отдела — не работник
         on_cooldown = (now - state.last_run_for(a.agent_id)) < AGENT_COOLDOWN_SECS
-        if a.status != "thinking" and not on_cooldown:
+        if a.status != "thinking" and not on_cooldown and not a.paused:
             return True
     existing = {a.role for a in members}
     return any(r not in existing for r in worker_roles)
@@ -159,9 +163,9 @@ def has_actionable_move() -> bool:
 
 
 def free_worker_of_role(dept_id: str, role: str, now: float):
-    """Свободный (idle, не в cooldown) работник нужной роли в отделе — или None."""
+    """Свободный (idle, не на паузе, не в cooldown) работник нужной роли в отделе — или None."""
     for a in registry.members_of(dept_id):
-        if a.role != role or a.status == "thinking":
+        if a.role != role or a.status == "thinking" or a.paused:
             continue
         if (now - state.last_run_for(a.agent_id)) < AGENT_COOLDOWN_SECS:
             continue
@@ -470,12 +474,18 @@ async def apply_company_decision(decision: dict, publish) -> None:
         execution.set_cur_ms(cur)
         milestones.mark_active(cur)
     done_id = decision.get("milestone_done")
-    if done_id and done_id not in (None, "null") and milestones.get(done_id):
-        milestones.set_status(done_id, "done")
-        summ = decision.get("milestone_summary") or ""
-        if summ and summ not in (None, "null"):
-            milestones.set_summary(done_id, summ)
-        await publish({"type": "system", "text": f"✅ Этап «{milestones.get(done_id)['title']}» завершён"})
+    if done_id and done_id not in (None, "null"):
+        ms = milestones.get(done_id)
+        # CEO принимает решение о статусе каждый цикл заново и может повторно
+        # прислать milestone_done для этапа, уже закрытого на прошлом цикле — без
+        # проверки текущего статуса это публиковало «Этап завершён» в ленту заново
+        # при каждом цикле (реальный кейс: один и тот же этап объявлялся 6 раз подряд).
+        if ms and ms.get("status") != "done":
+            milestones.set_status(done_id, "done")
+            summ = decision.get("milestone_summary") or ""
+            if summ and summ not in (None, "null"):
+                milestones.set_summary(done_id, summ)
+            await publish({"type": "system", "text": f"✅ Этап «{ms['title']}» завершён"})
     await _set_progress_note(thought or "CEO управляет компанией", publish)
 
     action = decision.get("action", "wait")

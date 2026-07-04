@@ -1,5 +1,5 @@
 // Разделы навигации — мои 4 + системные (решение пользователя).
-export type Section = "office" | "dashboard" | "project" | "team" | "results" | "chats" | "company" | "account"
+export type Section = "office" | "dashboard" | "project" | "team" | "scenario" | "results" | "chats" | "company" | "account"
 
 // Терминология BOS §12 п.4: домен называет исполнителя Worker (agent — допустимый
 // внутренний код-термин, не контрактное имя). Тип переименован из Agent/AgentStatus;

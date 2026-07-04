@@ -46,20 +46,19 @@ ROLE_META: dict[str, dict] = {
         "success_metrics": ["сделки", "конверсия"],
     },
     "developer": {
+        # Раньше "designer" и "developer" были двумя отдельными ролями на ОДИН
+        # артефакт site/ (одинаковая декларация артефакта в plan._derive_artifacts,
+        # почти дословно совпадающие границы в builtin_roles/*.md) — на практике
+        # второй систематически переписывал то, что уже собрал первый (прод-кейс:
+        # два полных прохода framer_motion_3d_site на один и тот же лендинг за один
+        # прогон). Слиты в одну роль: developer владеет сайтом end-to-end (структура,
+        # премиальный визуал, логика) — один production-шаг, не два.
         "department": "tech", "title": "Разработчик", "capability": "coding",
-        "mission": "Писать и запускать реальный рабочий код.",
-        "responsibilities": ["боты", "скрипты/API", "сайты"],
+        "mission": "Писать и запускать реальный рабочий код: от премиального визуала сайта до логики и ботов.",
+        "responsibilities": ["UI/UX и вёрстка сайтов", "боты", "скрипты/API", "анимации"],
         "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file"],
         "constraints": ["не использовать платные конструкторы (Tilda/Webflow)", "артефакты только через write_file"],
-        "success_metrics": ["код компилируется и работает"],
-    },
-    "designer": {
-        "department": "tech", "title": "Дизайнер", "capability": "coding",
-        "mission": "Создавать визуально премиальные многостраничные сайты.",
-        "responsibilities": ["UI/UX", "вёрстка site/", "анимации"],
-        "tools": ["write_file", "list_files"],
-        "constraints": ["не использовать конструкторы — писать код", "только статика, бэкенд не строить"],
-        "success_metrics": ["красивый рабочий многофайловый сайт"],
+        "success_metrics": ["код компилируется и работает", "красивый рабочий сайт"],
     },
     "integrator": {
         "department": "tech", "title": "Интегратор", "capability": "coding",

@@ -88,15 +88,24 @@ def _work_for_gap(g: dict) -> tuple[str, str, str] | None:
 
 def replan() -> list[dict]:
     """Steady State: под каждый НЕзакрытый разрыв создаёт работу БЕЗ владельца.
-    Дедуп по objective (requested_by=`gap:<oid>`) — одна авто-задача на цель, чтобы
-    офис не спамил одинаковыми задачами каждый цикл (endless-retry — горизонт Phase X)."""
+    Дедуп по objective (requested_by=`gap:<oid>`) — не больше одной АКТИВНОЙ
+    авто-задачи на цель одновременно, чтобы офис не спамил одинаковыми задачами
+    каждый цикл (endless-retry — горизонт Phase X).
+
+    Дедуп смотрит только на pending/in_progress задачи с этим тегом, а не на ВСЕ —
+    иначе одна-единственная попытка (даже принятая с расхождением с контрактом,
+    как в реальном кейсе: разрыв «10 заявок/неделю» остался 0/10, но одна
+    сгенерированная задача с неизмеримым done_criterion была принята с
+    предупреждением) блокировала повторные попытки для этой цели НАВСЕГДА, хотя
+    разрыв так и остался открытым."""
     from src.office import plan
     created = []
-    existing = {t.get("requested_by", "") for t in plan.all_tasks()}
+    active_tags = {t.get("requested_by", "") for t in plan.all_tasks()
+                   if t.get("status") in ("pending", "in_progress")}
     for g in unmet():
         tag = f"gap:{g['objective_id']}"
-        if tag in existing:
-            continue  # авто-задача под этот разрыв уже ставилась
+        if tag in active_tags:
+            continue  # авто-задача под этот разрыв уже в работе — не дублируем
         work = _work_for_gap(g)
         if not work:
             continue

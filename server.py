@@ -1290,6 +1290,56 @@ async def set_model(request: Request):
     return {"ok": True, "model": model}
 
 
+@app.get("/api/org-graph")
+async def get_org_graph():
+    """Узлы и рёбра для вкладки «Сценарии» (см. docs/scenario-graph-tab-spec.md)."""
+    from src.office import org_graph
+    return org_graph.build()
+
+
+@app.post("/api/agent/{agent_id}/pause")
+async def pause_agent(agent_id: str):
+    """Ставит ОДНОГО сотрудника на паузу — в отличие от /api/office/pause,
+    не трогает остальную компанию. Лидер отдела перестаёт предлагать ему задачи."""
+    ok = registry.pause(agent_id)
+    if not ok:
+        return JSONResponse({"error": "агент не найден"}, status_code=404)
+    return {"ok": True, "agent_id": agent_id, "paused": True}
+
+
+@app.post("/api/agent/{agent_id}/resume")
+async def resume_agent(agent_id: str):
+    ok = registry.resume(agent_id)
+    if not ok:
+        return JSONResponse({"error": "агент не найден"}, status_code=404)
+    office_loop.wake_tenant()
+    return {"ok": True, "agent_id": agent_id, "paused": False}
+
+
+@app.post("/api/task/{task_id}/reassign")
+async def reassign_task(task_id: str, request: Request):
+    """Переназначить задачу другому исполнителю (вкладка «Сценарии»). Body: {agent_id}."""
+    from src.office import plan as plan_mod
+    data = await request.json()
+    agent_id = (data.get("agent_id") or "").strip()
+    if not agent_id:
+        return JSONResponse({"error": "agent_id обязателен"}, status_code=400)
+    target = registry.get(agent_id)
+    if not target:
+        return JSONResponse({"error": "агент не найден"}, status_code=404)
+    task = plan_mod.get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "задача не найдена"}, status_code=404)
+    if task.get("role") != target.role:
+        return JSONResponse(
+            {"error": f"агент {agent_id} — роль {target.role}, задаче нужна роль {task.get('role')}"},
+            status_code=409)
+    if not plan_mod.reassign(task_id, agent_id):
+        return JSONResponse({"error": "задачу нельзя переназначить в её текущем статусе"}, status_code=409)
+    office_loop.wake_tenant()
+    return {"ok": True, "task_id": task_id, "agent_id": agent_id}
+
+
 @app.post("/api/agent/{agent_id}/model")
 async def set_agent_model(agent_id: str, request: Request):
     """Назначить агенту индивидуальную модель (пустая — вернуть к общей)."""

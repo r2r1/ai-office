@@ -92,6 +92,7 @@ def set_business_stages(stages: list[dict]) -> None:
     for b in base:
         b["status"] = "done"
     existing = {s["id"]: s for s in st}
+    used_ids = set(_SYS)
     biz = []
     for i, sd in enumerate(stages):
         sid = sd.get("id") or f"stage_{i+1}"
@@ -102,8 +103,18 @@ def set_business_stages(stages: list[dict]) -> None:
                         "summary": prev.get("summary", sd.get("summary", "")),
                         "items": prev.get("items", [])})
         else:
+            # ЛЛМ может вернуть id, совпадающий с системным этапом (intake/research/
+            # strategy) или с другим бизнес-этапом того же ответа — без дедупа два
+            # разных этапа получают один id, и любой поиск по id находит только
+            # первый, молча пряча второй (реальный кейс: два этапа "strategy").
+            if sid in used_ids:
+                base_sid, n = sid, 2
+                while f"{base_sid}_{n}" in used_ids:
+                    n += 1
+                sid = f"{base_sid}_{n}"
             biz.append({"id": sid, "title": sd.get("title", f"Этап {i+1}"),
                         "status": "pending", "summary": sd.get("summary", ""), "items": []})
+        used_ids.add(sid)
     _save(base + biz)
 
 

@@ -91,6 +91,7 @@ const NAV: Array<{ id: Section; label: string; group: "top" | "bottom" }> = [
   { id: "dashboard",   label: "Сводка",  group: "top" },
   { id: "project",     label: "Проект",  group: "top" },
   { id: "team",        label: "Команда", group: "top" },
+  { id: "scenario",    label: "Сценарии", group: "top" },
   { id: "results",     label: "Итоги",   group: "top" },
   { id: "chats",       label: "Чаты",    group: "top" },
   { id: "company",     label: "Компания", group: "bottom" },

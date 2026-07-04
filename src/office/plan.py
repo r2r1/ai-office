@@ -26,7 +26,10 @@ def _data() -> dict:
 _ROLE_REMAP = {
     "researcher": "analyst", "architect": "developer", "strategist": "marketer",
     "hr": "developer", "cto": "developer", "cmo": "marketer", "sales_lead": "salesman",
-    "seo": "marketer", "qa": "developer", "copywriter": "marketer", "ux": "designer",
+    "seo": "marketer", "qa": "developer", "copywriter": "marketer", "ux": "developer",
+    # designer слит в developer (один владелец артефакта site/, см. roles.py) —
+    # редирект нужен для старых тенантов/промптов, которые ещё помнят роль "designer".
+    "designer": "developer",
 }
 
 
@@ -384,6 +387,24 @@ def get_task(task_id: str) -> dict | None:
         if t["id"] == task_id:
             return t
     return None
+
+
+def reassign(task_id: str, agent_id: str) -> bool:
+    """Ручное переназначение задачи другому исполнителю (вкладка «Сценарии»).
+    Задача возвращается в pending под новым исполнителем — следующий цикл
+    планировщика подхватит её как обычную готовую к работе задачу той же роли,
+    без специального пути в exec-логике."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id:
+            if t.get("status") not in ("pending", "in_progress", "blocked"):
+                return False
+            t["assignee"] = agent_id
+            t["status"] = "pending"
+            t["updated_ts"] = time.time()
+            _save(d)
+            return True
+    return False
 
 
 def for_agent(agent_id: str) -> list[dict]:

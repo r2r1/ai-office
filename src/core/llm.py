@@ -138,10 +138,22 @@ def _client() -> AsyncOpenAI:
 
 
 def _is_model_unavailable(err: Exception) -> bool:
-    """503/недоступная модель у провайдера (нет канала, модель не найдена)."""
+    """Провайдер/модель сейчас недоступны — нужно переключиться, не ретраить ту же
+    модель вслепую. Две категории под одним предикатом:
+      1. модель/канал реально не существует (model_not_found, no such model);
+      2. апстрим временно лежит (503 upstream_unavailable/service_unavailable и
+         аналоги) — раньше это НЕ ловилось (текст ошибки apinet «Сервис временно
+         недоступен, upstream_unavailable» не совпадал ни с одной фразой ниже), и
+         офис просто ретраил ту же самую упавшую модель каждый цикл до бесконечности
+         вместо того, чтобы один раз попробовать резервную."""
     s = str(err).lower()
     return ("model_not_found" in s or "no available channel" in s
-            or "does not exist" in s or "no such model" in s)
+            or "does not exist" in s or "no such model" in s
+            or "upstream_unavailable" in s or "service_unavailable" in s
+            or "server_error" in s or "временно недоступен" in s
+            # "503" голым числом не матчим (ложные срабатывания на несвязанные
+            # числа) — только явный формат ошибки провайдера "error code: 50x".
+            or any(f"error code: {c}" in s for c in ("502", "503", "504")))
 
 
 def _fallback_model(failed: str) -> str:

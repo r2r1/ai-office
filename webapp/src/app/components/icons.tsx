@@ -59,6 +59,17 @@ const PATHS: Record<string, ReactNode> = {
       <rect x="15" y="15" width="3" height="5" rx="0.7" />
     </>
   ),
+  // Сценарии — узлы связей (граф)
+  scenario: (
+    <>
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="18" cy="6" r="2.4" />
+      <circle cx="12" cy="13" r="2.4" />
+      <circle cx="6" cy="20" r="2.4" />
+      <circle cx="18" cy="20" r="2.4" />
+      <path d="M8 7.5 10.3 11.3M16 7.5 13.7 11.3M10.3 14.8 8 18.5M13.7 14.8 16 18.5" />
+    </>
+  ),
   // Доступы — вилка/разъём
   connections: (
     <>

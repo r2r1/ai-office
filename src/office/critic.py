@@ -239,6 +239,48 @@ def check_site() -> list[dict]:
             problems.append(_p("js_error", "critical",
                 f"index.html: JS-ошибка синтаксиса в инлайн <script type=module> — {err[:100]}"))
 
+    # 8b. ESM-РЕАКТ БЕЗ ИМПОРТА REACT: скилл "3D-лендинг на Framer Motion" грузит
+    # react-dom/client и framer-motion через esm.sh importmap, а сам 'react' часто
+    # забывают импортировать явно и обращаются к глобальному React (`const {...} =
+    # React` / `React.createElement`) — в ESM-модуле такого глобала НЕТ, скрипт падает
+    # с ReferenceError на первой же строке, страница остаётся пустой. node --check
+    # эту ошибку НЕ ловит (это валидный синтаксис, просто React не определён в
+    # рантайме), а Playwright (review_site_visual) опционален и часто не установлен —
+    # нужна дешёвая детерминированная проверка, которая работает всегда.
+    def _read_full_raw(p: str) -> str:
+        raw = workspace.read_bytes(p)
+        return raw.decode("utf-8", errors="replace") if raw else ""
+    raw_js = "\n".join(_read_full_raw(p) for p in js_files)
+    inline_modules = "\n".join(m.group(1) for m in re.finditer(
+        r'<script[^>]*type=["\']module["\'][^>]*>(.*?)</script>', html, re.IGNORECASE | re.DOTALL))
+    combined_raw = raw_js + "\n" + inline_modules
+    uses_esm_react = "esm.sh/react" in low or "esm.sh/framer-motion" in low
+    if uses_esm_react:
+        imports_react = bool(re.search(r'import\s+(?:\*\s*as\s+)?React\b.*from\s+[\'"]react[\'"]', combined_raw))
+        uses_bare_react = bool(re.search(r'(?<![\w.$])React\s*[.;]', combined_raw))
+        if uses_bare_react and not imports_react:
+            problems.append(_p("react_not_imported", "critical",
+                "Код обращается к глобальному React (React.createElement / const {...} = React), "
+                "но 'react' нигде не импортирован через ESM (import React from 'react') — в браузере "
+                "такого глобала нет, скрипт падает с ReferenceError на первой строке, страница пустая."))
+
+    # 8c. TAILWIND-КЛАССЫ БЕЗ TAILWIND: без шага сборки utility-классы (md:w-1/2,
+    # bg-gradient-to-br, grid-cols-3 и т.п.) — просто строки, ничего не значащие для
+    # браузера, если сам Tailwind не подключён (CDN-скрипт или собранный .css с этими
+    # классами). Реальный кейс: сайт с десятками таких классов рендерился полностью
+    # неоформленным (без сетки/отступов/цветов), потому что рантайм Tailwind не грузился.
+    tailwind_markers = (r'\b(?:sm|md|lg|xl):[a-z0-9_-]+', r'\bbg-gradient-to-(?:br|bl|tr|tl|r|l|t|b)\b',
+                        r'\bgrid-cols-\d\b', r'\btext-(?:gray|indigo|red|blue|green|purple)-\d{3}\b')
+    tailwind_used = any(re.search(pat, low) for pat in tailwind_markers) \
+        or any(re.search(pat, combined_raw) for pat in tailwind_markers)
+    tailwind_loaded = "tailwindcss" in low or any(p.endswith("tailwind.css") for p in in_dir)
+    if tailwind_used and not tailwind_loaded:
+        problems.append(_p("tailwind_without_tailwind", "critical",
+            "В разметке/JS используются Tailwind utility-классы (md:, bg-gradient-to-, "
+            "grid-cols- и т.п.), но сам Tailwind нигде не подключён (нет <script src="
+            "\"https://cdn.tailwindcss.com\"> и нет tailwind.css) — без сборки эти классы "
+            "ничего не значат, вёрстка отображается неоформленной."))
+
     # 9. ДОСТУПНОСТЬ (базово): картинки без alt.
     imgs_no_alt = 0
     for p in html_pages:
