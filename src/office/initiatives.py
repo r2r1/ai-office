@@ -1,10 +1,13 @@
 """
-Система инициатив — CEO проактивно предлагает возможности.
+Система инициатив — BOS §5: идея ДО решения. Предлагает либо CEO (по
+наблюдённой opportunity), либо сам предприниматель (propose()). Прежде чем
+показать пользователю решение accept/reject, инициатива проходит стадию
+глубокого исследования (research) — офис не просит решить вслепую, решение
+принимается по анализу, не по одной строке заголовка.
 
-Офис не ждёт команды. Он постоянно ищет возможности улучшить
-бизнес и предлагает их пользователю с обоснованием и ROI-оценкой.
-Пользователь принимает, отклоняет или откладывает инициативу.
-При принятии — задачи инициативы добавляются в план.
+Статусы: researching (идёт анализ) → pending (ждёт решения) → accepted/rejected/expired.
+При accept — задачи инициативы добавляются в план (см. server.py accept_initiative,
+который дополнительно заводит/переименовывает Work под неё — BOS §3).
 """
 
 import time
@@ -29,13 +32,15 @@ def add(
     expected_outcome: str,
     estimated_effort: str = "1-2 цикла",
     tasks: list | None = None,
-    source: str = "ceo",  # "ceo" | "event" | "auto"
+    source: str = "ceo",  # "ceo" | "event" | "auto" | "user"
+    needs_research: bool = True,
 ) -> str:
-    """Добавить инициативу. Дедуп по title."""
+    """Добавить инициативу. Дедуп по title. needs_research=True — статус
+    "researching" (ждёт глубокого анализа, ещё не показывается на решение);
+    False — сразу "pending" (для путей, где анализ уже включён в rationale)."""
     items = _load()
-    # Дедупликация по заголовку
     for item in items:
-        if item["status"] == "pending" and item["title"].lower() == title.lower():
+        if item["status"] in ("pending", "researching") and item["title"].lower() == title.lower():
             return item["id"]
 
     iid = f"i_{uuid.uuid4().hex[:8]}"
@@ -48,17 +53,59 @@ def add(
         "estimated_effort": estimated_effort,
         "tasks": tasks or [],
         "source": source,
-        "status": "pending",  # pending | accepted | rejected | expired
+        "research": "",
+        "status": "researching" if needs_research else "pending",
         "expires_at": time.time() + _EXPIRE_SECS,
     })
     _save(items)
     return iid
 
 
+def propose(title: str, idea: str) -> str:
+    """Предприниматель сам предлагает инициативу (не только AI) — минимальный
+    ввод (название + мысль), глубокий анализ офис делает сам (see server.py:
+    планировщик запускает research в фоне сразу после создания)."""
+    return add(title, idea, "", "1-2 цикла", [], source="user", needs_research=True)
+
+
+def get(iid: str) -> dict | None:
+    for item in _load():
+        if item["id"] == iid:
+            return dict(item)
+    return None
+
+
+def set_research(iid: str, research: str, tasks: list | None = None) -> dict | None:
+    """Фиксирует результат глубокого исследования и переводит инициативу в
+    pending — только теперь она показывается пользователю на решение."""
+    items = _load()
+    for item in items:
+        if item["id"] == iid:
+            item["research"] = (research or "").strip()[:3000]
+            if tasks:
+                item["tasks"] = tasks
+            item["status"] = "pending"
+            _save(items)
+            return dict(item)
+    return None
+
+
+def researching() -> list:
+    return [i for i in _load() if i["status"] == "researching"]
+
+
 def pending() -> list:
     expire_old()
     items = _load()
     return [i for i in items if i["status"] == "pending"]
+
+
+def active() -> list:
+    """Всё, что пользователь ещё увидит (идёт анализ + ждёт решения) —
+    для UI, который должен показать «идёт исследование», а не молчать."""
+    expire_old()
+    items = _load()
+    return [i for i in items if i["status"] in ("researching", "pending")]
 
 
 def accept(iid: str) -> list:
@@ -117,10 +164,11 @@ def has_pending_similar(title: str) -> bool:
 
 def payload() -> dict:
     p = pending()
+    r = researching()
     all_items = _load()
     return {
         "pending": p,
+        "researching": r,
         "pending_count": len(p),
         "total": len(all_items),
     }
-

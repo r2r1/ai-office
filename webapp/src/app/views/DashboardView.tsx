@@ -8,20 +8,26 @@ const DEPT_NAMES: Record<string, string> = { tech: "Технический", mar
 
 interface DashboardViewProps {
   onNavigate?: (s: Section) => void
+  /** Открыть конкретный проект во вкладке «Проект» (после принятия инициативы). */
+  onOpenProject?: (projectId: string) => void
 }
 
-export function DashboardView({ onNavigate }: DashboardViewProps) {
+export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps) {
   const { state } = useOffice()
   const [health, setHealth] = useState<any>(null)
   const [autonomy, setAutonomy] = useState<any>(null)
   const [initiatives, setInitiatives] = useState<any[]>([])
   const [milestones, setMilestones] = useState<any[]>([])
+  const [gaps, setGaps] = useState<any[]>([])
+  // Результат последнего accept — показываем "стало проектом «X»" вместо тишины.
+  const [acceptedResult, setAcceptedResult] = useState<{ title: string; projectId: string; projectTitle: string } | null>(null)
 
   useEffect(() => {
     api.get("/api/health").then(setHealth).catch(() => {})
     api.get("/api/autonomy").then(setAutonomy).catch(() => {})
     api.get("/api/initiatives").then(d => setInitiatives(d?.pending || [])).catch(() => {})
     api.milestones().then(d => setMilestones(d.stages || []))
+    api.gap().then(d => setGaps(d.gaps || [])).catch(() => {})
   }, [state.feed.length])
 
   const currentStage = milestones.find((m: any) => m.id === state.progress.current)
@@ -36,14 +42,45 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
   ]
 
   async function handleInitiative(iid: string, action: "accept" | "reject") {
-    await api.post(`/api/initiative/${iid}/${action}`, {})
+    const ini = initiatives.find(i => i.id === iid)
+    const r = await api.post(`/api/initiative/${iid}/${action}`, {})
     setInitiatives(prev => prev.filter(i => i.id !== iid))
+    if (action === "accept" && r?.project_id && ini) {
+      setAcceptedResult({ title: ini.title, projectId: r.project_id, projectTitle: r.project_title || ini.title })
+    }
   }
 
   return (
     <ViewShell>
       <ViewHead title="Сводка" sub={state.ready ? "Состояние компании на текущий момент" : "Офис ожидает бриф"} />
       <ViewBody>
+        {/* Gap до цели — заголовок Command Center: разрыв между тем, где
+            компания хочет быть, и где она сейчас (BOS §3 Gap Analysis). Раньше
+            это вычислялось бэкендом (src/office/gap.py) и никогда не
+            показывалось — единственный экран продукта обязан начинаться с
+            этого, а не с анимации или общих цифр. */}
+        {gaps.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            <SectionLabel>🎯 До цели</SectionLabel>
+            <div style={{ display: "grid", gap: 10 }}>
+              {gaps.map((g: any, i: number) => (
+                <Card key={i} style={{
+                  borderLeft: `3px solid ${g.met ? "#a0e0ab" : "var(--mercury-a)"}`,
+                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+                }}>
+                  <div style={{ fontSize: 13, color: "var(--text)" }}>{g.title}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>
+                      {g.current} <span style={{ color: "var(--faint)" }}>из</span> {g.desired}
+                    </span>
+                    {g.met ? <Pill color="#a0e0ab">✓ достигнута</Pill> : <Pill accent>разрыв {g.gap}</Pill>}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Прогресс по проекту + текущий этап */}
         <MercuryBar percent={state.progress.percent} style={{ marginBottom: 10 }} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
@@ -54,30 +91,29 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
             style={linkBtn}>Доска задач →</button>
         </div>
 
-        {/* Здоровье отделов */}
-        {health && (
-          <>
-            <SectionLabel>Здоровье компании {health.status} {health.company}/100</SectionLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
-              {Object.entries<any>(health.departments || {}).map(([dept, ds]) => (
-                <Card key={dept}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, color: "var(--text)" }}>{DEPT_NAMES[dept] || dept}</span>
-                    <span>{ds.status} <span className="mono" style={{ fontSize: 12, color: "var(--text-dim)" }}>{ds.score}</span></span>
-                  </div>
-                  <div style={{ height: 4, background: "var(--hairline)", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${ds.score}%`, background: ds.score >= 75 ? "#a0e0ab" : ds.score >= 45 ? "#ffac2e" : "#e05a5a", transition: "width 0.5s" }} />
-                  </div>
-                  {ds.issues?.length > 0 && (
-                    <div style={{ marginTop: 6, fontSize: 10, color: "#ffac2e" }}>⚠ {ds.issues.join(" · ")}</div>
-                  )}
-                </Card>
-              ))}
+        {/* Результат последнего accept — куда делась принятая инициатива */}
+        {acceptedResult && (
+          <Card style={{ borderLeft: "3px solid #a0e0ab", padding: "12px 16px", marginBottom: 18,
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              ✅ «{acceptedResult.title}» стала проектом «<b style={{ color: "var(--text)" }}>{acceptedResult.projectTitle}</b>»
             </div>
-          </>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { onOpenProject?.(acceptedResult.projectId); setAcceptedResult(null) }}
+                style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
+                  border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text)" }}>
+                Открыть →
+              </button>
+              <button onClick={() => setAcceptedResult(null)}
+                style={{ padding: "6px 10px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
+                  border: "none", background: "transparent", color: "var(--muted)" }}>×</button>
+            </div>
+          </Card>
         )}
 
-        {/* Инициативы CEO */}
+        {/* Инициативы CEO — решения ждут пользователя, поэтому идут ДО
+            статусных виджетов (Command Center: сначала «что решить», потом
+            «как дела»). */}
         {initiatives.length > 0 && (
           <>
             <SectionLabel>💡 Инициативы CEO · {initiatives.length}</SectionLabel>
@@ -100,6 +136,29 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
                           border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>✖</button>
                     </div>
                   </div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Здоровье отделов */}
+        {health && (
+          <>
+            <SectionLabel>Здоровье компании {health.status} {health.company}/100</SectionLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
+              {Object.entries<any>(health.departments || {}).map(([dept, ds]) => (
+                <Card key={dept}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: "var(--text)" }}>{DEPT_NAMES[dept] || dept}</span>
+                    <span>{ds.status} <span className="mono" style={{ fontSize: 12, color: "var(--text-dim)" }}>{ds.score}</span></span>
+                  </div>
+                  <div style={{ height: 4, background: "var(--hairline)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${ds.score}%`, background: ds.score >= 75 ? "#a0e0ab" : ds.score >= 45 ? "#ffac2e" : "#e05a5a", transition: "width 0.5s" }} />
+                  </div>
+                  {ds.issues?.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 10, color: "#ffac2e" }}>⚠ {ds.issues.join(" · ")}</div>
+                  )}
                 </Card>
               ))}
             </div>
@@ -142,8 +201,7 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
 
         {/* Быстрые ссылки */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={() => onNavigate?.("project")} style={linkCard}>📋 План и задачи →</button>
-          <button onClick={() => onNavigate?.("results")} style={linkCard}>📦 Результаты →</button>
+          <button onClick={() => onNavigate?.("project")} style={linkCard}>📋 План, задачи и артефакты проектов →</button>
           <button onClick={() => onNavigate?.("team")} style={linkCard}>👥 Команда →</button>
         </div>
       </ViewBody>

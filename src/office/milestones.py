@@ -1,5 +1,16 @@
 """
 Этапы (вехи) пути офиса к цели — динамический прогресс-бар. По тенанту.
+
+BOS §5/§14 п.6: Stage переезжает ПОД конкретный Work. Системные этапы (intake/
+research/strategy) — одноразовый BOOTSTRAP компании, общий для всех проектов
+(видны всегда, тегом проекта не помечаются). Бизнес-этапы (заведённые CEO под
+конкретный engagement) помечены `project` — тем проектом, для которого их создали;
+читающие функции по умолчанию видят только этапы ТЕКУЩЕГО активного проекта, но
+принимают `project_id` явно (для карточки закрытого проекта в UI).
+
+Старые записи без `project` (заведены до этой миграции) лениво приписываются
+текущему активному проекту при первом чтении — тот же приём, что
+`plan.adopt_orphan_tasks`.
 """
 
 import time
@@ -17,10 +28,25 @@ BASE_STAGES = [
 _SYS = ("intake", "research", "strategy")
 
 
+def _current_project_id() -> str:
+    from src.office import projects
+    p = projects.active()
+    return p["id"] if p else ""
+
+
 def _load() -> list[dict]:
     st = ctx.read_json(_FILE, None)
     if not st:
-        st = [dict(s) for s in BASE_STAGES]
+        return [dict(s) for s in BASE_STAGES]
+    pid = _current_project_id()
+    if pid:
+        changed = False
+        for s in st:
+            if s["id"] not in _SYS and not s.get("project"):
+                s["project"] = pid
+                changed = True
+        if changed:
+            _save(st)
     return st
 
 
@@ -28,8 +54,12 @@ def _save(stages: list[dict]) -> None:
     ctx.write_json(_FILE, stages)
 
 
-def all_stages() -> list[dict]:
-    return [dict(s) for s in _load()]
+def all_stages(project_id: str = "") -> list[dict]:
+    """Системные этапы (всегда) + бизнес-этапы указанного проекта (или текущего
+    активного, если project_id не передан)."""
+    st = _load()
+    pid = project_id or _current_project_id()
+    return [dict(s) for s in st if s["id"] in _SYS or (s.get("project") or "") == pid]
 
 
 def get(stage_id: str) -> dict | None:
@@ -86,13 +116,17 @@ def set_summary(stage_id: str, summary: str) -> None:
     _save(st)
 
 
-def set_business_stages(stages: list[dict]) -> None:
+def set_business_stages(stages: list[dict], project_id: str = "") -> None:
+    """Задаёт бизнес-этапы ТЕКУЩЕГО проекта (или указанного). Этапы других проектов
+    в файле не трогаем — история чужих Work остаётся читаемой (карточка проекта)."""
+    pid = project_id or _current_project_id()
     st = _load()
     base = [s for s in st if s["id"] in _SYS]
     for b in base:
         b["status"] = "done"
-    existing = {s["id"]: s for s in st}
-    used_ids = set(_SYS)
+    other_projects = [s for s in st if s["id"] not in _SYS and (s.get("project") or "") != pid]
+    existing = {s["id"]: s for s in st if s["id"] in _SYS or (s.get("project") or "") == pid}
+    used_ids = {s["id"] for s in st}  # избегаем коллизий id вообще со всеми, не только своим проектом
     biz = []
     for i, sd in enumerate(stages):
         sid = sd.get("id") or f"stage_{i+1}"
@@ -101,7 +135,7 @@ def set_business_stages(stages: list[dict]) -> None:
             biz.append({"id": sid, "title": sd.get("title", prev["title"]),
                         "status": prev.get("status", "pending"),
                         "summary": prev.get("summary", sd.get("summary", "")),
-                        "items": prev.get("items", [])})
+                        "items": prev.get("items", []), "project": pid})
         else:
             # ЛЛМ может вернуть id, совпадающий с системным этапом (intake/research/
             # strategy) или с другим бизнес-этапом того же ответа — без дедупа два
@@ -113,21 +147,23 @@ def set_business_stages(stages: list[dict]) -> None:
                     n += 1
                 sid = f"{base_sid}_{n}"
             biz.append({"id": sid, "title": sd.get("title", f"Этап {i+1}"),
-                        "status": "pending", "summary": sd.get("summary", ""), "items": []})
+                        "status": "pending", "summary": sd.get("summary", ""), "items": [], "project": pid})
         used_ids.add(sid)
-    _save(base + biz)
+    _save(base + other_projects + biz)
 
 
-def insert_business_stage(title: str, after_id: str | None = None, status: str = "pending") -> str:
-    """Добавляет новый бизнес-этап (по запросу предпринимателя). Системные этапы не трогаем.
-    Возвращает id созданного этапа."""
+def insert_business_stage(title: str, after_id: str | None = None, status: str = "pending",
+                           project_id: str = "") -> str:
+    """Добавляет новый бизнес-этап ТЕКУЩЕМУ проекту (по запросу предпринимателя).
+    Системные этапы не трогаем. Возвращает id созданного этапа."""
     import re
+    pid = project_id or _current_project_id()
     st = _load()
     base = re.sub(r"[^a-z0-9]+", "_", (title or "").lower()).strip("_")[:20] or f"stage_{len(st)+1}"
     sid, i = base, 2
     while any(s["id"] == sid for s in st):
         sid, i = f"{base}_{i}", i + 1
-    new = {"id": sid, "title": (title or "").strip()[:80], "status": status, "summary": "", "items": []}
+    new = {"id": sid, "title": (title or "").strip()[:80], "status": status, "summary": "", "items": [], "project": pid}
     # позиция вставки: после after_id, но не раньше системных этапов
     idx = len(st)
     if after_id:
@@ -151,17 +187,22 @@ def retitle(stage_id: str, title: str) -> bool:
     return False
 
 
-def has_business_stages() -> bool:
-    return any(s["id"] not in _SYS for s in _load())
+def has_business_stages(project_id: str = "") -> bool:
+    """Есть ли у ТЕКУЩЕГО (или указанного) проекта уже заведённые бизнес-этапы —
+    после закрытия проекта и старта нового ответ снова False: новый Work строит
+    свой путь заново, не наследует чужой."""
+    pid = project_id or _current_project_id()
+    return any(s["id"] not in _SYS and (s.get("project") or "") == pid for s in _load())
 
 
-def all_business_done() -> bool:
-    biz = [s for s in _load() if s["id"] not in _SYS]
+def all_business_done(project_id: str = "") -> bool:
+    pid = project_id or _current_project_id()
+    biz = [s for s in _load() if s["id"] not in _SYS and (s.get("project") or "") == pid]
     return bool(biz) and all(s["status"] == "done" for s in biz)
 
 
-def current_index() -> int:
-    st = _load()
+def current_index(project_id: str = "") -> int:
+    st = all_stages(project_id)
     active = [i for i, s in enumerate(st) if s["status"] == "active"]
     if active:
         return active[0]
@@ -173,14 +214,14 @@ def current_index() -> int:
     return done[-1] + 1
 
 
-def progress_payload() -> dict:
-    st = _load()
+def progress_payload(project_id: str = "") -> dict:
+    st = all_stages(project_id)
     n = len(st)
     done_count = len([s for s in st if s["status"] == "done"])
     return {
         "stages": [{"id": s["id"], "title": s["title"], "status": s["status"],
                     "summary": s["summary"], "item_count": len(s["items"])} for s in st],
-        "current": current_index(),
+        "current": current_index(project_id),
         "percent": round(done_count / n * 100) if n else 0,
     }
 

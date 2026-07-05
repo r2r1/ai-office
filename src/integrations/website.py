@@ -183,6 +183,7 @@ async def _list_pages(creds: dict, params: dict) -> str:
 INTEGRATION = Integration(
     name="website",
     title="Сайт / Лендинг",
+    category="publishing",
     icon="🌐",
     description="Публикация посадочной страницы с формой захвата лидов. Хостинг и сбор заявок — встроенные, ключи не нужны.",
     how_to="Учётные данные не нужны — страница публикуется и хостится самим офисом. "

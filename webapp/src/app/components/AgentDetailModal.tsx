@@ -77,10 +77,7 @@ export function AgentDetailModal({ agentId, emoji, onClose, onOpenChat }: Props)
             <ModalSection label={`Готовые результаты · ${done.length}`}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {done.map((x: any, i: number) => (
-                  <div key={i}>
-                    <div style={{ fontSize: 12, color: "var(--mercury-a)", marginBottom: 6 }}>{x.task || x.title || "Результат"}</div>
-                    <ModalPre>{x.content || x.result || ""}</ModalPre>
-                  </div>
+                  <DeliverableItem key={i} title={x.task || x.title || "Результат"} content={x.content || x.result || ""} />
                 ))}
               </div>
             </ModalSection>
@@ -113,5 +110,31 @@ export function AgentDetailModal({ agentId, emoji, onClose, onOpenChat }: Props)
         </>
       )}
     </Modal>
+  )
+}
+
+const PREVIEW_LEN = 220
+
+// Короткий превью результата + кнопка «Показать полностью» вместо простыни текста
+// целиком (реальный баг: вкладка «Готовые результаты» рендерила ПОЛНЫЙ контент,
+// включая инжектированный контекст задачи, на весь экран).
+function DeliverableItem({ title, content }: { title: string; content: string }) {
+  const [open, setOpen] = useState(false)
+  const isLong = content.length > PREVIEW_LEN
+  // Защита от старых записей (до фикса короткой подписи на бэкенде), где title
+  // мог содержать весь контекст задачи целиком, а не короткий титул.
+  const shortTitle = title.length > 100 ? title.slice(0, 100) + "…" : title
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "var(--mercury-a)", marginBottom: 6 }}>{shortTitle}</div>
+      <ModalPre>{open || !isLong ? content : content.slice(0, PREVIEW_LEN) + "…"}</ModalPre>
+      {isLong && (
+        <button onClick={() => setOpen(v => !v)}
+          style={{ marginTop: 6, fontSize: 11, color: "var(--mercury-a)", background: "transparent",
+            border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+          {open ? "Свернуть ↑" : "Показать полностью →"}
+        </button>
+      )}
+    </div>
   )
 }

@@ -87,7 +87,9 @@ def _work_for_gap(g: dict) -> tuple[str, str, str] | None:
 
 
 def replan() -> list[dict]:
-    """Steady State: под каждый НЕзакрытый разрыв создаёт работу БЕЗ владельца.
+    """Steady State: под каждый НЕзакрытый разрыв создаёт задачу и, если она попадает
+    в свежий пустой активный проект, называет его по разрыву (BOS §3/§5: Gap создаёт
+    Work, а не голую задачу без владельца-контекста).
     Дедуп по objective (requested_by=`gap:<oid>`) — не больше одной АКТИВНОЙ
     авто-задачи на цель одновременно, чтобы офис не спамил одинаковыми задачами
     каждый цикл (endless-retry — горизонт Phase X).
@@ -98,7 +100,7 @@ def replan() -> list[dict]:
     сгенерированная задача с неизмеримым done_criterion была принята с
     предупреждением) блокировала повторные попытки для этой цели НАВСЕГДА, хотя
     разрыв так и остался открытым."""
-    from src.office import plan
+    from src.office import plan, projects
     created = []
     active_tags = {t.get("requested_by", "") for t in plan.all_tasks()
                    if t.get("status") in ("pending", "in_progress")}
@@ -109,7 +111,17 @@ def replan() -> list[dict]:
         work = _work_for_gap(g)
         if not work:
             continue
+        # Gap создаёт Work, а не голую задачу в чужом контексте (BOS §3): если
+        # add_task вот-вот попадёт в свежесозданный ПУСТОЙ активный проект
+        # (ensure_active() завела его от общего брифа), проверяем пустоту ДО
+        # добавления задачи и после даём проекту название, отражающее разрыв.
+        proj_before = projects.active()
+        was_empty = bool(proj_before) and not plan.for_project(proj_before["id"])
         role, title, crit = work
         task = plan.add_task(title, role, crit, requested_by=tag)
         created.append(task)
+        if was_empty:
+            proj = projects.active()
+            if proj:
+                projects.rename(proj["id"], f"Закрыть разрыв: {g['title']}")
     return created

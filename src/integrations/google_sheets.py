@@ -130,6 +130,7 @@ async def _create_spreadsheet(creds: dict, params: dict) -> str:
 INTEGRATION = Integration(
     name="google_sheets",
     title="Google Sheets",
+    category="productivity",
     icon="📊",
     description="Читать, записывать и создавать Google Таблицы. Авторизация через Google OAuth.",
     how_to="Нажми «Подключить Google» — это даёт доступ сразу к Sheets, Gmail и Calendar.",

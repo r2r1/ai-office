@@ -231,11 +231,11 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
             for p in py_problems:
                 lessons.add(role, f"Код: {p}")
             feedback = "⚠ Синтаксические ошибки в коде:\n" + "\n".join(f"- {p}" for p in py_problems[:3])
-            await publish({"type": "speech", "agent_id": agent_id, "text": feedback[:200]})
+            await publish({"type": "speech", "agent_id": agent_id, "text": feedback})
             fix_task = (f"{task}\n\n{feedback}\n\nИсправь ошибки в файлах. "
                         f"Прочитай файл через read_file, найди ошибку, перепиши через write_file.")
             ctx_task = task_with_context(role, fix_task, skill, department=department, objective=objective)
-            fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+            fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill, title=task)
             await fn()
 
     # --- Верификация Telegram-бота ---
@@ -252,7 +252,7 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
             fix_task = (f"{task}\n\n{feedback}\n\n"
                         f"Прочитай существующие файлы через list_files + read_file, исправь проблемы.")
             ctx_task = task_with_context(role, fix_task, skill, department=department, objective=objective)
-            fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+            fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill, title=task)
             await fn()
         return  # бот-задача обработана
 
@@ -275,11 +275,11 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
             lessons.add(role, f"Синтаксис: {e}")
         feedback = ("⚠ Синтаксические ошибки JS/HTML — сайт НЕ публикуется, пока не исправлено:\n"
                     + "\n".join(f"- {e}" for e in v["errors"][:3]))
-        await publish({"type": "speech", "agent_id": agent_id, "text": feedback[:200]})
+        await publish({"type": "speech", "agent_id": agent_id, "text": feedback})
         fix_task = (f"{task}\n\n{feedback}\n\nИсправь синтаксис в файлах. "
                     f"Прочитай файл через read_file, найди ошибку, перепиши через write_file.")
         ctx_task = task_with_context(role, fix_task, skill, department=department, objective=objective)
-        fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+        fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill, title=task)
         await fn()
         v = workspace.verify(changed_since=started_ts)
         if not v.get("ok"):
@@ -314,7 +314,7 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
     for p in problems:
         lessons.add(role, f"Сайт: {critic.text_of(p)}")
     feedback = critic.critique_text(problems)
-    await publish({"type": "speech", "agent_id": agent_id, "text": f"🔁 {feedback[:120]}"})
+    await publish({"type": "speech", "agent_id": agent_id, "text": f"🔁 {feedback}"})
     # Инкрементальная правка с обязательным журналом изменений.
     fix_task = (f"{task}\n\n{feedback}\n\n"
                 f"ЭТО ПРАВКА существующего сайта, НЕ новый сайт:\n"
@@ -324,7 +324,7 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
                 f"3. Публиковать НЕ нужно — офис опубликует сам.\n"
                 f"4. В конце ответа ОДНОЙ строкой: «Изменения: …» — что именно поправил.")
     ctx_task = task_with_context(role, fix_task, skill, department=department, objective=objective)
-    fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill)
+    fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill, title=task)
     fix_result = await fn()
     fix_note = (fix_result or "").strip().replace("\n", " ")
     import re as _re
@@ -343,7 +343,7 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
                      f"Почини ТОЧЕЧНО в существующих файлах site/ (read_file → правка), "
                      f"публиковать не нужно. В конце строкой «Изменения: …».")
         ctx_task2 = task_with_context(role, fix_task2, skill, department=department, objective=objective)
-        r2 = await agent_factory.create(role, ctx_task2, agent_id, publish, skill=skill)()
+        r2 = await agent_factory.create(role, ctx_task2, agent_id, publish, skill=skill, title=task)()
         n2 = (r2 or "").strip().replace("\n", " ")
         m2 = _re.search(r"Изменени[яе]\s*:\s*(.+)", n2)
         await publish_site_auto(publish, note=(m2.group(1) if m2 else "повторная правка")[:160])
@@ -393,6 +393,23 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
     from src.office import execution_policy
     t_rec_policy = (plan.get_task(task_id) if task_id and plan.is_generated() else None) or {"title": task}
     policy = execution_policy.decide(t_rec_policy, agent_id, role)
+    # Анти-заклинивание скилла: 3+ провала задачи с ОДНИМ и тем же скиллом — смени
+    # способ, а не ретрай того же пути. Реальный прогон: designer 7 раз подряд брал
+    # framer_motion_3d_site, зависал на одинаковом месте и был убит watchdog'ом —
+    # почти 1.5 часа и деньги в никуда, стратегия ни разу не поменялась.
+    _attempts = int(t_rec_policy.get("attempts") or 0)
+    if _attempts >= 3 and skill:
+        from src.office import trace as _trace
+        _trace.log("skill_switch", agent=agent_id, task_id=task_id,
+                   dropped=skill, attempts=_attempts)
+        await publish({"type": "system",
+                       "text": f"🔁 {_attempts} попыток со скиллом «{skill}» не сработали — "
+                               f"исполнитель меняет способ"})
+        task = (task + f"\n\n⚠ ВАЖНО: предыдущие {_attempts} попыток этой задачи со скиллом "
+                       f"«{skill}» НЕ завершились (зависания/ошибки). НЕ вызывай его снова. "
+                       f"Возьми другой способ через use_skill (для сайта — «Премиальный сайт "
+                       f"(без 3D)») или сделай работу напрямую своими инструментами.")
+        skill = ""
     # BOS §6: оценка стоимости сверяется с ОСТАТКОМ бюджета ДО исполнения.
     if costs.would_exceed(policy["estimated_usd"]):
         registry.update_status(agent_id, "idle")
@@ -437,7 +454,7 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 design_style.ensure_design_tokens(b.get("niche", ""), b.get("audience", ""))
             ctx_task = task_with_context(role, task, skill, department=department, objective=objective)
             fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill,
-                                      model=policy["model"])
+                                      model=policy["model"], title=task)
             result = await fn()
             # ---- Приёмка качества (критик) для сайтов: дизайнер/разработчик ----
             if role in ("designer", "developer"):
@@ -522,7 +539,10 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
         if summary:
             await publish({"type": "speech", "agent_id": agent_id, "text": f"✅ Готово: {summary}"})
     except Exception as e:
-        err_str = str(e)
+        # str(TimeoutError) — пустая строка: 7 подряд agent_error с error="" в
+        # реальном прогоне были недиагностируемы. Всегда включаем тип исключения.
+        err_str = str(e).strip() or ""
+        err_str = f"{type(e).__name__}: {err_str}" if err_str else type(e).__name__
         trace.log("agent_error", agent=agent_id, role=role,
                   sec=round(time.time() - _job_t0, 1), error=err_str[:200])
         await publish({"type": "error", "agent_id": agent_id, "text": err_str[:100]})

@@ -86,6 +86,9 @@ APINET_TENANT_QUOTA=...
 ALLOW_CODE_EXECUTION=0          # 1 = разрешить execute_code/run_command (терминал);
                                 # без песочницы это исполнение БЕЗ изоляции от ФС
                                 # хоста — security-долг, docs/audit-dd-2026-07.md §17
+TELEGRAM_API_ID=...              # ключи ПРИЛОЖЕНИЯ (my.telegram.org), не пользователя —
+TELEGRAM_API_HASH=...            # без них форма входа в личный Telegram (office/
+                                # telegram_login.py) просит их у каждого пользователя
 ```
 
 ### Минимальная проверка перед коммитом

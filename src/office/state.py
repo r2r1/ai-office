@@ -51,10 +51,13 @@ def history() -> list[dict]:
 def save_deliverable(agent_id: str, role: str, task: str, content: str) -> None:
     if not content or not content.strip():
         return
+    from src.office import projects
+    proj = projects.active()
     d = _load()
     d["deliverables"].append({"agent_id": agent_id, "role": role, "task": task,
                               "content": content.strip(), "ts": time.time(),
-                              "time": datetime.now().strftime("%d.%m %H:%M")})
+                              "time": datetime.now().strftime("%d.%m %H:%M"),
+                              "project": proj["id"] if proj else ""})
     if len(d["deliverables"]) > 200:
         del d["deliverables"][: len(d["deliverables"]) - 200]
     _save(d)
@@ -66,6 +69,27 @@ def deliverables() -> list[dict]:
 
 def deliverables_for(agent_id: str) -> list[dict]:
     return [d for d in reversed(_load()["deliverables"]) if d.get("agent_id") == agent_id]
+
+
+def deliverables_for_project(project_id: str) -> list[dict]:
+    """Артефакты КОНКРЕТНОГО Work (BOS §5) — для карточки проекта в UI, не
+    общего котла на всю компанию. Записи без project (заведены раньше) —
+    лениво привязываются к текущему активному, тот же приём, что sites.py."""
+    from src.office import projects
+    d = _load()
+    changed = False
+    pid = None
+    for item in d["deliverables"]:
+        if not item.get("project"):
+            if pid is None:
+                p = projects.active()
+                pid = p["id"] if p else ""
+            if pid:
+                item["project"] = pid
+                changed = True
+    if changed:
+        _save(d)
+    return [x for x in reversed(d["deliverables"]) if x.get("project") == project_id]
 
 
 def events_for(agent_id: str, limit: int = 30) -> list[dict]:

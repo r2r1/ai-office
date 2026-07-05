@@ -431,9 +431,15 @@ def _try_extract_connection(question: str, answer: str) -> dict | None:
 
 
 def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]],
-           skill: str = "", model: str = ""):
+           skill: str = "", model: str = "", title: str = ""):
     """Возвращает async-функцию, запускающую агента. `model` — решение Execution
-    Policy для конкретной задачи (пусто → обычный путь models.for_agent)."""
+    Policy для конкретной задачи (пусто → обычный путь models.for_agent).
+    `title` — короткая подпись задачи для карточки в «Артефактах»/«Готовых
+    результатах»; `task` часто приходит УЖЕ дополненным контекстом (бриф/ТЗ/
+    память — task_with_context), и если не передать короткий title отдельно,
+    в save_deliverable уходит эта громадная строка целиком (реальный баг:
+    вкладки «Артефакты» и «Готовые результаты» рендерили простыню на
+    полэкрана вместо короткой подписи)."""
     # Системный промпт собирает Prompt Builder (роли/политики — .md-файлы,
     # сборка централизована, см. docs/bos-architecture.md §7). Полный промпт
     # логируется в prompts.jsonl тенанта — отладка мышления зрячая.
@@ -627,7 +633,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
 
     async def _handle_verify_code(args: dict) -> str:
         res = workspace_module.verify_text()
-        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🧪 {res[:120]}"})
+        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🧪 {res}"})
         return res
 
     async def _handle_execute_code(args: dict) -> str:
@@ -635,7 +641,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         stdin = args.get("stdin", "")
         await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"▶️ Запускаю {path}…"})
         res = workspace_module.execute_code(path, stdin)
-        short = res[:200].replace("\n", " ")
+        short = res.replace("\n", " ")
         await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📤 {short}"})
         await publish({"type": "code_executed", "agent_id": agent_id, "path": path,
                        "text": f"▶️ {agent_id}: {path} → {short}"})
@@ -885,7 +891,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             },
         )
 
-        state.save_deliverable(agent_id, role, task, result)
+        state.save_deliverable(agent_id, role, (title or task)[:80], result)
         # Результат задачи НЕ дублируем в личный чат: артефакты лежат в файлах,
         # сводка — во вкладке «Итоги», ход работы — в журнале. Личный чат остаётся
         # местом для диалога и блокирующих вопросов агента, а не свалкой результатов.

@@ -7,21 +7,23 @@ OAuth-интеграции (oauth_url != "") считаются подключё
 """
 
 from src.integrations.base import Integration
-from src.integrations.telegram        import INTEGRATION as _telegram
-from src.integrations.website         import INTEGRATION as _website
-from src.integrations.github          import INTEGRATION as _github
-from src.integrations.google_sheets   import INTEGRATION as _gsheets
-from src.integrations.gmail           import INTEGRATION as _gmail
-from src.integrations.google_calendar import INTEGRATION as _gcal
+from src.integrations.telegram          import INTEGRATION as _telegram
+from src.integrations.telegram_personal import INTEGRATION as _telegram_personal
+from src.integrations.website           import INTEGRATION as _website
+from src.integrations.github            import INTEGRATION as _github
+from src.integrations.google_sheets     import INTEGRATION as _gsheets
+from src.integrations.gmail             import INTEGRATION as _gmail
+from src.integrations.google_calendar   import INTEGRATION as _gcal
 from src.office import connections
 
 _ALL: dict[str, Integration] = {
-    _website.name:  _website,
-    _telegram.name: _telegram,
-    _github.name:   _github,
-    _gsheets.name:  _gsheets,
-    _gmail.name:    _gmail,
-    _gcal.name:     _gcal,
+    _website.name:          _website,
+    _telegram.name:         _telegram,
+    _telegram_personal.name: _telegram_personal,
+    _github.name:           _github,
+    _gsheets.name:          _gsheets,
+    _gmail.name:            _gmail,
+    _gcal.name:             _gcal,
 }
 
 # Все Google-интеграции держат токен под одним именем "google"

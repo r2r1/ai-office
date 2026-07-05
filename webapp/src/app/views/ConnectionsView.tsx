@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
+import type { CSSProperties } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewBody, Card, Empty, SectionLabel } from "./ui"
+import { Modal, ModalSection } from "../components/Modal"
 import { useThrottled } from "../hooks"
 
 /* Иконки Google-сервисов отдельно — не эмодзи */
@@ -16,15 +18,134 @@ const GOOGLE_ICON = (
 
 const GOOGLE_SERVICES = new Set(["google_sheets", "gmail", "google_calendar"])
 
+/** Модалка входа в личный Telegram-аккаунт — интерактивный флоу (телефон → код
+ * → опционально 2FA-пароль), НЕ обычная форма одного ключа: см. how_to интеграции
+ * и office/telegram_login.py на бэкенде. */
+function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+  const [step, setStep] = useState<"phone" | "code" | "password">("phone")
+  const [hasDefaultCreds, setHasDefaultCreds] = useState<boolean | null>(null)
+  const [apiId, setApiId] = useState("")
+  const [apiHash, setApiHash] = useState("")
+  const [phone, setPhone] = useState("")
+  const [code, setCode] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  // Оператор мог задать TELEGRAM_API_ID/TELEGRAM_API_HASH один раз в .env (ключи
+  // приложения, не пользователя) — тогда поля api_id/api_hash в форме не нужны:
+  // обычный пользователь не должен идти на my.telegram.org сам.
+  useEffect(() => {
+    if (open) api.tgConfig().then(c => setHasDefaultCreds(c.has_default_creds))
+  }, [open])
+
+  function reset() {
+    setStep("phone"); setApiId(""); setApiHash(""); setPhone(""); setCode(""); setPassword(""); setError("")
+  }
+
+  async function submitPhone() {
+    if (!phone.trim()) { setError("Введите номер телефона"); return }
+    if (!hasDefaultCreds && (!apiId.trim() || !apiHash.trim())) { setError("Заполните все поля"); return }
+    setBusy(true); setError("")
+    const r = await api.tgLoginStart(phone.trim(), apiId.trim(), apiHash.trim())
+    setBusy(false)
+    if (!r?.ok) { setError(r?.error || "Не удалось запросить код"); return }
+    setStep("code")
+  }
+
+  async function submitCode() {
+    if (!code.trim()) { setError("Введите код из Telegram"); return }
+    setBusy(true); setError("")
+    const r = await api.tgLoginConfirm(code.trim())
+    setBusy(false)
+    if (r?.need_password) { setStep("password"); setError(""); return }
+    if (!r?.ok) { setError(r?.error || "Код не подошёл"); return }
+    reset(); onDone(); onClose()
+  }
+
+  async function submitPassword() {
+    if (!password.trim()) { setError("Введите пароль двухфакторной защиты"); return }
+    setBusy(true); setError("")
+    const r = await api.tgLoginConfirm("", password.trim())
+    setBusy(false)
+    if (!r?.ok) { setError(r?.error || "Пароль не подошёл"); return }
+    reset(); onDone(); onClose()
+  }
+
+  async function close() {
+    if (step !== "phone") await api.tgLoginCancel()
+    reset(); onClose()
+  }
+
+  const inputStyle: CSSProperties = {
+    width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)",
+    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
+    color: "var(--text)", fontSize: 13,
+  }
+  const btnStyle: CSSProperties = {
+    padding: "9px 16px", borderRadius: "var(--radius-pill)", border: "none",
+    background: "var(--mercury-a, #ffac2e)", color: "#0a0a0a", fontWeight: 600,
+    fontSize: 12.5, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+  }
+
+  return (
+    <Modal open={open} onClose={close} title="Вход в личный Telegram"
+      subtitle="Нужен, чтобы писать в ЛС первым — бот так не умеет">
+      {step === "phone" && (
+        <>
+          {hasDefaultCreds === false && (
+            <ModalSection label="api_id и api_hash (my.telegram.org → API development tools)">
+              <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 8, lineHeight: 1.5 }}>
+                Оператор не задал ключи приложения — введите свои разработческие
+                (обычно это делает один раз оператор сервиса, не каждый пользователь).
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <input style={inputStyle} placeholder="api_id" value={apiId} onChange={e => setApiId(e.target.value)} />
+                <input style={inputStyle} placeholder="api_hash" value={apiHash} onChange={e => setApiHash(e.target.value)} />
+              </div>
+            </ModalSection>
+          )}
+          <ModalSection label="Номер телефона">
+            <input style={inputStyle} placeholder="+79991234567" value={phone} onChange={e => setPhone(e.target.value)}
+              disabled={hasDefaultCreds === null} autoFocus />
+          </ModalSection>
+        </>
+      )}
+      {step === "code" && (
+        <ModalSection label={`Код из Telegram (отправлен на ${phone})`}>
+          <input style={inputStyle} placeholder="12345" value={code} onChange={e => setCode(e.target.value)} autoFocus />
+        </ModalSection>
+      )}
+      {step === "password" && (
+        <ModalSection label="Пароль двухфакторной защиты">
+          <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus />
+        </ModalSection>
+      )}
+      {error && <div style={{ fontSize: 12, color: "#ff6b6b", marginTop: -8, marginBottom: 14 }}>{error}</div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button disabled={busy}
+          onClick={step === "phone" ? submitPhone : step === "code" ? submitCode : submitPassword}
+          style={btnStyle}>
+          {step === "phone" ? "Получить код" : step === "code" ? "Подтвердить" : "Войти"}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) {
   const isOAuth   = Boolean(integ.oauth_url)
   const isGoogle  = GOOGLE_SERVICES.has(integ.name)
+  const isTgPersonal = integ.name === "telegram_personal"
   const connected = integ.connected
+  const [loginOpen, setLoginOpen] = useState(false)
 
   const handleConnect = () => {
     if (isOAuth) {
       // OAuth: редирект на страницу согласия
       window.location.href = integ.oauth_url
+    } else if (isTgPersonal) {
+      setLoginOpen(true)
     }
   }
 
@@ -105,8 +226,20 @@ function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) 
         </button>
       )}
 
+      {/* Личный Telegram — интерактивный вход, не форма ключа */}
+      {isTgPersonal && !connected && (
+        <button onClick={handleConnect}
+          style={{
+            marginTop: 2, padding: "8px 14px", borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)",
+            color: "var(--text)", fontSize: 12, fontWeight: 600, cursor: "pointer",
+          }}>
+          Войти в Telegram
+        </button>
+      )}
+
       {/* Инструкция для обычных ключей */}
-      {!isOAuth && integ.how_to && !connected && (
+      {!isOAuth && !isTgPersonal && integ.how_to && !connected && (
         <div style={{
           fontSize: 10.5, color: "var(--faint)", lineHeight: 1.4,
           borderTop: "1px solid var(--hairline-soft)", paddingTop: 8, whiteSpace: "pre-line",
@@ -114,12 +247,24 @@ function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) 
           {integ.how_to}
         </div>
       )}
+      {isTgPersonal && (
+        <TelegramPersonalLoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onDone={onRefresh} />
+      )}
     </Card>
   )
 }
 
 const DI_CATEGORY_LABEL: Record<string, string> = {
   crm: "CRM", analytics: "Аналитика", social: "Соцсети",
+}
+
+// Порядок и подписи категорий каталога интеграций — новая интеграция без
+// категории попадёт в "other" автоматически, каталог не расползётся плоским
+// списком по мере роста (сейчас 7 интеграций, дальше будет больше).
+const INTEG_CATEGORY_ORDER = ["communication", "publishing", "productivity", "dev", "other"]
+const INTEG_CATEGORY_LABEL: Record<string, string> = {
+  communication: "Коммуникации", publishing: "Публикация",
+  productivity: "Продуктивность", dev: "Разработка", other: "Другое",
 }
 
 /** Карточка источника Digital Infrastructure (уровень 2 Instant Learning) —
@@ -191,6 +336,10 @@ export function ConnectionsBody() {
     cat, items: diSources.filter(s => s.category === cat),
   })).filter(g => g.items.length > 0)
 
+  const integByCategory = INTEG_CATEGORY_ORDER.map(cat => ({
+    cat, items: integrations.filter((integ: any) => (integ.category || "other") === cat),
+  })).filter(g => g.items.length > 0)
+
   return (
       <ViewBody>
         {/* Digital Infrastructure — что офис видит о компании за пределами
@@ -220,13 +369,18 @@ export function ConnectionsBody() {
         {integrations.length === 0 ? (
           <Empty icon="🔌" text="Каталог не загружен" hint="Убедитесь, что сервер запущен" />
         ) : (
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 10, marginBottom: 32,
-          }}>
-            {integrations.map((integ: any, i: number) => (
-              <IntegCard key={i} integ={integ} onRefresh={refresh} />
+          <div style={{ marginBottom: 32 }}>
+            {integByCategory.map(({ cat, items }) => (
+              <div key={cat} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, fontWeight: 600 }}>
+                  {INTEG_CATEGORY_LABEL[cat] || cat}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+                  {items.map((integ: any, i: number) => (
+                    <IntegCard key={i} integ={integ} onRefresh={refresh} />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

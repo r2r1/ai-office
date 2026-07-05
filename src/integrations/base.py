@@ -44,6 +44,7 @@ class Integration:
     cred_fields: list[CredField] = field(default_factory=list)
     actions: dict[str, Action] = field(default_factory=dict)
     oauth_url: str = ""   # если задан — подключение через кнопку «Войти», а не ввод ключа
+    category: str = "other"  # для группировки каталога в UI: communication/publishing/productivity/dev
 
     def cred_keys(self) -> list[str]:
         return [c.key for c in self.cred_fields]
@@ -57,6 +58,7 @@ class Integration:
             "description": self.description,
             "how_to": self.how_to,
             "oauth_url": self.oauth_url,
+            "category": self.category,
             "cred_fields": [
                 {"key": c.key, "label": c.label, "secret": c.secret}
                 for c in self.cred_fields

@@ -37,6 +37,16 @@ def is_model_unavailable_error(err: str) -> bool:
     return "model_not_found" in low or "no available channel" in low
 
 
+def is_network_error(err: str) -> bool:
+    """Транзиентный сетевой сбой до провайдера (таймаут/прокси/обрыв) — не quota и
+    не отсутствие модели. Одиночный — норма (ретрай цикла), серия подряд — офис
+    должен встать на паузу с понятным сообщением, а не спамить трейсбеками."""
+    low = (err or "").lower()
+    return ("timed out" in low or "timeout" in low or "connection error" in low
+            or "connect error" in low or "connection refused" in low
+            or "connecttimeout" in low)
+
+
 def is_quota_error(err: str) -> bool:
     """Ошибка нехватки баланса/квоты у LLM-провайдера."""
     err = err or ""

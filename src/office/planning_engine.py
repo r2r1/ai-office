@@ -398,10 +398,12 @@ async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int 
                     tasks=ini.get("tasks", []),
                     source="event",
                 )
-                await publish({"type": "initiative", "id": iid, "title": ini["title"],
-                               "expected_outcome": ini.get("expected_outcome", "")})
                 await publish({"type": "speech", "agent_id": "orchestrator_1",
-                               "text": f"💡 Новая инициатива: {ini['title']} → {ini.get('expected_outcome','')[:60]}"})
+                               "text": f"💡 Возможная инициатива: {ini['title']} — запускаю анализ, прежде чем спросить"})
+                # Глубокое исследование ДО показа решения пользователю (не
+                # заголовок «на глазок» — предприниматель решает по анализу).
+                from src.office import initiative_research
+                await initiative_research.run(iid, ini["title"], ini.get("rationale", summary), publish)
             events_mod.mark_processed([ev["id"]])
     except Exception as e:
         await publish({"type": "error", "agent_id": "orchestrator_1",

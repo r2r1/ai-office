@@ -1,5 +1,11 @@
 // Разделы навигации — мои 4 + системные (решение пользователя).
-export type Section = "office" | "dashboard" | "project" | "team" | "scenario" | "results" | "chats" | "company" | "account"
+// "chats" остаётся валидным Section (используется программно — клик по агенту
+// открывает его), но убран из верхнего NavRail (см. NavRail.tsx): Чаты
+// открываются из Команды, а не висят отдельным пунктом. "scenario" как Section
+// больше не существует — органиграмма стала режимом ВНУТРИ "office"
+// (App.tsx: officeMode), а не отдельным разделом (карта сайта, рефакторинг
+// сессии 2026-07-05).
+export type Section = "office" | "dashboard" | "project" | "team" | "leads" | "chats" | "company" | "account"
 
 // Терминология BOS §12 п.4: домен называет исполнителя Worker (agent — допустимый
 // внутренний код-термин, не контрактное имя). Тип переименован из Agent/AgentStatus;

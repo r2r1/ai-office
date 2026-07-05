@@ -3,148 +3,800 @@ import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import type { ReactNode } from "react"
-import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar } from "./ui"
-import { Modal, ModalSection, ModalPre } from "../components/Modal"
+import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel } from "./ui"
 import { useThrottled } from "../hooks"
 
-type ModalContent = { title: ReactNode; subtitle?: ReactNode; body: ReactNode } | null
-
+// Карта сайта (рефакторинг 2026-07-05): «Этапы» и «Задачи» раньше были
+// отдельными top-level вкладками наравне с «Проектами» — но Stage и Task
+// СУЩЕСТВУЮТ ТОЛЬКО внутри конкретного Work (BOS §5), не сами по себе — теперь
+// они раскрываются ВНУТРИ карточки проекта. Три вида Work получили свои
+// вкладки (жизненный цикл различается: Initiative → decision → Project →
+// AI сам решает Process это или нет → архив/Process) + Спецификация —
+// компания-широкий контракт, не привязан к одному Work.
 const TABS = [
-  { id: "milestones", label: "Этапы" },
-  { id: "tasks",      label: "Задачи" },
-  { id: "projects",   label: "Проекты" },
-  { id: "spec",       label: "Спецификация" },
+  { id: "initiatives", label: "Инициативы" },
+  { id: "projects",    label: "Проекты" },
+  { id: "processes",   label: "Процессы" },
+  { id: "spec",        label: "Спецификация" },
 ]
 
-export function ProjectView() {
+interface ProjectViewProps {
+  /** Глубокая ссылка — открыть конкретный проект сразу (например, после принятия
+   * инициативы на Сводке), не заставляя искать его в списке. */
+  focusProjectId?: string
+  onFocusHandled?: () => void
+}
+
+export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps = {}) {
   const { state } = useOffice()
-  const [tab, setTab] = useState("milestones")
-  const [milestones, setMilestones] = useState<any[]>([])
+  const [tab, setTab] = useState("initiatives")
   const [projects, setProjects] = useState<any[]>([])
-  const tasks = state.plan.tasks || []
+  const [initiatives, setInitiatives] = useState<any[]>([])
+  const [researchingInitiatives, setResearchingInitiatives] = useState<any[]>([])
+  const [leadsSummary, setLeadsSummary] = useState<{ statuses: string[]; labels: Record<string, string>; leads: any[] }>({ statuses: [], labels: {}, leads: [] })
+  const [processes, setProcesses] = useState<any[]>([])
+  const [expanded, setExpanded] = useState<string>("")
+  const [details, setDetails] = useState<Record<string, any>>({})
   const tick = useThrottled(state.feed.length, 2500)
-  const [modal, setModal] = useState<ModalContent>(null)
+
+  const refreshProcesses = () => api.processes().then(d => setProcesses(d.processes || []))
+  const refreshInitiatives = () => api.initiatives().then(d => {
+    setInitiatives(d.pending || [])
+    setResearchingInitiatives(d.researching || [])
+  })
 
   useEffect(() => {
-    api.milestones().then(d => setMilestones(d.stages || []))
-    api.projects().then(d => setProjects(d.projects || []))
+    api.projects().then(d => {
+      const items: any[] = d.projects || []
+      setProjects(items)
+      // Один проект — незачем заставлять кликать, чтобы его раскрыть.
+      setExpanded(cur => cur || (items.length === 1 ? items[0].id : ""))
+    })
+    refreshInitiatives()
+    api.leads().then(d => setLeadsSummary(d))
+    refreshProcesses()
   }, [tick])
 
+  // Инициативы ("ini:<id>"), процесс продаж ("process:sales") и произвольные
+  // повторяющиеся процессы (id вида "proc<n>_...", см. src/office/processes.py)
+  // — не реальные Project, у них нет /api/project/{id}: раскрытие только
+  // переключает видимость.
+  const isRealProject = (id: string) => id && !id.startsWith("ini:") && !id.startsWith("proc") && id !== "process:sales"
+
+  async function toggle(id: string) {
+    if (expanded === id) { setExpanded(""); return }
+    setExpanded(id)
+    if (isRealProject(id) && !details[id]) {
+      const d = await api.projectDetail(id)
+      setDetails(prev => ({ ...prev, [id]: d }))
+    }
+  }
+
+  // Обновляем детали уже раскрытого проекта на каждый тик (живой прогресс),
+  // не только при первом раскрытии.
+  useEffect(() => {
+    if (!expanded || !isRealProject(expanded)) return
+    api.projectDetail(expanded).then(d => setDetails(prev => ({ ...prev, [expanded]: d })))
+  }, [tick, expanded]) // eslint-disable-line
+
+  // Глубокая ссылка: как только список проектов подгружен — раскрываем искомый.
+  useEffect(() => {
+    if (!focusProjectId) return
+    const p = projects.find((x: any) => x.id === focusProjectId)
+    if (p) {
+      setTab("projects")
+      toggle(p.id)
+      onFocusHandled?.()
+    }
+  }, [focusProjectId, projects]) // eslint-disable-line
+
+  async function acceptInitiative(iid: string) {
+    const r = await api.acceptInitiative(iid)
+    setInitiatives(prev => prev.filter(i => i.id !== iid))
+    const d = await api.projects()
+    setProjects(d.projects || [])
+    // Принятая инициатива стала конкретным проектом — переключаемся на вкладку
+    // «Проекты» и сразу его раскрываем, не заставляя искать глазами в списке
+    // (BOS §5: decision spawn_project).
+    if (r?.project_id) { setExpanded(r.project_id); setTab("projects") }
+  }
+
+  async function rejectInitiative(iid: string) {
+    await api.rejectInitiative(iid)
+    setInitiatives(prev => prev.filter(i => i.id !== iid))
+  }
+
+  async function proposeInitiative(title: string, idea: string) {
+    await api.proposeInitiative(title, idea)
+    await refreshInitiatives()
+  }
+
+  async function createProcess(title: string, role: string, instruction: string) {
+    await api.createProcess(title, role, instruction)
+    await refreshProcesses()
+  }
+  async function pauseProcess(id: string) { await api.pauseProcess(id); await refreshProcesses() }
+  async function resumeProcess(id: string) { await api.resumeProcess(id); await refreshProcesses() }
+  async function deleteProcess(id: string) {
+    await api.deleteProcess(id)
+    if (expanded === id) setExpanded("")
+    await refreshProcesses()
+  }
+
+  const hasSalesProcess = leadsSummary.leads.length > 0
   const tabsWithBadges = TABS.map(t => ({
     ...t,
-    badge: t.id === "tasks" ? tasks.filter((x: any) => x.status === "in_progress").length
-      : t.id === "milestones" ? milestones.length
+    badge: t.id === "initiatives" ? (initiatives.length + researchingInitiatives.length || undefined)
       : t.id === "projects" ? (projects.length || undefined)
+      : t.id === "processes" ? (processes.length + (hasSalesProcess ? 1 : 0) || undefined)
       : undefined,
   }))
 
   return (
     <ViewShell>
-      <ViewHead title="Проект" sub={state.ready ? state.progress.note || "План работы офиса" : "Ожидание брифа"} />
+      <ViewHead title="Работа" sub={state.ready ? state.progress.note || "План работы офиса" : "Ожидание брифа"} />
       <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
 
-      {tab === "milestones" && <MilestonesTab milestones={milestones} progress={state.progress} onOpen={setModal} />}
-      {tab === "tasks"      && <TasksTab tasks={tasks} />}
-      {tab === "projects"   && <ProjectsTab projects={projects} />}
-      {tab === "spec"       && <SpecTab tick={tick} />}
-
-      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.title} subtitle={modal?.subtitle}>
-        {modal?.body}
-      </Modal>
+      {tab === "initiatives" && (
+        <InitiativesTab initiatives={initiatives} researching={researchingInitiatives}
+          expanded={expanded} onToggle={toggle}
+          onAccept={acceptInitiative} onReject={rejectInitiative} onPropose={proposeInitiative} />
+      )}
+      {tab === "projects" && (
+        <ProjectsOnlyTab projects={projects} expanded={expanded} details={details} onToggle={toggle} />
+      )}
+      {tab === "processes" && (
+        <ProcessesTab leadsSummary={leadsSummary} processes={processes} expanded={expanded} onToggle={toggle}
+          onCreateProcess={createProcess} onPauseProcess={pauseProcess}
+          onResumeProcess={resumeProcess} onDeleteProcess={deleteProcess} />
+      )}
+      {tab === "spec" && <SpecTab tick={tick} />}
     </ViewShell>
   )
 }
 
-// ── Этапы ────────────────────────────────────────────────────────────────────
-function stageModal(m: any, idx: number): ModalContent {
-  const items = m.items || []
-  return {
-    title: m.title || m.name || m.id,
-    subtitle: `Этап ${idx + 1} · ${m.status === "done" ? "готов" : m.status === "active" ? "в работе" : "ожидает"}`,
-    body: (
-      <>
-        {m.description && (
-          <ModalSection label="Описание">
-            <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{m.description}</div>
-          </ModalSection>
-        )}
-        {m.summary && (
-          <ModalSection label="Что достигнуто">
-            <ModalPre>{m.summary}</ModalPre>
-          </ModalSection>
-        )}
-        {items.length > 0 && (
-          <ModalSection label={`Записи о работе · ${items.length}`}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {items.map((it: any, i: number) => (
-                <div key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.55, paddingLeft: 12,
-                  borderLeft: "2px solid var(--hairline-strong)" }}>
-                  {it.role && <span style={{ color: "var(--mercury-a)", marginRight: 6 }}>{roleName(it.role)}</span>}
-                  {it.text}
-                </div>
-              ))}
-            </div>
-          </ModalSection>
-        )}
-        {!m.description && !m.summary && items.length === 0 && (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>По этому этапу пока нет записей.</div>
-        )}
-      </>
-    ),
-  }
+// Work.type (BOS §5) — бейдж, чтобы список не выглядел так, будто Process и
+// Initiative — это Project без даты окончания (семантика прогресса разная).
+const WORK_TYPE_BADGE: Record<string, { icon: string; label: string }> = {
+  project: { icon: "🎯", label: "Проект" },
+  process: { icon: "🔄", label: "Процесс" },
+  initiative: { icon: "💡", label: "Инициатива" },
 }
 
-function MilestonesTab({ milestones, progress, onOpen }: { milestones: any[]; progress: any; onOpen: (c: ModalContent) => void }) {
-  if (milestones.length === 0) return (
+// ── Инициативы: предлагает AI (opportunity-события) ИЛИ сам предприниматель.
+// Жизненный цикл: researching (глубокий анализ идёт) → pending (ждёт решения,
+// с готовым анализом) → accept (становится проектом) / reject. Минимум
+// действий пользователя — одна кнопка, весь анализ офис делает сам заранее. ──
+function InitiativesTab({ initiatives, researching, expanded, onToggle, onAccept, onReject, onPropose }: {
+  initiatives: any[]; researching: any[]
+  expanded: string; onToggle: (id: string) => void
+  onAccept: (id: string) => void; onReject: (id: string) => void
+  onPropose: (title: string, idea: string) => void
+}) {
+  const isEmpty = initiatives.length === 0 && researching.length === 0
+  return (
     <ViewBody>
-      <Empty icon="◎" text="Этапы проекта ещё не сформированы"
-        hint="Директор составит план после получения брифа и стратегии" />
+      {isEmpty && (
+        <Empty icon="💡" text="Инициатив пока нет"
+          hint="AI предложит их сам по мере наблюдений, или предложи свою идею ниже" />
+      )}
+      <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+        {researching.map((ini: any) => (
+          <ResearchingInitiativeItem key={ini.id} initiative={ini} />
+        ))}
+        {initiatives.map((ini: any) => (
+          <InitiativeAccordionItem key={ini.id} initiative={ini}
+            isOpen={expanded === `ini:${ini.id}`} onToggle={() => onToggle(`ini:${ini.id}`)}
+            onAccept={() => onAccept(ini.id)} onReject={() => onReject(ini.id)} />
+        ))}
+      </div>
+      <NewInitiativeForm onPropose={onPropose} />
+    </ViewBody>
+  )
+}
+
+function NewInitiativeForm({ onPropose }: { onPropose: (title: string, idea: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState("")
+  const [idea, setIdea] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  if (!open) return (
+    <button onClick={() => setOpen(true)}
+      style={{ padding: "10px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+        border: "1px dashed var(--hairline-strong)", background: "transparent", color: "var(--text-dim)" }}>
+      + Предложить свою идею
+    </button>
+  )
+
+  async function submit() {
+    if (!title.trim()) return
+    setBusy(true)
+    await onPropose(title.trim(), idea.trim())
+    setBusy(false); setOpen(false); setTitle(""); setIdea("")
+  }
+
+  const inputStyle = {
+    width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)",
+    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
+    color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-sans)",
+  } as const
+
+  return (
+    <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <SectionLabel>Своя идея</SectionLabel>
+      <input style={inputStyle} placeholder="Название идеи" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+      <textarea style={{ ...inputStyle, resize: "vertical" }} rows={2}
+        placeholder="Опиши мысль в двух словах — глубокий анализ офис сделает сам"
+        value={idea} onChange={e => setIdea(e.target.value)} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={submit} disabled={busy || !title.trim()}
+          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+            border: "none", background: "var(--mercury-a)", color: "#1a1408", fontWeight: 600,
+            opacity: busy || !title.trim() ? 0.6 : 1 }}>
+          {busy ? "…" : "Отправить на анализ"}
+        </button>
+        <button onClick={() => setOpen(false)}
+          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+            border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+          Отмена
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+function ResearchingInitiativeItem({ initiative: ini }: { initiative: any }) {
+  return (
+    <Card style={{ cursor: "default", opacity: 0.85 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+        <Pill>{WORK_TYPE_BADGE.initiative.icon} {WORK_TYPE_BADGE.initiative.label}</Pill>
+        <Pill>⏳ Идёт анализ…</Pill>
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 4 }}>{ini.title}</div>
+      <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+        Офис проводит глубокое исследование, прежде чем спросить решение — обычно 1 цикл.
+      </div>
+    </Card>
+  )
+}
+
+// ── Проекты: только Project (разовая работа с началом и концом) ─────────────
+function ProjectsOnlyTab({ projects, expanded, details, onToggle }: {
+  projects: any[]; expanded: string; details: Record<string, any>; onToggle: (id: string) => void
+}) {
+  const active = projects.filter((p: any) => p.status === "active")
+  const closed = [...projects.filter((p: any) => p.status !== "active")].reverse()
+
+  if (projects.length === 0) return (
+    <ViewBody>
+      <Empty icon="🎯" text="Проектов пока нет"
+        hint="Появится, как только примешь инициативу или офис соберёт план по брифу" />
     </ViewBody>
   )
 
-  const stages = progress.stages || []
-  const currentId = progress.current
-
   return (
     <ViewBody>
-      <MercuryBar percent={progress.percent} style={{ marginBottom: 28 }} />
       <div style={{ display: "grid", gap: 12 }}>
-        {milestones.map((m: any, i: number) => {
-          const stageInfo = stages.find((s: any) => s.id === m.id)
-          const isCurrent = m.id === currentId
-          const isDone = stageInfo?.status === "done"
-          return (
-            <Card key={m.id || i} onClick={() => onOpen(stageModal({ ...m, status: stageInfo?.status }, i))}
-              style={{ position: "relative", overflow: "hidden",
-              borderColor: isCurrent ? "rgba(255,172,46,0.3)" : isDone ? "rgba(160,224,171,0.2)" : undefined }}>
-              {isCurrent && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "var(--mercury-a)" }} />}
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingLeft: isCurrent ? 8 : 0 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-                    <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>Этап {i + 1}</span>
-                    {isCurrent && <Pill accent>В работе</Pill>}
-                    {isDone && <Pill color="#a0e0ab">Готово</Pill>}
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{m.title || m.name || m.id}</div>
-                  {m.description && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5,
-                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.description}</div>}
-                  {m.summary && <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 8, lineHeight: 1.5, borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10,
-                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.summary}</div>}
-                  <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 8 }}>Нажмите, чтобы открыть полностью →</div>
-                </div>
-                <div className="mono" style={{ fontSize: 22, color: isDone ? "#a0e0ab" : isCurrent ? "var(--mercury-a)" : "var(--faint)", flexShrink: 0 }}>
-                  {isDone ? "✓" : isCurrent ? "▶" : String(i + 1).padStart(2, "0")}
-                </div>
-              </div>
-            </Card>
-          )
-        })}
+        {active.map((p: any) => (
+          <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
+            detail={details[p.id]} onToggle={() => onToggle(p.id)} />
+        ))}
+        {closed.map((p: any) => (
+          <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
+            detail={details[p.id]} onToggle={() => onToggle(p.id)} />
+        ))}
       </div>
     </ViewBody>
   )
 }
 
-// ── Задачи (Kanban) ───────────────────────────────────────────────────────────
+// ── Процессы: непрерывная работа — конвейер Instance (продажи) ИЛИ
+// повторяющееся действие (контент-завод и т.п.). AI сам решает при закрытии
+// проекта, не стоит ли превратить его в процесс (см. src/office/loop.py). ──
+function ProcessesTab({ leadsSummary, processes, expanded, onToggle, onCreateProcess, onPauseProcess, onResumeProcess, onDeleteProcess }: {
+  leadsSummary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
+  processes: any[]
+  expanded: string; onToggle: (id: string) => void
+  onCreateProcess: (title: string, role: string, instruction: string) => void
+  onPauseProcess: (id: string) => void; onResumeProcess: (id: string) => void; onDeleteProcess: (id: string) => void
+}) {
+  const hasSalesProcess = leadsSummary.leads.length > 0
+  const isEmpty = !hasSalesProcess && processes.length === 0
+
+  return (
+    <ViewBody>
+      {isEmpty && (
+        <Empty icon="🔄" text="Процессов пока нет"
+          hint="Появится сам, когда офис решит, что завершённый проект стоит вести постоянно — или заведи свой ниже" />
+      )}
+      <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+        {hasSalesProcess && (
+          <ProcessAccordionItem summary={leadsSummary} isOpen={expanded === "process:sales"}
+            onToggle={() => onToggle("process:sales")} />
+        )}
+        {processes.map((p: any) => (
+          <RecurringProcessAccordionItem key={p.id} proc={p} isOpen={expanded === p.id}
+            onToggle={() => onToggle(p.id)} onPause={() => onPauseProcess(p.id)}
+            onResume={() => onResumeProcess(p.id)} onDelete={() => onDeleteProcess(p.id)} />
+        ))}
+      </div>
+      <NewProcessForm onCreate={onCreateProcess} />
+    </ViewBody>
+  )
+}
+
+// Процесс не обязан быть Instance-конвейером (продажи) — это ЛЮБОЕ повторяющееся
+// действие: «контент-завод», «ежедневная аналитика рынка». v1-каданс — только
+// «каждый цикл офиса» (см. src/office/processes.py); свою задачу процесс ставит
+// заново, как только предыдущая закрыта.
+const RECURRING_ROLES = ["researcher", "marketer", "analyst", "salesman", "developer", "integrator", "hr"]
+
+function NewProcessForm({ onCreate }: { onCreate: (title: string, role: string, instruction: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState("")
+  const [role, setRole] = useState(RECURRING_ROLES[0])
+  const [instruction, setInstruction] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  if (!open) return (
+    <button onClick={() => setOpen(true)}
+      style={{ padding: "10px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+        border: "1px dashed var(--hairline-strong)", background: "transparent", color: "var(--text-dim)" }}>
+      + Новый процесс (повторяющееся действие)
+    </button>
+  )
+
+  async function submit() {
+    if (!title.trim() || !instruction.trim()) return
+    setBusy(true)
+    await onCreate(title.trim(), role, instruction.trim())
+    setBusy(false); setOpen(false); setTitle(""); setInstruction("")
+  }
+
+  const inputStyle = {
+    width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)",
+    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
+    color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-sans)",
+  } as const
+
+  return (
+    <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <SectionLabel>Новый процесс</SectionLabel>
+      <input style={inputStyle} placeholder="Название (например: Контент-завод)" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+      <select style={inputStyle} value={role} onChange={e => setRole(e.target.value)}>
+        {RECURRING_ROLES.map(r => <option key={r} value={r}>{roleName(r)}</option>)}
+      </select>
+      <textarea style={{ ...inputStyle, resize: "vertical" }} rows={2}
+        placeholder="Что делать каждый цикл (например: написать и опубликовать пост дня по нише клиента)"
+        value={instruction} onChange={e => setInstruction(e.target.value)} />
+      <div style={{ fontSize: 11, color: "var(--faint)" }}>
+        Каданс v1: каждый цикл офиса, как только предыдущая задача процесса закрыта.
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={submit} disabled={busy || !title.trim() || !instruction.trim()}
+          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+            border: "none", background: "var(--mercury-a)", color: "#1a1408", fontWeight: 600,
+            opacity: busy || !title.trim() || !instruction.trim() ? 0.6 : 1 }}>
+          {busy ? "…" : "Создать процесс"}
+        </button>
+        <button onClick={() => setOpen(false)}
+          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+            border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+          Отмена
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+function RecurringProcessAccordionItem({ proc, isOpen, onToggle, onPause, onResume, onDelete }: {
+  proc: any; isOpen: boolean; onToggle: () => void; onPause: () => void; onResume: () => void; onDelete: () => void
+}) {
+  const typeBadge = WORK_TYPE_BADGE.process
+  const isActive = proc.status === "active"
+  return (
+    <Card style={{ cursor: "default" }}>
+      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
+            {isActive ? <Pill color="#a0e0ab">Идёт постоянно</Pill> : <Pill>На паузе</Pill>}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{proc.title}</div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            {roleName(proc.role)} · каждый цикл{proc.run_count ? ` · запусков: ${proc.run_count}` : ""}
+          </div>
+        </div>
+        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▸</div>
+      </div>
+      {isOpen && (
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <SectionLabel style={{ marginBottom: 8 }}>Что делает каждый цикл</SectionLabel>
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>{proc.instruction}</div>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--faint)" }}>
+            {proc.last_run_ts
+              ? `Последний запуск: ${new Date(proc.last_run_ts * 1000).toLocaleString("ru", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
+              : "Ещё не запускался — задача появится в ближайшем цикле офиса"}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {isActive ? (
+              <button onClick={onPause} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
+                border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+            ) : (
+              <button onClick={onResume} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
+                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "#a0e0ab" }}>▶ Возобновить</button>
+            )}
+            <button onClick={onDelete} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
+              border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)" }}>Удалить</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// Инициатива — BOS §5: до решения у неё нет ни Stage-пути, ни Task-дерева,
+// только идея+обоснование и бинарный выбор. Визуально того же уровня, что
+// Project/Process (одна и та же карточка-аккордеон), но раскрытие показывает
+// не прогресс, а обоснование + предпросмотр задач, которые появятся при accept.
+function InitiativeAccordionItem({ initiative: ini, isOpen, onToggle, onAccept, onReject }: {
+  initiative: any; isOpen: boolean; onToggle: () => void; onAccept: () => void; onReject: () => void
+}) {
+  const typeBadge = WORK_TYPE_BADGE.initiative
+  return (
+    <Card style={{ borderColor: "rgba(255,172,46,0.35)", cursor: "default" }}>
+      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
+            <Pill accent>Ждёт решения</Pill>
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{ini.title}</div>
+          {!isOpen && ini.expected_outcome && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>📈 {ini.expected_outcome}</div>}
+        </div>
+        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▸</div>
+      </div>
+      {isOpen && (
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <SectionLabel style={{ marginBottom: 8 }}>Почему сейчас</SectionLabel>
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>{ini.rationale}</div>
+          </div>
+          {ini.research && (
+            <div>
+              <SectionLabel style={{ marginBottom: 8 }}>📊 Глубокий анализ офиса</SectionLabel>
+              <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{ini.research}</div>
+            </div>
+          )}
+          {ini.expected_outcome && (
+            <div>
+              <SectionLabel style={{ marginBottom: 8 }}>Ожидаемый результат</SectionLabel>
+              <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{ini.expected_outcome}
+                {ini.estimated_effort && <span style={{ color: "var(--faint)" }}> · усилий: {ini.estimated_effort}</span>}</div>
+            </div>
+          )}
+          {(ini.tasks || []).length > 0 && (
+            <div>
+              <SectionLabel style={{ marginBottom: 8 }}>Если принять — появится Проект с задачами · {ini.tasks.length}</SectionLabel>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {ini.tasks.map((t: any, i: number) => (
+                  <div key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.4, paddingLeft: 12, borderLeft: "2px solid var(--hairline-strong)" }}>
+                    {t.title} <span style={{ color: "var(--faint)" }}>· {roleName(t.role)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onAccept}
+              style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                border: "1px solid #a0e0ab", background: "rgba(160,224,171,0.15)", color: "#a0e0ab", fontWeight: 500 }}>
+              ✅ Принять → создать проект
+            </button>
+            <button onClick={onReject}
+              style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+              ✖ Отклонить
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// Процесс — BOS §5: никогда не завершается, поэтому нет линейного прогресса —
+// вместо этого поток Instance, у каждого своя стадия. Сегодня единственный
+// реальный процесс — продажи (лиды); раскрытие ведёт в полноценный Kanban,
+// не дублирует его здесь.
+function ProcessAccordionItem({ summary, isOpen, onToggle }: {
+  summary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
+  isOpen: boolean; onToggle: () => void
+}) {
+  const typeBadge = WORK_TYPE_BADGE.process
+  const counts = summary.statuses.map(s => ({
+    id: s, label: summary.labels[s] || s,
+    count: summary.leads.filter((l: any) => (l.status || "new") === s).length,
+  }))
+  return (
+    <Card style={{ cursor: "default" }}>
+      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
+            <Pill color="#a0e0ab">Идёт постоянно</Pill>
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>Продажи</div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>{summary.leads.length} лид(ов) в потоке — у процесса нет «% выполнено», только стадия каждого элемента</div>
+        </div>
+        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▸</div>
+      </div>
+      {isOpen && (
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+          <SectionLabel style={{ marginBottom: 8 }}>Instance по стадиям</SectionLabel>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            {counts.map(c => (
+              <div key={c.id} style={{ padding: "6px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)", background: "var(--surface-soft)" }}>
+                <div style={{ fontSize: 9.5, color: "var(--muted)", textTransform: "uppercase" }}>{c.label}</div>
+                <div className="mono" style={{ fontSize: 15, color: "var(--text)" }}>{c.count}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--faint)" }}>Полная доска с карточками, историей и follow-up — во вкладке «Лиды».</div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function ProjectAccordionItem({ project: p, isOpen, detail, onToggle }: {
+  project: any; isOpen: boolean; detail: any; onToggle: () => void
+}) {
+  const lb = p.left_behind || {}
+  const isActive = p.status === "active"
+  const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
+
+  return (
+    <Card style={{ borderColor: isActive ? "rgba(255,172,46,0.3)" : undefined, cursor: "default" }}>
+      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
+            {isActive ? <Pill accent>Активный</Pill> : <Pill color="#a0e0ab">Закрыт</Pill>}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
+          {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
+          {p.status === "done" && !isOpen && (
+            <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
+              <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
+              <span>🌐 сайтов: {(lb.sites || []).length}</span>
+              <span>👤 лидов: {lb.leads_count ?? 0}</span>
+            </div>
+          )}
+        </div>
+        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>
+          ▸
+        </div>
+      </div>
+
+      {isOpen && (
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+          {!detail ? (
+            <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div>
+          ) : (
+            <ProjectDetailBody project={p} detail={detail} />
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// Внутренняя иерархия одного Work: прогресс → Stage-путь → Task-дерево
+// (parent_id) → артефакты. Это и есть Work → Stage → Task → Subtask из BOS §5,
+// а не 4 несвязанные вкладки.
+// Отделы — та же карта, что в Сводке (DashboardView.tsx): держим локально,
+// т.к. это чисто отображение, не доменная логика.
+const DEPT_NAMES: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
+
+function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }) {
+  const isActive = p.status === "active"
+  const tasks: any[] = detail.tasks || []
+  const stages = (detail.milestones?.stages || []).filter((s: any) => s.item_count > 0 || s.status !== "pending")
+  const sites: any[] = detail.sites || []
+  const deliverables: any[] = detail.deliverables || []
+  const progress = detail.progress || {}
+  const lb = p.left_behind || {}
+
+  // Команда проекта: реальная кросс-функциональность (BOS §5 — «несколько
+  // воркеров и взаимодействие разных отделов, как в реальной компании»), а не
+  // догадка — считается из ролей/отделов задач, которые ЭТОТ Work реально
+  // породил, включая уже закрытые (история, кто участвовал).
+  const roleCounts = new Map<string, number>()
+  const depts = new Set<string>()
+  tasks.forEach((t: any) => {
+    if (t.role) roleCounts.set(t.role, (roleCounts.get(t.role) || 0) + 1)
+    if (t.department) depts.add(t.department)
+  })
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {isActive && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Прогресс · {progress.done ?? 0}/{progress.total ?? 0} задач</SectionLabel>
+          <MercuryBar percent={progress.percent ?? 0} />
+        </div>
+      )}
+
+      {roleCounts.size > 0 && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>
+            Команда проекта · {roleCounts.size} {roleCounts.size === 1 ? "роль" : "ролей"}
+            {depts.size > 1 ? ` · ${depts.size} отдела` : ""}
+          </SectionLabel>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[...roleCounts.entries()].map(([role, count]) => (
+              <Pill key={role}>{roleName(role)}{count > 1 ? ` × ${count}` : ""}</Pill>
+            ))}
+          </div>
+          {depts.size > 1 && (
+            <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 8 }}>
+              Совместная работа отделов: {[...depts].map(d => DEPT_NAMES[d] || d).join(" + ")}
+            </div>
+          )}
+        </div>
+      )}
+
+      {p.status === "done" && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Что оставил после себя</SectionLabel>
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
+            <span>🌐 сайтов: {(lb.sites || []).length}</span>
+            <span>👤 лидов: {lb.leads_count ?? 0}</span>
+          </div>
+        </div>
+      )}
+
+      {stages.length > 0 && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Этапы · {stages.length}</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {stages.map((s: any) => (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                <span style={{ color: s.status === "done" ? "#a0e0ab" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
+                  {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
+                </span>
+                <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tasks.some((t: any) => (t.deps || []).length > 0) && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Сценарий выполнения</SectionLabel>
+          <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 10 }}>
+            План составлен ДО начала работы — офис действует по нему, а не придумывает следующий шаг на ходу.
+          </div>
+          <TaskGraph tasks={tasks} />
+        </div>
+      )}
+
+      <div>
+        <SectionLabel style={{ marginBottom: 8 }}>Задачи · {tasks.length}</SectionLabel>
+        <ProjectTaskTree tasks={tasks} />
+      </div>
+
+      {(sites.length > 0 || deliverables.length > 0) && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Артефакты · {sites.length + deliverables.length}</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {sites.map((s: any) => (
+              <a key={s.slug} href={`/site/${s.slug}`} target="_blank" rel="noreferrer"
+                style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
+                🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11 }}>↗</span>
+              </a>
+            ))}
+            {deliverables.map((d: any, i: number) => (
+              <ArtifactRow key={i} d={d} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ARTIFACT_PREVIEW_LEN = 220
+
+// Короткая строка «что сделано» + опциональная кнопка «Показать полностью»
+// вместо полного содержимого артефакта инлайн (реальный баг: сюда попадал
+// весь контекст задачи целиком — брифом, ТЗ, памятью — на весь экран).
+function ArtifactRow({ d }: { d: any }) {
+  const [open, setOpen] = useState(false)
+  const content = (d.content || "").trim()
+  const isLong = content.length > ARTIFACT_PREVIEW_LEN
+  // Защита от старых записей (до фикса короткой подписи на бэкенде) — там
+  // task мог содержать весь контекст задачи целиком, не только короткий титул.
+  const taskLabel = (d.task || "").length > 100 ? (d.task || "").slice(0, 100) + "…" : d.task
+  return (
+    <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.4 }}>
+      <div>📝 {taskLabel} <span style={{ color: "var(--faint)" }}>· {roleName(d.role)}</span></div>
+      {content && (
+        <>
+          {open && (
+            <div style={{ marginTop: 6, padding: "8px 10px", background: "var(--surface-soft)",
+              borderLeft: "2px solid var(--hairline-strong)", borderRadius: 4, fontSize: 12,
+              whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-dim)" }}>
+              {content}
+            </div>
+          )}
+          {isLong && (
+            <button onClick={() => setOpen(v => !v)}
+              style={{ marginTop: 4, fontSize: 11, color: "var(--mercury-a)", background: "transparent",
+                border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              {open ? "Свернуть ↑" : "Показать полный результат →"}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Сценарий-граф: план-граф зависимостей задач, составленный ДО начала
+// работы (orchestrator.plan_tasks/generate_initiative) — пользователь видит,
+// что будет происходить, а не только что уже случилось; офис исполняет по
+// нему же (plan.py уважает deps), не придумывает порядок на лету. Колонки —
+// топологические уровни (шаг зависит только от предыдущих шагов). ──────────
+function TaskGraph({ tasks }: { tasks: any[] }) {
+  const byId = new Map(tasks.map((t: any) => [t.id, t]))
+  const levelCache = new Map<string, number>()
+  function levelOf(t: any): number {
+    if (levelCache.has(t.id)) return levelCache.get(t.id)!
+    levelCache.set(t.id, 0) // защита от циклов в данных — не должно быть, но не вешаем UI
+    const deps = (t.deps || []).filter((d: string) => byId.has(d) && d !== t.id)
+    const lvl = deps.length === 0 ? 0 : 1 + Math.max(...deps.map((d: string) => levelOf(byId.get(d))))
+    levelCache.set(t.id, lvl)
+    return lvl
+  }
+  const columns: Record<number, any[]> = {}
+  tasks.forEach((t: any) => { const l = levelOf(t); (columns[l] = columns[l] || []).push(t) })
+  const maxLevel = Math.max(0, ...Object.keys(columns).map(Number))
+  const dotColor = (t: any) => t.status === "done" ? "#a0e0ab" : t.status === "in_progress" ? "var(--mercury-a)"
+    : t.status === "blocked" ? "#e08a8a" : "var(--whisper)"
+
+  return (
+    <div style={{ display: "flex", gap: 18, overflowX: "auto", paddingBottom: 6, marginBottom: 14 }}>
+      {Array.from({ length: maxLevel + 1 }, (_, lvl) => (
+        <div key={lvl} style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 170, flexShrink: 0 }}>
+          <div className="mono" style={{ fontSize: 9, color: "var(--faint)", textAlign: "center", textTransform: "uppercase" }}>Шаг {lvl + 1}</div>
+          {(columns[lvl] || []).map((t: any) => (
+            <div key={t.id} style={{
+              padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--hairline)",
+              background: "var(--surface)", display: "flex", flexDirection: "column", gap: 4,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor(t), flexShrink: 0 }} />
+                <span style={{ fontSize: 11.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
+                  textDecoration: t.status === "done" ? "line-through" : "none", lineHeight: 1.3 }}>{t.title}</span>
+              </div>
+              <span style={{ fontSize: 9.5, color: "var(--faint)", paddingLeft: 12 }}>{roleName(t.role)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Задачи проекта: kanban по статусу + вложенность parent_id (Task→Subtask,
+//    BOS §5 — вложенность вместо отдельной сущности Subtask) ─────────────────
 const COLS = [
   { key: "pending",     label: "В очереди",  dot: "var(--whisper)" },
   { key: "in_progress", label: "В работе",   dot: "var(--mercury-a)" },
@@ -154,127 +806,100 @@ const COLS = [
   { key: "skipped",     label: "Пропущены",  dot: "var(--muted)" },
 ]
 
-function TasksTab({ tasks }: { tasks: any[] }) {
+function ProjectTaskTree({ tasks }: { tasks: any[] }) {
   const [unblocking, setUnblocking] = useState<string>("")
   const hasBlocked = tasks.some((t: any) => t.status === "blocked")
   const hasSkipped = tasks.some((t: any) => t.status === "skipped")
-  // Колонки «Заблокированы»/«Пропущены» показываем только когда в них есть задачи.
   const cols = COLS.filter(c =>
     (c.key !== "blocked" || hasBlocked) && (c.key !== "skipped" || hasSkipped))
+
+  const byId = new Map(tasks.map((t: any) => [t.id, t]))
+  const childrenOf = (id: string) => tasks.filter((t: any) => t.parent && t.parent === id)
+  // Корень дерева: без parent, ИЛИ parent указывает на задачу другого проекта/
+  // несуществующую — тогда она тоже верхнего уровня, а не теряется молча.
+  const isRoot = (t: any) => !t.parent || !byId.has(t.parent)
 
   const unblock = async (id: string) => {
     setUnblocking(id)
     await api.unblockTask(id)
-    await refreshData(["plan"])  // сразу показать задачу в очереди, не ждать SSE
+    await refreshData(["plan"])
     setUnblocking("")
   }
 
-  return (
-    <ViewBody>
-      {tasks.length === 0 ? (
-        <Empty icon="◉" text="План задач появится после старта офиса"
-          hint="Директор сформирует доску после получения стратегии" />
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          {cols.map(col => {
-            const items = tasks.filter((t: any) => t.status === col.key)
-            return (
-              <div key={col.key} style={{ background: "var(--surface-soft)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)", padding: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: col.dot, display: "inline-block" }} />
-                    <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-dim)" }}>{col.label}</span>
-                  </div>
-                  <span style={{ fontSize: 10, color: "var(--muted)" }}>{items.length}</span>
+  if (tasks.length === 0) return (
+    <div style={{ fontSize: 12.5, color: "var(--faint)" }}>У этого проекта пока нет своих задач.</div>
+  )
+
+  function renderTask(t: any, depth: number) {
+    const children = childrenOf(t.id)
+    return (
+      <div key={t.id} style={{ marginLeft: depth * 16 }}>
+        <div style={{ background: "var(--surface)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)",
+          padding: "10px 12px", marginBottom: children.length > 0 ? 6 : 0 }}>
+          <div style={{ fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text)", lineHeight: 1.35,
+            textDecoration: t.status === "done" ? "line-through" : "none", marginBottom: 8 }}>
+            {t.title}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <Pill accent={t.status === "in_progress"}>{roleName(t.role)}</Pill>
+            {(t.attempts || 0) > 0 && t.status !== "done" && (
+              <Pill color="#e0b06a">попытка {t.attempts}</Pill>
+            )}
+            {t.done_criterion && t.status !== "done" && t.status !== "blocked" && (
+              <span style={{ fontSize: 10, color: "#6f8a6a", lineHeight: 1.3 }}>✓ {t.done_criterion}</span>
+            )}
+          </div>
+          {t.status === "blocked" && (
+            <div style={{ marginTop: 8 }}>
+              {t.blocked_reason && (
+                <div style={{ fontSize: 10.5, color: "#e08a8a", lineHeight: 1.4, marginBottom: 8 }}>
+                  ⛔ {t.blocked_reason}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {items.map((t: any) => (
-                    <div key={t.id} style={{ background: "var(--surface)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "10px 12px" }}>
-                      <div style={{ fontSize: 12.5, color: col.key === "done" ? "var(--muted)" : "var(--text)", lineHeight: 1.35,
-                        textDecoration: col.key === "done" ? "line-through" : "none", marginBottom: 8 }}>
-                        {t.title}
-                      </div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                        <Pill accent={col.key === "in_progress"}>{roleName(t.role)}</Pill>
-                        {(t.attempts || 0) > 0 && col.key !== "done" && (
-                          <Pill color="#e0b06a">попытка {t.attempts}</Pill>
-                        )}
-                        {t.done_criterion && col.key !== "done" && col.key !== "blocked" && (
-                          <span style={{ fontSize: 10, color: "#6f8a6a", lineHeight: 1.3 }}>✓ {t.done_criterion}</span>
-                        )}
-                      </div>
-                      {col.key === "blocked" && (
-                        <div style={{ marginTop: 8 }}>
-                          {t.blocked_reason && (
-                            <div style={{ fontSize: 10.5, color: "#e08a8a", lineHeight: 1.4, marginBottom: 8 }}>
-                              ⛔ {t.blocked_reason}
-                            </div>
-                          )}
-                          <button onClick={() => unblock(t.id)} disabled={unblocking === t.id}
-                            style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, cursor: "pointer",
-                              background: "var(--surface-soft)", border: "1px solid var(--hairline-strong)",
-                              color: "var(--text-dim)" }}>
-                            {unblocking === t.id ? "…" : "↩ Вернуть в работу"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {items.length === 0 && <div style={{ fontSize: 11, color: "var(--faint)", textAlign: "center", padding: "16px 0" }}>—</div>}
-                </div>
-              </div>
-            )
-          })}
+              )}
+              <button onClick={() => unblock(t.id)} disabled={unblocking === t.id}
+                style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, cursor: "pointer",
+                  background: "var(--surface-soft)", border: "1px solid var(--hairline-strong)",
+                  color: "var(--text-dim)" }}>
+                {unblocking === t.id ? "…" : "↩ Вернуть в работу"}
+              </button>
+            </div>
+          )}
         </div>
-      )}
-    </ViewBody>
-  )
-}
-
-// ── Проекты ───────────────────────────────────────────────────────────────────
-function ProjectsTab({ projects }: { projects: any[] }) {
-  if (projects.length === 0) return (
-    <ViewBody>
-      <Empty icon="📁" text="Проектов пока нет"
-        hint="Первый проект появится вместе с планом задач" />
-    </ViewBody>
-  )
-  return (
-    <ViewBody>
-      <div style={{ display: "grid", gap: 12 }}>
-        {[...projects].reverse().map((p: any) => {
-          const lb = p.left_behind || {}
-          const isActive = p.status === "active"
-          return (
-            <Card key={p.id} style={{ borderColor: isActive ? "rgba(255,172,46,0.3)" : undefined }}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-                    {isActive ? <Pill accent>Активный</Pill> : <Pill color="#a0e0ab">Закрыт</Pill>}
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
-                  {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
-                  {p.status === "done" && (
-                    <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
-                      <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
-                      <span>🌐 сайтов: {(lb.sites || []).length}</span>
-                      <span>👤 лидов: {lb.leads_count ?? 0}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="mono" style={{ fontSize: 22, color: isActive ? "var(--mercury-a)" : "#a0e0ab", flexShrink: 0 }}>
-                  {isActive ? "▶" : "✓"}
-                </div>
-              </div>
-            </Card>
-          )
-        })}
+        {children.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10 }}>
+            {children.map((c: any) => renderTask(c, 0))}
+          </div>
+        )}
       </div>
-    </ViewBody>
+    )
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+      {cols.map(col => {
+        const items = tasks.filter((t: any) => t.status === col.key && isRoot(t))
+        return (
+          <div key={col.key} style={{ background: "var(--surface-soft)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)", padding: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: col.dot, display: "inline-block" }} />
+                <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-dim)" }}>{col.label}</span>
+              </div>
+              <span style={{ fontSize: 10, color: "var(--muted)" }}>{items.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.map((t: any) => renderTask(t, 0))}
+              {items.length === 0 && <div style={{ fontSize: 11, color: "var(--faint)", textAlign: "center", padding: "16px 0" }}>—</div>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
-// ── Спецификация (контракт приёмки) ──────────────────────────────────────────
+// ── Спецификация (контракт приёмки) — компания-широкий, не привязан к одному
+//    Work: собирается из брифа + ВСЕГО план-графа (см. src/office/specification.py) ──
 function SpecTab({ tick }: { tick: number }) {
   const [spec, setSpec] = useState<any>(null)
   const [confirming, setConfirming] = useState(false)
@@ -355,4 +980,3 @@ function SectionMini({ children }: { children: ReactNode }) {
   return <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.6, textTransform: "uppercase",
     color: "var(--muted)", marginBottom: 10 }}>{children}</div>
 }
-

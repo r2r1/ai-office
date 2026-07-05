@@ -163,10 +163,13 @@ def set_tasks(tasks: list[dict]) -> None:
 
 
 def add_task(title: str, role: str, done_criterion: str = "",
-             requested_by: str = "", deps: list[str] | None = None) -> dict:
+             requested_by: str = "", deps: list[str] | None = None, parent: str = "") -> dict:
     """
     Добавляет задачу в доску (например, поставленную КОЛЛЕГОЙ-агентом другому отделу/роли).
     Возвращает созданную задачу. Видна в to-do списке исполнителя и у его лидера.
+
+    `parent` — id другой задачи (BOS §5/§1: вложенность произвольной глубины через
+    parent_id вместо отдельной сущности Subtask). Пусто — задача верхнего уровня.
     """
     d = _data()
     tasks = d.get("tasks", [])
@@ -190,6 +193,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "done_criterion": (done_criterion or "").strip()[:200],
         "status": "pending", "assignee": "", "requested_by": requested_by,
         "project": projects.ensure_active()["id"],
+        "parent": (parent or "").strip(),
         "artifacts": _derive_artifacts(role, title),
         "required_capabilities": _required_caps({"title": title}),
     }
@@ -202,6 +206,29 @@ def add_task(title: str, role: str, done_criterion: str = "",
 
 def all_tasks() -> list[dict]:
     return list(_data().get("tasks", []))
+
+
+def for_project(project_id: str) -> list[dict]:
+    """Задачи, принадлежащие конкретному проекту (для карточки проекта в UI)."""
+    return [t for t in all_tasks() if t.get("project") == project_id]
+
+
+def children_of(task_id: str) -> list[dict]:
+    """Прямые подзадачи (parent_id == task_id) — BOS §5: вложенность вместо Subtask."""
+    return [t for t in all_tasks() if t.get("parent") == task_id]
+
+
+def set_deps(task_id: str, deps: list[str]) -> None:
+    """Патчит зависимости уже созданной задачи — нужно для двухпроходного
+    построения графа: LLM отдаёт зависимости через свои временные id (t1, t2),
+    реальные id задача получает только при add_task(), поэтому граф
+    достраивается вторым проходом после того, как все задачи уже созданы."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id:
+            t["deps"] = [x for x in deps if x and x != task_id]
+            _save(d)
+            return
 
 
 def adopt_orphan_tasks(project_id: str) -> int:
@@ -437,10 +464,11 @@ def board_summary(dept_id: str | None = None) -> str:
     return f"✓{len(b['done'])} ⟳{len(b['doing'])} ☐{len(b['todo'])}{blocked}{skipped} | в работе: {doing}"
 
 
-def progress() -> dict:
+def progress(project_id: str = "") -> dict:
     """done — реально выполненные; skipped — снятые (роль без отдела). Процент и
-    «всё закрыто» считаются по done+skipped, но done НЕ завышается пропущенными."""
-    tasks = all_tasks()
+    «всё закрыто» считаются по done+skipped, но done НЕ завышается пропущенными.
+    project_id задан — считает только по задачам этого проекта (карточка проекта)."""
+    tasks = for_project(project_id) if project_id else all_tasks()
     total = len(tasks)
     done = sum(1 for t in tasks if t.get("status") == "done")
     skipped = sum(1 for t in tasks if t.get("status") == "skipped")

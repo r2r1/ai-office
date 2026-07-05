@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -791,6 +791,80 @@ async def test_integration(name: str):
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=200)
 
 
+@app.get("/api/integrations/telegram_personal/config")
+async def telegram_personal_config():
+    """Заданы ли ключи ПРИЛОЖЕНИЯ оператором (.env) — если да, форма входа не
+    просит пользователя искать api_id/api_hash на my.telegram.org самому."""
+    from src.office import telegram_login
+    return {"has_default_creds": telegram_login.has_default_creds()}
+
+
+@app.post("/api/integrations/telegram_personal/login/start")
+async def telegram_personal_login_start(request: Request):
+    """Шаг 1 входа в личный Telegram: запросить код на телефон. Body: {phone,
+    api_id?, api_hash?} — последние два нужны, только если оператор не задал
+    TELEGRAM_API_ID/TELEGRAM_API_HASH в .env (см. office/telegram_login.py)."""
+    from src.office import telegram_login
+    data = await request.json()
+    phone = (data.get("phone") or "").strip()
+    if not phone:
+        return JSONResponse({"error": "нужен phone"}, status_code=400)
+    api_id = 0
+    if data.get("api_id"):
+        try:
+            api_id = int(data["api_id"])
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "api_id должен быть числом"}, status_code=400)
+    api_hash = (data.get("api_hash") or "").strip()
+    if not telegram_login.has_default_creds() and (not api_id or not api_hash):
+        return JSONResponse({"error": "нужны api_id и api_hash (оператор не задал их в .env)"},
+                            status_code=400)
+    tid = saas_context.get_tenant()
+    result = await telegram_login.start(tid, phone, api_id, api_hash)
+    return result
+
+
+@app.post("/api/integrations/telegram_personal/login/confirm")
+async def telegram_personal_login_confirm(request: Request):
+    """Шаг 2: подтвердить код (+ 2FA-пароль при need_password). Body: {code, password?}."""
+    from src.office import telegram_login
+    data = await request.json()
+    tid = saas_context.get_tenant()
+    result = await telegram_login.confirm(tid, data.get("code", ""), data.get("password", ""))
+    return result
+
+
+@app.post("/api/integrations/telegram_personal/login/cancel")
+async def telegram_personal_login_cancel():
+    from src.office import telegram_login
+    telegram_login.cancel(saas_context.get_tenant())
+    return {"ok": True}
+
+
+@app.post("/api/leads/{lead_id}/followup")
+async def send_lead_followup(lead_id: str, request: Request):
+    """Отправить follow-up лиду напрямую в Telegram-ЛС (личный аккаунт) и записать
+    в историю лида. Body: {text}. Target берётся из contact лида — если это не
+    @username/телефон, интеграция сама вернёт понятную причину отказа."""
+    data = await request.json()
+    text = (data.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text обязателен"}, status_code=400)
+    lead = leads_module.get(lead_id)
+    if not lead:
+        return JSONResponse({"error": "лид не найден"}, status_code=404)
+    integ = integrations_registry.get("telegram_personal")
+    if not integrations_registry.is_connected(integ):
+        return JSONResponse({"error": "нет активной сессии личного Telegram — подключите в «Доступы»"},
+                            status_code=400)
+    creds = integrations_registry.credentials_for(integ)
+    result = await integ.actions["send_dm"].handler(creds, {"target": lead["contact"], "text": text})
+    sent = "отправлено" in result.lower()
+    leads_module.add_note(lead_id, f"Telegram: {text[:80]}" if sent else f"⚠ Не отправлено: {result[:150]}",
+                          by="owner")
+    return {"ok": sent, "result": result}
+
+
 @app.get("/site/{tenant}/{slug}", response_class=HTMLResponse)
 async def serve_site(tenant: str, slug: str):
     """Отдаёт опубликованный сайт тенанта (публично). Инлайн-лендинг или папка с файлами."""
@@ -1172,8 +1246,39 @@ async def get_sites():
 
 @app.get("/api/leads")
 async def get_leads():
-    """Все собранные лиды."""
-    return {"leads": leads_module.all_leads()}
+    """Все собранные лиды (мини-CRM: статус + история)."""
+    return {"leads": leads_module.all_leads(), "statuses": leads_module.STATUSES,
+            "labels": leads_module.STATUS_LABELS}
+
+
+@app.post("/api/leads/{lead_id}/status")
+async def set_lead_status(lead_id: str, request: Request):
+    """Сменить статус лида (мини-CRM). Body: {status, note?}.
+    ⚠️ Путь ОБЯЗАН быть /api/leads/... (множественное число), не /api/lead/... —
+    последний уже занят публичным приёмом заявок POST /api/lead/{tenant}/{slug}
+    (без авторизации, для форм лендингов). Оба двухсегментные, FastAPI матчит по
+    порядку регистрации — /api/lead/{lead_id}/status ловился ТЕМ роутом (tenant=
+    lead_id, slug="status") и не долистывал до этого хендлера (нашли по 404 в реальном тесте)."""
+    data = await request.json()
+    status = (data.get("status") or "").strip()
+    note = data.get("note") or ""
+    lead = leads_module.set_status(lead_id, status, note)
+    if not lead:
+        return JSONResponse({"error": "лид не найден или статус некорректен"}, status_code=404)
+    return {"ok": True, "lead": lead}
+
+
+@app.post("/api/leads/{lead_id}/note")
+async def add_lead_note(lead_id: str, request: Request):
+    """Добавить заметку к лиду. Body: {text}."""
+    data = await request.json()
+    text = (data.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text обязателен"}, status_code=400)
+    lead = leads_module.add_note(lead_id, text, by="owner")
+    if not lead:
+        return JSONResponse({"error": "лид не найден"}, status_code=404)
+    return {"ok": True, "lead": lead}
 
 
 @app.get("/api/office/status")
@@ -1658,6 +1763,76 @@ async def get_projects():
             "active": projects_module.active()}
 
 
+@app.get("/api/processes")
+async def get_processes():
+    """Повторяющиеся процессы (BOS §5: Process — recurring action, не только
+    поток Instance вроде продаж) — «контент-завод», «ежедневная аналитика»."""
+    from src.office import processes as processes_module
+    return {"processes": processes_module.all_processes()}
+
+
+@app.post("/api/processes")
+async def create_process(request: Request):
+    from src.office import processes as processes_module
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    role = (body.get("role") or "").strip()
+    instruction = (body.get("instruction") or "").strip()
+    if not title or not role or not instruction:
+        raise HTTPException(status_code=400, detail="Нужны title, role и instruction")
+    proc = processes_module.create(title, role, instruction, body.get("cadence", "every_cycle"))
+    office_loop.wake_tenant()
+    return {"ok": True, "process": proc}
+
+
+@app.post("/api/process/{process_id}/pause")
+async def pause_process(process_id: str):
+    from src.office import processes as processes_module
+    proc = processes_module.set_status(process_id, "paused")
+    if not proc:
+        raise HTTPException(status_code=404, detail="Процесс не найден")
+    return {"ok": True, "process": proc}
+
+
+@app.post("/api/process/{process_id}/resume")
+async def resume_process(process_id: str):
+    from src.office import processes as processes_module
+    proc = processes_module.set_status(process_id, "active")
+    if not proc:
+        raise HTTPException(status_code=404, detail="Процесс не найден")
+    return {"ok": True, "process": proc}
+
+
+@app.post("/api/process/{process_id}/delete")
+async def delete_process(process_id: str):
+    from src.office import processes as processes_module
+    ok = processes_module.delete(process_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Процесс не найден")
+    return {"ok": True}
+
+
+@app.get("/api/project/{project_id}")
+async def get_project_detail(project_id: str):
+    """Карточка одного проекта: сам проект + его задачи, прогресс, СВОИ этапы
+    (Stage теперь привязаны к Work — BOS §5/§14 п.6) и СВОИ артефакты (сайты +
+    готовые материалы) — «Итоги» были общим котлом на всю компанию, теперь это
+    выдача конкретного Work (карта сайта, рефакторинг сессии 2026-07-05)."""
+    from src.office import projects as projects_module
+    proj = projects_module.get(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    tasks = plan_module.for_project(project_id)
+    return {
+        "project": proj,
+        "tasks": tasks,
+        "progress": plan_module.progress(project_id),
+        "milestones": milestones.progress_payload(project_id),
+        "sites": sites_module.for_project(project_id),
+        "deliverables": state.deliverables_for_project(project_id),
+    }
+
+
 @app.get("/api/specification")
 async def get_specification():
     """Спецификация работы — контракт приёмки (Acceptance L1)."""
@@ -1757,17 +1932,79 @@ async def get_initiatives(request: Request):
     return initiatives_module.payload()
 
 
+@app.post("/api/initiatives")
+async def propose_initiative(request: Request):
+    """Предприниматель сам предлагает инициативу (BOS §5: Intent не обязан идти
+    только от AI-наблюдения) — минимальный ввод, глубокий анализ офис делает
+    сам в фоне (не блокируем HTTP-ответ длинным LLM-вызовом с поиском)."""
+    import asyncio
+    from src.office import initiative_research
+    from src.saas import context as ctx
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    idea = (body.get("idea") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Нужно название инициативы")
+    iid = initiatives_module.propose(title, idea)
+
+    tid = ctx.get_tenant()
+
+    async def _bg():
+        ctx.set_tenant(tid)
+        await initiative_research.run(iid, title, idea, bus.publish)
+
+    asyncio.create_task(_bg())
+    return {"ok": True, "id": iid}
+
+
 @app.post("/api/initiative/{iid}/accept")
 async def accept_initiative(iid: str, request: Request):
+    """Принятая инициатива — BOS §5: decision spawn_project. Если сейчас нет
+    активного проекта или он пуст (не поглощает чужую работу), заводим/переименовываем
+    Work под эту инициативу — тот же приём, что gap.replan() (см. src/office/gap.py):
+    иначе задачи молча оседали бы в общем контейнере без владельца-структуры."""
+    from src.office import projects as projects_module
+    initiative = next((i for i in initiatives_module.pending() if i["id"] == iid), None)
+    proj_before = projects_module.active()
+    was_empty = (not proj_before) or not plan_module.for_project(proj_before["id"])
 
     tasks = initiatives_module.accept(iid)
+    added = 0
+    # Двухпроходное построение графа: LLM отдаёт зависимости через СВОИ
+    # временные id (t1, t2, ...) — реальные id задача получает только внутри
+    # add_task(). Первый проход создаёт задачи и запоминает temp→real;
+    # второй патчит deps через plan.set_deps (BOS §5: сценарий составлен ДО
+    # начала работы, а не придумывается на ходу).
+    temp_to_real: dict[str, str] = {}
+    created: list[tuple[str, list[str]]] = []
     for t in tasks:
         role = (t.get("role") or "").strip()
         title = (t.get("title") or "").strip()
         if role and title:
-            plan_module.add_task(title, role, t.get("done_criterion", ""), requested_by="user")
+            real = plan_module.add_task(title, role, t.get("done_criterion", ""), requested_by="user")
+            added += 1
+            temp_id = (t.get("id") or "").strip()
+            if temp_id:
+                temp_to_real[temp_id] = real["id"]
+            deps = [d for d in (t.get("deps") or []) if isinstance(d, str)]
+            if deps:
+                created.append((real["id"], deps))
+    for real_id, temp_deps in created:
+        resolved = [temp_to_real[d] for d in temp_deps if d in temp_to_real]
+        if resolved:
+            plan_module.set_deps(real_id, resolved)
+
+    proj_after = projects_module.active() if added else None
+    if added and was_empty and initiative and proj_after:
+        projects_module.rename(proj_after["id"], initiative["title"])
+        proj_after = projects_module.get(proj_after["id"])
+
     office_loop.wake_tenant()
-    return {"ok": True, "tasks_added": len(tasks)}
+    return {
+        "ok": True, "tasks_added": added,
+        "project_id": proj_after["id"] if proj_after else "",
+        "project_title": proj_after["title"] if proj_after else "",
+    }
 
 
 @app.post("/api/initiative/{iid}/reject")

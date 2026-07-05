@@ -188,6 +188,7 @@ async def _delete_email(creds: dict, params: dict) -> str:
 INTEGRATION = Integration(
     name="gmail",
     title="Gmail",
+    category="communication",
     icon="📧",
     description="Отправка и чтение писем через Gmail API. Авторизация через Google OAuth.",
     how_to="Нажми «Подключить Google» — это даёт доступ сразу к Gmail, Sheets и Calendar.",

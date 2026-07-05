@@ -250,6 +250,7 @@ async def _free_busy(creds: dict, params: dict) -> str:
 INTEGRATION = Integration(
     name="google_calendar",
     title="Google Calendar",
+    category="productivity",
     icon="📅",
     description="Управление событиями в Google Calendar. Авторизация через Google OAuth.",
     how_to="Нажми «Подключить Google» — это даёт доступ сразу к Calendar, Gmail и Sheets.",

@@ -44,6 +44,12 @@ _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый 
 _office_tasks: dict[str, asyncio.Task] = {}
 _completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
 _last_blocked_heartbeat: dict[str, float] = {}  # tid -> ts последнего напоминания о блокере
+_net_fail_streak: dict[str, int] = {}   # tid -> подряд идущих сетевых сбоев цикла
+# Сколько сетевых сбоев подряд терпим до авто-паузы: одиночный таймаут — норма
+# (ретрай цикла), но серия означает лежащий прокси/сеть — без паузы офис спамил
+# одинаковыми трейсбеками каждые 10с часами (реальный прогон: ConnectTimeout
+# на локальный прокси 127.0.0.1:10809, десятки идентичных стектрейсов).
+NET_FAIL_PAUSE_AFTER = int(os.getenv("NET_FAIL_PAUSE_AFTER", "3"))
 
 
 def wake_tenant() -> None:
@@ -241,6 +247,25 @@ async def _run_office(tid: str) -> None:
             await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
             continue
 
+        # Недожатые лиды (мини-CRM, product-vision.md §3): дешёвая детерминированная
+        # проверка без LLM — событие поднимается один раз на пачку, не спамит.
+        from src.office import leads as leads_mod
+        n_stale = leads_mod.check_stale_events()
+        if n_stale:
+            await publish({"type": "system",
+                           "text": f"🟡 {n_stale} лид(ов) без ответа 72+ часов — см. «Лиды»"})
+
+        # Повторяющиеся процессы (BOS §5: Process — необязательно поток Instance
+        # вроде продаж, может быть циклическое действие: «контент-завод»,
+        # «ежедневная аналитика рынка»). Работает НЕЗАВИСИМО от того, завершён
+        # ли план проекта — Process не подчиняется завершению Project. Дедуп —
+        # тот же приём, что gap.replan(): новая задача только когда предыдущая
+        # закрыта, иначе один процесс спамил бы задачу каждый цикл.
+        from src.office import processes as processes_mod
+        proc_tasks = processes_mod.tick()
+        for pt in proc_tasks:
+            await publish({"type": "system", "text": f"🔄 Процесс поставил задачу: {pt['title'][:70]}"})
+
         # Бюджетный лимит из Конституции: превышен общий лимит расхода → авто-пауза.
         if costs.over_limit():
             control.pause("Достигнут лимит расхода — офис на паузе. Повысьте лимит в «Компания → Лимиты».")
@@ -287,6 +312,27 @@ async def _run_office(tid: str) -> None:
                 for s in milestones.all_stages():
                     if s.get("status") != "done":
                         milestones.set_status(s["id"], "done")
+                # BOS §5: ДО закрытия проекта — CEO решает сам, разовый ли это
+                # результат или на самом деле непрерывный цикл (Process). Смотрим
+                # ПОКА проект ещё активен (задачи ещё принадлежат ему, до close()).
+                from src.office import processes as processes_mod
+                from src.office import projects as projects_mod_peek
+                active_proj = projects_mod_peek.active()
+                if active_proj:
+                    tasks_summary = "\n".join(f"- {t['title']} ({t.get('role','')})"
+                                               for t in plan.for_project(active_proj["id"])[:15])
+                    try:
+                        cls = await orchestrator.classify_recurring(
+                            active_proj["title"], active_proj.get("goal", ""), tasks_summary)
+                    except Exception:
+                        cls = {}
+                    if cls.get("recurring") and cls.get("title") and cls.get("instruction"):
+                        proc = processes_mod.create(
+                            cls["title"], cls.get("role", "marketer"), cls["instruction"])
+                        await publish({"type": "system",
+                                       "text": f"🔄 Офис решил: «{active_proj['title'][:40]}» — это непрерывный "
+                                               f"цикл, запускаю процесс «{proc['title']}»"})
+
                 # Project закрывается с фиксацией «что оставил после себя» (задачи,
                 # сайты, лиды + срез мира) — история компании ведётся по проектам.
                 from src.office import projects as projects_mod
@@ -351,14 +397,30 @@ async def _run_office(tid: str) -> None:
         try:
             await planning_engine.orchestrate(strategy, publish, tech_design=tech_design, cycle=cycle)
         except Exception as e:
-            err_str = str(e)
+            err_str = str(e).strip() or type(e).__name__
             import traceback
             if llm.is_quota_error(err_str):
                 reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
                 control.pause(reason)
                 await publish({"type": "system", "text": reason})
+            elif llm.is_network_error(err_str):
+                # Серия сетевых сбоев подряд = сеть/прокси до провайдера лежит.
+                # Пауза с понятной причиной вместо бесконечного спама трейсбеков.
+                n = _net_fail_streak.get(tid, 0) + 1
+                _net_fail_streak[tid] = n
+                if n >= NET_FAIL_PAUSE_AFTER:
+                    reason = ("⛔ Нет связи с LLM-провайдером (таймауты подряд). Проверьте "
+                              "интернет/прокси и нажмите «Возобновить».")
+                    control.pause(reason)
+                    await publish({"type": "system", "text": reason})
+                    _net_fail_streak.pop(tid, None)
+                else:
+                    await publish({"type": "error", "agent_id": "orchestrator_1",
+                                   "text": f"Сетевой сбой ({n}/{NET_FAIL_PAUSE_AFTER}): {err_str[:100]}"})
             else:
                 await publish({"type": "error", "agent_id": "orchestrator_1",
                                "text": f"Сбой цикла: {err_str[:150]}"})
                 traceback.print_exc()
+        else:
+            _net_fail_streak.pop(tid, None)  # успешный цикл сбрасывает серию
         await asyncio.sleep(LOOP_INTERVAL)

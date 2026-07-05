@@ -90,6 +90,7 @@ async def _push(creds: dict, params: dict) -> str:
 INTEGRATION = Integration(
     name="github",
     title="GitHub",
+    category="dev",
     icon="🐙",
     description="Создание репозитория и пуш кода проекта из рабочей папки офиса.",
     how_to=(

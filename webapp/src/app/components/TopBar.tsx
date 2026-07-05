@@ -12,21 +12,20 @@ interface TopBarProps {
   onToggleTheme: () => void
   isMobile: boolean
   understanding?: { score: number } | null
-  onUnderstandingClick?: () => void
   officePaused?: boolean
   onToggleOffice?: () => void
   autonomyLevel?: string
-  onAutonomyClick?: () => void
   health?: { company: number; status: string } | null
   trust?: { company: number; streak: number } | null
-  onHealthClick?: () => void
   qualityMode?: { icon: string; label: string } | null
-  onQualityClick?: () => void
+  /** Один клик — один попап со всеми статусами разом (Понимание/Здоровье/
+   * Доверие/Автономность/Качество). Раньше это были 4 отдельные кнопки,
+   * ведущие в 2 разных места, плюс отдельный попап — визуальный шум
+   * (governance-виджеты, найдено при аудите функционала). */
+  onStatusClick?: () => void
 }
 
-const AUTONOMY_ICONS: Record<string, string> = { scout: "🔍", guided: "🤝", trusted: "✅", autonomous: "🚀" }
-
-export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, onUnderstandingClick, officePaused, onToggleOffice, autonomyLevel, onAutonomyClick, health, trust, onHealthClick, qualityMode, onQualityClick }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, officePaused, onToggleOffice, autonomyLevel, health, trust, qualityMode, onStatusClick }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -84,45 +83,11 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
             {cost.toFixed(4)}
           </div>
         )}
-        {!isMobile && understanding != null && (
-          <UnderstandingBadge score={understanding.score} onClick={onUnderstandingClick} />
-        )}
-        {!isMobile && (health || trust) && (
-          <button onClick={onHealthClick}
-            title={`Здоровье ${health?.company ?? "—"}/100 · доверие ${trust?.company ?? "—"}/100`}
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 11px",
-              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-              background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
-            {health && <span style={{ fontSize: 12 }}>{health.status} <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{health.company}</span></span>}
-            {trust && <span style={{ fontSize: 12 }}>🤝 <span className="mono" style={{ fontSize: 11,
-              color: trust.company >= 70 ? "#a0e0ab" : trust.company >= 40 ? "#ffac2e" : "var(--text-dim)" }}>{trust.company}</span></span>}
-          </button>
-        )}
-        {!isMobile && autonomyLevel && (
-          <button onClick={onAutonomyClick} title={`Уровень автономности: ${autonomyLevel}`}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
-              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-              background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
-            <span style={{ fontSize: 13 }}>{AUTONOMY_ICONS[autonomyLevel] || "🔍"}</span>
-            <span className="mono" style={{ fontSize: 10, color: "var(--text-dim)" }}>{autonomyLevel}</span>
-          </button>
+        {!isMobile && (understanding != null || health || trust || autonomyLevel || qualityMode) && (
+          <StatusBadge understanding={understanding} health={health} trust={trust}
+            autonomyLevel={autonomyLevel} qualityMode={qualityMode} onClick={onStatusClick} />
         )}
         <OfficeToggle paused={!!officePaused} onClick={onToggleOffice} isMobile={isMobile} />
-        {!isMobile && qualityMode && (
-          <button onClick={onQualityClick} title={`Режим качества: ${qualityMode.label}`}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
-              borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-              background: "transparent", cursor: "pointer", transition: "all 0.2s ease" }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface-soft)" }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}>
-            <span style={{ fontSize: 12 }}>{qualityMode.icon}</span>
-            <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{qualityMode.label}</span>
-          </button>
-        )}
         <button
           onClick={onToggleTheme}
           title={theme === "dark" ? "Светлая тема" : "Темная тема"}
@@ -177,25 +142,44 @@ function OfficeToggle({ paused, onClick, isMobile }: { paused: boolean; onClick?
   )
 }
 
-/** Индикатор «Понимание компании X%». Кликабелен — открывает попап. */
-function UnderstandingBadge({ score, onClick }: { score: number; onClick?: () => void }) {
+const AUTONOMY_ICONS: Record<string, string> = { scout: "🔍", guided: "🤝", trusted: "✅", autonomous: "🚀" }
+
+/** Один сводный индикатор вместо четырёх отдельных кнопок (Понимание/Здоровье/
+ * Доверие/Автономность/Качество) — клик открывает один попап со всеми
+ * разделами. Показывает самый по смыслу "тревожный" из показателей компактно;
+ * остальное — внутри попапа. */
+function StatusBadge({ understanding, health, trust, autonomyLevel, qualityMode, onClick }: {
+  understanding?: { score: number } | null
+  health?: { company: number; status: string } | null
+  trust?: { company: number; streak: number } | null
+  autonomyLevel?: string
+  qualityMode?: { icon: string; label: string } | null
+  onClick?: () => void
+}) {
   const [hover, setHover] = useState(false)
-  const color = score >= 70 ? "#a0e0ab" : score >= 40 ? "#ffac2e" : "var(--text-dim)"
+  const healthColor = health ? (health.company >= 75 ? "#a0e0ab" : health.company >= 45 ? "#ffac2e" : "#e05a5a") : "var(--text-dim)"
   return (
     <button
       onClick={onClick}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      title="Насколько офис знает твой бизнес"
+      title="Статус офиса: понимание бизнеса, здоровье, доверие, автономность, качество"
       style={{
-        display: "flex", alignItems: "center", gap: 6, padding: "5px 10px",
+        display: "flex", alignItems: "center", gap: 8, padding: "5px 12px",
         borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
         background: hover ? "var(--surface-soft)" : "transparent",
         cursor: "pointer", transition: "all 0.2s ease",
       }}>
-      <span style={{ fontSize: 13 }}>🧠</span>
-      <span className="mono" style={{ fontSize: 11, color }}>
-        {score}%
-      </span>
+      {health && (
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: healthColor, flexShrink: 0 }} />
+      )}
+      {autonomyLevel && <span style={{ fontSize: 13 }}>{AUTONOMY_ICONS[autonomyLevel] || "🔍"}</span>}
+      {understanding != null && (
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{understanding.score}%</span>
+      )}
+      {trust && (
+        <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>🤝{trust.company}</span>
+      )}
+      {qualityMode && <span style={{ fontSize: 12 }}>{qualityMode.icon}</span>}
     </button>
   )
 }

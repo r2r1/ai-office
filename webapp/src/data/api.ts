@@ -62,7 +62,24 @@ export const api = {
   history: () => getJSON<{ events: any[]; results: Record<string, string> }>("/api/history", { events: [], results: {} }),
   progress: () => getJSON<any>("/api/progress", { percent: 0, note: "", stages: [], current: "" }),
   costs: () => getJSON<any>("/api/costs", { total: { cost: 0 }, agents: [] }),
-  leads: () => getJSON<{ leads: any[] }>("/api/leads", { leads: [] }),
+  leads: () => getJSON<{ leads: any[]; statuses: string[]; labels: Record<string, string> }>(
+    "/api/leads", { leads: [], statuses: [], labels: {} }),
+  setLeadStatus: (id: string, status: string, note = "") =>
+    postJSON<any>(`/api/leads/${id}/status`, { status, note }, null),
+  addLeadNote: (id: string, text: string) =>
+    postJSON<any>(`/api/leads/${id}/note`, { text }, null),
+  sendLeadFollowup: (id: string, text: string) =>
+    postJSONReadBody<any>(`/api/leads/${id}/followup`, { text }, { ok: false, error: "Ошибка запроса" }),
+  // ── Личный Telegram (MTProto) — интерактивный вход, не обычный cred-флоу ──
+  tgConfig: () => getJSON<{ has_default_creds: boolean }>(
+    "/api/integrations/telegram_personal/config", { has_default_creds: false }),
+  tgLoginStart: (phone: string, api_id = "", api_hash = "") =>
+    postJSONReadBody<any>("/api/integrations/telegram_personal/login/start",
+      { phone, api_id, api_hash }, { ok: false, error: "Ошибка запроса" }),
+  tgLoginConfirm: (code: string, password = "") =>
+    postJSONReadBody<any>("/api/integrations/telegram_personal/login/confirm",
+      { code, password }, { ok: false, error: "Ошибка запроса" }),
+  tgLoginCancel: () => postJSON<any>("/api/integrations/telegram_personal/login/cancel", {}, null),
   sites: () => getJSON<{ sites: any[] }>("/api/sites", { sites: [] }),
   plan: () => getJSON<any>("/api/plan", { generated: false, tasks: [], progress: { done: 0, total: 0 } }),
   deliverables: () => getJSON<{ deliverables: any[] }>("/api/deliverables", { deliverables: [] }),
@@ -99,6 +116,18 @@ export const api = {
   updateObjective: (id: string, patch: Record<string, unknown>) =>
     postJSON<any>("/api/objectives", { id, ...patch }, null),
   projects: () => getJSON<{ projects: any[]; active: any }>("/api/projects", { projects: [], active: null }),
+  initiatives: () => getJSON<{ pending: any[]; researching: any[]; pending_count: number; total: number }>("/api/initiatives", { pending: [], researching: [], pending_count: 0, total: 0 }),
+  proposeInitiative: (title: string, idea: string) => postJSON<any>("/api/initiatives", { title, idea }, null),
+  acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null),
+  rejectInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/reject`, {}, null),
+  gap: () => getJSON<{ gaps: any[] }>("/api/gap", { gaps: [] }),
+  processes: () => getJSON<{ processes: any[] }>("/api/processes", { processes: [] }),
+  createProcess: (title: string, role: string, instruction: string) =>
+    postJSON<any>("/api/processes", { title, role, instruction }, null),
+  pauseProcess: (id: string) => postJSON<any>(`/api/process/${id}/pause`, {}, null),
+  resumeProcess: (id: string) => postJSON<any>(`/api/process/${id}/resume`, {}, null),
+  deleteProcess: (id: string) => postJSON<any>(`/api/process/${id}/delete`, {}, null),
+  projectDetail: (id: string) => getJSON<{ project: any; tasks: any[]; progress: any; milestones: any; sites: any[]; deliverables: any[] }>(`/api/project/${id}`, { project: null, tasks: [], progress: {}, milestones: {}, sites: [], deliverables: [] }),
   specification: () => getJSON<any>("/api/specification", { status: "none" }),
   confirmSpecification: (note = "") => postJSON<any>("/api/specification/confirm", { note }, null),
   intents: () => getJSON<{ intents: any[] }>("/api/intents", { intents: [] }),

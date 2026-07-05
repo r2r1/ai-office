@@ -48,9 +48,14 @@ def active() -> dict | None:
     return None
 
 
-def create(title: str, goal: str = "") -> dict:
-    """Создаёт проект и делает его активным (прежний активный закрывается как done —
-    v1 не ведёт два активных проекта параллельно)."""
+def create(title: str, goal: str = "", type: str = "project") -> dict:
+    """Создаёт Work и делает его активным (прежний активный закрывается как done —
+    v1 не ведёт два активных Work параллельно, см. BOS §5/§14 п.6).
+
+    `type` — project (разовое, есть конец) | process (никогда не завершается сам,
+    v1 пока не реализует Instance-поток — заводится как задел на будущее) |
+    initiative (идея до решения). Сегодня вся созданная работа фактически ведётся
+    как project; поле подготавливает данные к разделению, не меняя раннее поведение."""
     d = _data()
     items = d.get("items", [])
     for p in items:
@@ -61,6 +66,7 @@ def create(title: str, goal: str = "") -> dict:
     proj = {
         "id": pid, "title": (title or "Проект").strip()[:160],
         "goal": (goal or "").strip()[:300],
+        "type": type if type in ("project", "process", "initiative") else "project",
         "status": "active",
         "created_ts": time.time(), "closed_ts": None,
         "left_behind": {},   # что проект оставил после себя (заполняется при закрытии)
@@ -80,6 +86,19 @@ def ensure_active() -> dict:
     from src.office import brief
     goal = brief.effective_goal()
     return create(goal[:80] or "Первый проект", goal)
+
+
+def rename(pid: str, title: str) -> None:
+    """Переименовывает проект (BOS §3: Gap создаёт Work, а не голую задачу — если под
+    разрыв только что был авто-создан пустой активный проект вместо конкретной цели,
+    его название должно отражать разрыв, а не общий бриф-заголовок). Вызывающий сам
+    решает, когда переименование уместно (см. gap.replan)."""
+    d = _data()
+    for p in d.get("items", []):
+        if p["id"] == pid:
+            p["title"] = (title or p["title"]).strip()[:160]
+            _save(d)
+            return
 
 
 def close(pid: str = "", note: str = "") -> dict | None:

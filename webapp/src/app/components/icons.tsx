@@ -70,6 +70,15 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M8 7.5 10.3 11.3M16 7.5 13.7 11.3M10.3 14.8 8 18.5M13.7 14.8 16 18.5" />
     </>
   ),
+  // Лиды — карточка контакта
+  leads: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="9" cy="11" r="2" />
+      <path d="M6.5 16a2.5 2.5 0 0 1 5 0" />
+      <path d="M14 10h4M14 14h3" />
+    </>
+  ),
   // Доступы — вилка/разъём
   connections: (
     <>

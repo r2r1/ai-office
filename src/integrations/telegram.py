@@ -125,6 +125,7 @@ async def _stop_bot(creds: dict, params: dict) -> str:
 INTEGRATION = Integration(
     name="telegram",
     title="Telegram",
+    category="communication",
     icon="✈️",
     description="Отправка сообщений и постов в чаты и каналы через Bot API.",
     how_to=(

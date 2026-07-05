@@ -83,32 +83,59 @@ export function ViewBody({ children, style }: { children: ReactNode; style?: CSS
 export interface TabDef { id: string; label: string; badge?: number }
 
 export function SubTabs({ tabs, active, onChange }: { tabs: TabDef[]; active: string; onChange: (id: string) => void }) {
+  // Ряд табов горизонтально скроллится (overflowX: auto) без визуальной
+  // подсказки — на узких экранах (напр. 8 под-вкладок «Компании» на 375px)
+  // хвост списка обрезается краем экрана без намёка, что там ещё есть табы
+  // (найдено при мобильном аудите после карты сайта). Затухание справа
+  // показывается, только если реально есть что докрутить — не декорация.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [canScroll, setCanScroll] = useState(false)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const check = () => setCanScroll(el.scrollWidth - el.scrollLeft - el.clientWidth > 4)
+    check()
+    el.addEventListener("scroll", check, { passive: true })
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => { el.removeEventListener("scroll", check); ro.disconnect() }
+  }, [tabs.length])
+
   return (
-    <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--hairline)", flexShrink: 0,
-      paddingLeft: 28, paddingRight: 28, overflowX: "auto", position: "relative", zIndex: 3 }}>
-      {tabs.map(t => {
-        const isActive = t.id === active
-        return (
-          <button key={t.id} onClick={() => onChange(t.id)}
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "11px 16px", fontSize: 12.5,
-              fontWeight: isActive ? 500 : 400, color: isActive ? "var(--text)" : "var(--muted)",
-              background: "none", border: "none", borderBottom: isActive ? "2px solid var(--mercury-a)" : "2px solid transparent",
-              marginBottom: -1, cursor: "pointer", whiteSpace: "nowrap", transition: "color 0.15s, border-color 0.15s",
-              fontFamily: "var(--font-sans)" }}
-            onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = "var(--text-dim)" }}
-            onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = "var(--muted)" }}>
-            {t.label}
-            {t.badge != null && t.badge > 0 && (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99,
-                background: isActive ? "rgba(255,172,46,0.15)" : "var(--hairline-soft)",
-                color: isActive ? "var(--mercury-a)" : "var(--muted)",
-                border: `1px solid ${isActive ? "rgba(255,172,46,0.3)" : "var(--hairline)"}` }}>
-                {t.badge}
-              </span>
-            )}
-          </button>
-        )
-      })}
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <div ref={scrollRef} style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--hairline)",
+        paddingLeft: 28, paddingRight: 28, overflowX: "auto", position: "relative", zIndex: 3 }}>
+        {tabs.map(t => {
+          const isActive = t.id === active
+          return (
+            <button key={t.id} onClick={() => onChange(t.id)}
+              style={{ display: "flex", alignItems: "center", gap: 7, padding: "11px 16px", fontSize: 12.5,
+                fontWeight: isActive ? 500 : 400, color: isActive ? "var(--text)" : "var(--muted)",
+                background: "none", border: "none", borderBottom: isActive ? "2px solid var(--mercury-a)" : "2px solid transparent",
+                marginBottom: -1, cursor: "pointer", whiteSpace: "nowrap", transition: "color 0.15s, border-color 0.15s",
+                fontFamily: "var(--font-sans)", flexShrink: 0 }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = "var(--text-dim)" }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = "var(--muted)" }}>
+              {t.label}
+              {t.badge != null && t.badge > 0 && (
+                <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99,
+                  background: isActive ? "rgba(255,172,46,0.15)" : "var(--hairline-soft)",
+                  color: isActive ? "var(--mercury-a)" : "var(--muted)",
+                  border: `1px solid ${isActive ? "rgba(255,172,46,0.3)" : "var(--hairline)"}` }}>
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+      {canScroll && (
+        <div style={{
+          position: "absolute", top: 0, right: 0, bottom: 1, width: 32, pointerEvents: "none", zIndex: 4,
+          background: "linear-gradient(to right, transparent, var(--surface))",
+        }} />
+      )}
     </div>
   )
 }

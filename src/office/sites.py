@@ -21,7 +21,28 @@ def make_slug(title: str) -> str:
 
 
 def _all() -> dict:
-    return ctx.read_json(_FILE, {})
+    sites = ctx.read_json(_FILE, {})
+    # Лениво помечаем проектом старые записи (заведены до Work-модели — BOS §5) —
+    # тот же приём, что milestones._load()/plan.adopt_orphan_tasks.
+    from src.office import projects
+    pid = None
+    changed = False
+    for s in sites.values():
+        if not s.get("project"):
+            if pid is None:
+                p = projects.active()
+                pid = p["id"] if p else ""
+            if pid:
+                s["project"] = pid
+                changed = True
+    if changed:
+        ctx.write_json(_FILE, sites)
+    return sites
+
+
+def for_project(project_id: str) -> list[dict]:
+    items = [{k: v for k, v in s.items() if k != "html"} for s in _all().values() if s.get("project") == project_id]
+    return sorted(items, key=lambda x: x["updated_ts"], reverse=True)
 
 
 # Стабильный слаг ОСНОВНОГО сайта тенанта. Раньше и авто-публикация, и ручной
@@ -36,12 +57,15 @@ def main_slug() -> str:
 
 
 def save(title: str, html: str, slug: str = "") -> dict:
+    from src.office import projects
     sites = _all()
     slug = slug or make_slug(title)
     now = time.time()
     existing = sites.get(slug)
+    proj = projects.active()
     site = {"slug": slug, "title": (title or "").strip(), "html": html,
-            "created_ts": existing["created_ts"] if existing else now, "updated_ts": now}
+            "created_ts": existing["created_ts"] if existing else now, "updated_ts": now,
+            "project": (existing or {}).get("project") or (proj["id"] if proj else "")}
     sites[slug] = site
     ctx.write_json(_FILE, sites)
     return site
@@ -56,6 +80,7 @@ def save_dir(title: str, root: str, slug: str = "", note: str = "") -> dict:
     `note` — краткое «что изменилось» в этой правке. Копится в журнал ревизий,
     чтобы каждая публикация была понятной правкой, а не «новым сайтом».
     """
+    from src.office import projects
     sites = _all()
     slug = slug or make_slug(title)
     now = time.time()
@@ -65,9 +90,11 @@ def save_dir(title: str, root: str, slug: str = "", note: str = "") -> dict:
     if note:
         changelog.append({"rev": revision, "note": note.strip()[:200], "ts": now})
         changelog = changelog[-30:]
+    proj = projects.active()
     site = {"slug": slug, "title": (title or "").strip(), "root": (root or "").strip("/"),
             "created_ts": existing["created_ts"] if existing else now, "updated_ts": now,
-            "revision": revision, "changelog": changelog}
+            "revision": revision, "changelog": changelog,
+            "project": (existing or {}).get("project") or (proj["id"] if proj else "")}
     sites[slug] = site
     ctx.write_json(_FILE, sites)
     return site

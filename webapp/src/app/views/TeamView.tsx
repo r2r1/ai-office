@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react"
-import { useOfficeSelector } from "../../data/OfficeProvider"
+import { useOfficeSelector, useUnread } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
@@ -11,6 +11,9 @@ const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
 interface TeamViewProps {
   onOpenChat?: (agentId: string) => void
+  /** Общий инбокс переписки — «Чаты» больше не отдельный пункт NavRail, вход
+   * отсюда (карта сайта, рефакторинг 2026-07-05). */
+  onOpenInbox?: () => void
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -26,7 +29,7 @@ const STATUS_BG: Record<string, string> = {
   idle:     "rgba(255,255,255,0.03)",
 }
 
-export function TeamView({ onOpenChat }: TeamViewProps) {
+export function TeamView({ onOpenChat, onOpenInbox }: TeamViewProps) {
   // Селектор вместо useOffice() (весь state) — карточки перерисовывались на
   // КАЖДОЕ SSE-событие (в т.ч. не относящееся к команде — прогресс, стоимость),
   // из-за чего аватары агентов на каждый тик заново запускали пульс-анимацию.
@@ -35,6 +38,7 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
   const active = agents.filter(a => a.status === "active" || a.status === "thinking").length
   const [detailId, setDetailId] = useState<string | null>(null)
   const detailEmoji = detailId ? agentsMap[detailId]?.emoji : undefined
+  const unread = useUnread()
 
   // collapsing header (через MotionValue — без ре-рендеров на скролл)
   const scrollY     = useMotionValue(0)
@@ -68,15 +72,35 @@ export function TeamView({ onOpenChat }: TeamViewProps) {
       <motion.div style={{
         paddingTop: padTop, paddingBottom: padBottom, paddingLeft: 36, paddingRight: 36, flexShrink: 0,
         position: "relative", zIndex: 3, background: "var(--surface-head)",
+        display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
       }}>
-        <motion.div style={{ fontSize, lineHeight: 1, marginBottom: titleMargin, fontFamily: "var(--font-display)" }}>
-          Команда 
-        </motion.div>
-        <motion.div style={{ height: subHeight, opacity: subOpacity, overflow: "hidden" }}>
-          <div style={{ fontSize: 13, color: "var(--muted)", whiteSpace: "nowrap" }}>
-            <span style={{ color: "var(--mercury-a)" }}>{active} active</span>{" · "}{agents.length} total
-          </div>
-        </motion.div>
+        <div>
+          <motion.div style={{ fontSize, lineHeight: 1, marginBottom: titleMargin, fontFamily: "var(--font-display)" }}>
+            Команда
+          </motion.div>
+          <motion.div style={{ height: subHeight, opacity: subOpacity, overflow: "hidden" }}>
+            <div style={{ fontSize: 13, color: "var(--muted)", whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--mercury-a)" }}>{active} active</span>{" · "}{agents.length} total
+            </div>
+          </motion.div>
+        </div>
+        {onOpenInbox && (
+          <button onClick={onOpenInbox} title="Все переписки с командой"
+            style={{
+              flexShrink: 0, marginTop: 6, display: "flex", alignItems: "center", gap: 7,
+              padding: "8px 14px", borderRadius: "var(--radius-pill)",
+              border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)",
+              color: "var(--text)", fontSize: 12.5, cursor: "pointer",
+            }}>
+            💬 Чаты
+            {unread.total > 0 && (
+              <span className="mono" style={{
+                fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 8,
+                background: "var(--mercury-a)", color: "#0a0a0a",
+              }}>{unread.total > 9 ? "9+" : unread.total}</span>
+            )}
+          </button>
+        )}
         <motion.div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--hairline)", opacity: lineOpacity }} />
       </motion.div>
 

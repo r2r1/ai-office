@@ -338,3 +338,26 @@ async def generate_initiative(
         agent_id="orchestrator_1",
     )
     return _parse_json(raw) or {}
+
+
+async def classify_recurring(project_title: str, goal: str, tasks_summary: str) -> dict:
+    """BOS §5: по завершении Project CEO сам решает — разовый результат (в архив)
+    или на самом деле непрерывный цикл (Process, запускается автоматически).
+    Возвращает {} при сбое разбора — вызывающий трактует это как «не recurring»,
+    а не падает."""
+    user = (
+        f"Проект: «{project_title}»\nЦель: {goal[:400]}\n\n"
+        f"Что делала команда (задачи):\n{tasks_summary[:800]}\n\n"
+        "Это разовый результат или непрерывный цикл?"
+    )
+    system, _pid = prompt_builder.company_system(
+        "ceo_process_classify", "orchestrator_1", "orchestrator", user)
+    raw = await llm.run_agent(
+        system=system,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=250,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    return _parse_json(raw) or {}
