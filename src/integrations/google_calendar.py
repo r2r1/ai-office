@@ -290,6 +290,7 @@ INTEGRATION = Integration(
                 "all_day":     {"type": "boolean", "description": "Событие на весь день (тогда start = YYYY-MM-DD)"},
             },
             required=["title", "start"],
+            synonyms=["календар", "встреч"],
         ),
         "update_event": Action(
             name="update_event",

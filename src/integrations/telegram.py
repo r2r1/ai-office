@@ -166,6 +166,7 @@ INTEGRATION = Integration(
                 "parse_mode": {"type": "string", "enum": ["HTML", "Markdown", "MarkdownV2"], "description": "Разметка, опционально"},
             },
             required=["text"],
+            synonyms=["сообщени", "telegram", "телеграм"],
         ),
         "send_photo": Action(
             name="send_photo",

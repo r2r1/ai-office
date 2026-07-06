@@ -17,29 +17,12 @@ Tool Router (item 8): развязывает агентов от конкрет�
 from src.integrations import registry as integrations_registry
 from src.office import needs
 
-# Синонимы намерения → подсказки роутеру. Слова, которыми клиент/агент описывает
-# потребность, но которых нет в названиях действий. Привязка к (integration, action).
-_INTENT_HINTS: dict[str, tuple[str, str]] = {
-    "сайт": ("website", "publish_site"),
-    "лендинг": ("website", "publish_site"),
-    "landing": ("website", "publish_site"),
-    "страниц": ("website", "publish_site"),
-    "опубликова": ("website", "publish_site"),
-    "сообщени": ("telegram", "send_message"),
-    "telegram": ("telegram", "send_message"),
-    "телеграм": ("telegram", "send_message"),
-    "репозитор": ("github", "create_repo"),
-    "github": ("github", "push"),
-    "гитхаб": ("github", "push"),
-    "запушить": ("github", "push"),
-    "таблиц": ("google_sheets", "append_rows"),
-    "sheets": ("google_sheets", "append_rows"),
-    "письмо": ("gmail", "send_email"),
-    "email": ("gmail", "send_email"),
-    "почт": ("gmail", "send_email"),
-    "календар": ("google_calendar", "create_event"),
-    "встреч": ("google_calendar", "create_event"),
-}
+# Синонимы намерения теперь живут В МЕТАДАННЫХ действия (Action.synonyms,
+# src/integrations/base.py) — автор новой интеграции видит необходимость сразу
+# в своём файле, а не в отдельном модуле роутера. Этот словарь остаётся только
+# как fallback для действий, которые ЕЩЁ не задекларировали свои synonyms (не
+# должен расти для новых интеграций — там сразу используйте Action(synonyms=[...])).
+_INTENT_HINTS: dict[str, tuple[str, str]] = {}
 
 def _capabilities() -> list[dict]:
     """Плоский каталог: каждое действие интеграции — отдельная способность."""
@@ -53,6 +36,7 @@ def _capabilities() -> list[dict]:
                 "title": integ.title,
                 "tokens": needs.tokens(text),
                 "connected": integrations_registry.is_connected(integ),
+                "synonyms": list(getattr(action, "synonyms", None) or []),
             })
     return caps
 
@@ -66,13 +50,19 @@ def route(need: str, top: int = 3) -> list[dict]:
     by_key = {(c["integration"], c["action"]): c for c in caps}
 
     scored: dict[tuple[str, str], float] = {}
+    low = (need or "").lower()
     # 1) Совпадение по ключевым словам метаданных (единый скорер needs)
     for c in caps:
         overlap = needs.overlap(need, c["tokens"])
         if overlap:
             scored[(c["integration"], c["action"])] = float(overlap)
-    # 2) Бонус за синонимы намерения (распознаём «лендинг», «письмо» и т.п.)
-    low = (need or "").lower()
+    # 2) Бонус за синонимы намерения, задекларированные в самом действии
+    # (распознаём «лендинг», «письмо» и т.п., которых нет в его описании)
+    for c in caps:
+        if any(stem in low for stem in c["synonyms"]):
+            key = (c["integration"], c["action"])
+            scored[key] = scored.get(key, 0.0) + 2.5
+    # 3) Legacy fallback — действия без своих synonyms (см. docstring _INTENT_HINTS)
     for stem, (integ_name, action_name) in _INTENT_HINTS.items():
         if stem in low and (integ_name, action_name) in by_key:
             scored[(integ_name, action_name)] = scored.get((integ_name, action_name), 0.0) + 2.5

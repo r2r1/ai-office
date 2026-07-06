@@ -202,6 +202,7 @@ INTEGRATION = Integration(
                 "title": {"type": "string", "description": "Название сайта (определяет адрес)"},
             },
             required=[],
+            synonyms=["сайт", "лендинг", "landing", "страниц", "опубликова"],
         ),
         "list_pages": Action(
             name="list_pages",

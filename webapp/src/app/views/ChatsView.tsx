@@ -181,7 +181,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
           </div>
 
           {/* сообщения */}
-          <div ref={feedRef} role="log" aria-label="Сообщения чата"
+          <div ref={feedRef} role="log" aria-label="Сообщения чата" aria-live="polite" aria-atomic="false"
             style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
             {allMessages.length === 0 && (
               <div style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", paddingTop: 60 }}>

@@ -419,13 +419,9 @@ def _try_extract_connection(question: str, answer: str) -> dict | None:
         conn_type = "api"
         fields = {"key": answer.strip()}
 
-    # Не дублируем уже существующее подключение с тем же именем и тем же значением
-    existing = connections.get_by_name(platform)
-    if existing:
-        ev = existing.get("fields", {})
-        if ev.get("key") == answer.strip() or ev.get("value") == answer.strip():
-            return None  # уже есть, не создаём дубль
-
+    # Дедуп по имени+значениям — уже делает connections.save() (сравнивает ВСЕ
+    # поля, не только key/value) при создании; отдельная проверка здесь была
+    # дублирующей и более узкой копией той же логики в двух местах.
     return {"name": platform, "type": conn_type, "fields": fields,
             "note": "Автосохранено агентом при ответе на вопрос"}
 

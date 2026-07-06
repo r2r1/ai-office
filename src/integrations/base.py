@@ -31,6 +31,15 @@ class Action:
     handler: Callable[[dict, dict], Awaitable[str]]
     params: dict[str, dict] = field(default_factory=dict)   # JSON-schema properties
     required: list[str] = field(default_factory=list)
+    # Слова, которыми агент/клиент описывает потребность СВОБОДНО («лендинг»,
+    # «письмо»), но которых нет в name/description этого действия — раньше жили
+    # ТОЛЬКО в отдельном захардкоженном словаре src/office/tool_router.py
+    # (_INTENT_HINTS), физически оторванном от файла интеграции: автор новой
+    # интеграции мог не узнать, что такой словарь вообще существует, и его
+    # интеграция подхватывалась бы роутером хуже остальных без единой ошибки.
+    # Теперь синонимы — часть декларации самого действия, тот же принцип
+    # развязки, что уже применён к cred_fields/actions.
+    synonyms: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -213,6 +213,7 @@ INTEGRATION = Integration(
                 "from_name": {"type": "string", "description": "Имя отправителя (опционально)"},
             },
             required=["to", "subject", "body"],
+            synonyms=["письмо", "email", "почт"],
         ),
         "list_emails": Action(
             name="list_emails",

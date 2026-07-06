@@ -275,7 +275,7 @@ export default function App() {
               {(health || trust || autonomyLevel || qualityMode) && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--hairline)" }}>
                   {health && (
-                    <StatusChip label="Здоровье" value={`${health.status} ${health.company}`}
+                    <StatusChip label="Здоровье работы" value={`${health.status} ${health.company}`}
                       color={health.company >= 75 ? "#a0e0ab" : health.company >= 45 ? "#ffac2e" : "#e05a5a"}
                       onClick={() => { changeView("dashboard"); setUnderstandingOpen(false) }} />
                   )}
@@ -295,7 +295,15 @@ export default function App() {
                 </div>
               )}
 
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, fontWeight: 600 }}>🧠 Понимание компании — {understanding.score}%</div>
+              {/* Раньше называлось "Понимание компании" — визуально рядом со "Здоровьем
+                  работы" (то же число 0-100, тот же попап), но это разные показатели:
+                  здесь — сколько данных о бизнесе есть у офиса (заполненность анкеты
+                  онбординга), там — качество текущей работы отделов. Похожие названия
+                  рядом реально путали (найдено при аудите). */}
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, fontWeight: 600 }}>🧠 Данные о бизнесе — {understanding.score}%</div>
+              <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: -6, marginBottom: 8 }}>
+                Что офис узнал о вас на онбординге (не путать со «Здоровьем работы» выше)
+              </div>
               {understanding.items.map((item: any, i: number) => (
                 <div key={i} style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 5, display: "flex", gap: 6 }}>
                   <span>{item.icon}</span><span>{item.label}</span>

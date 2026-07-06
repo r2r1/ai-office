@@ -107,6 +107,7 @@ INTEGRATION = Integration(
             params={"name": {"type": "string", "description": "Имя репозитория"},
                     "private": {"type": "boolean", "description": "Приватный (по умолчанию да)"}},
             required=["name"],
+            synonyms=["репозитор", "github", "гитхаб"],
         ),
         "push": Action(
             name="push",
@@ -115,6 +116,7 @@ INTEGRATION = Integration(
             params={"repo": {"type": "string", "description": "Имя репозитория"},
                     "message": {"type": "string", "description": "Сообщение коммита"}},
             required=["repo"],
+            synonyms=["github", "гитхаб", "запушить"],
         ),
     },
 )

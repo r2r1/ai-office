@@ -175,6 +175,7 @@ INTEGRATION = Integration(
                 "values":   {"type": "array",  "description": "Строки: [[val1,val2],...]"},
             },
             required=["sheet_id", "values"],
+            synonyms=["таблиц", "sheets"],
         ),
         "create_spreadsheet": Action(
             name="create_spreadsheet",

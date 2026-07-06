@@ -10,7 +10,12 @@ Processes — BOS §5: Work, который никогда не завершае
 (done/skipped) — тот же дедуп-приём, что gap.replan(). Время суток (07:00) —
 следующий шаг, когда появится реальная потребность в точном расписании.
 
-Хранилище: data/tenants/<tid>/processes.json — список записей.
+Хранилище: data/tenants/<tid>/processes.json — {"items": [...]} (тот же формат,
+что objectives.json). Раньше здесь был голый список `[...]`, а не `{"items": []}`,
+как у objectives.json/plan.json — расхождение формы одинаковых по духу сущностей
+без единого контракта: рефакторинг, трогающий оба модуля по аналогии, мог тихо
+всё сломать (`list.get()` не существует, но копипаста кода чтения одного файла
+для другого падает не сразу, а только на реальных данных тенанта в проде).
 """
 
 import time
@@ -23,11 +28,14 @@ CADENCES = ("every_cycle",)
 
 
 def _all() -> list[dict]:
-    return ctx.read_json(_FILE, [])
+    d = ctx.read_json(_FILE, {"items": []})
+    if isinstance(d, list):
+        return d  # старый формат (голый список) — читаем как есть, без падения
+    return list(d.get("items", []))
 
 
 def _save(items: list[dict]) -> None:
-    ctx.write_json(_FILE, items)
+    ctx.write_json(_FILE, {"items": items})
 
 
 def create(title: str, role: str, instruction: str, cadence: str = "every_cycle") -> dict:

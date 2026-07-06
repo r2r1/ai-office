@@ -248,7 +248,12 @@ function FeedTab() {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+    // aria-live: лента — центральная механика продукта («что офис только что
+    // сделал сам») и раньше не объявлялась скринридером вообще (найдено при
+    // аудите доступности) — aria-atomic=false озвучивает только НОВЫЕ записи,
+    // не всю ленту целиком при каждом обновлении.
+    <div role="log" aria-live="polite" aria-atomic="false"
+      style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
       {feed.length === 0 && (
         <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", paddingTop: 40 }}>
           События появятся после старта
