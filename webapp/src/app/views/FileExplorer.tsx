@@ -47,14 +47,28 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
   const [runOut, setRunOut] = useState<string>("")
   const [running, setRunning] = useState(false)
 
-  const tree = useMemo(() => buildTree(files), [files])
+  // Фильтр по проекту (параллельные Work, Фаза 3: у каждого проекта — своя
+  // подпапка workspace/<workspace_dir>/, см. src/office/workspace.py). Без
+  // фильтра дерево мешает файлы ВСЕХ проектов разом — читаемо, только когда
+  // проект один; с несколькими параллельными это быстро становится кашей.
+  const [projects, setProjects] = useState<{ id: string; title: string; workspace_dir?: string }[]>([])
+  const [projectFilter, setProjectFilter] = useState<string>("")
+  useEffect(() => { api.projects().then(d => setProjects(d.projects || [])) }, [])
+  const scoped = projects.filter(p => p.workspace_dir)
+  const filteredFiles = useMemo(() => {
+    if (!projectFilter) return files
+    const prefix = projectFilter + "/"
+    return files.filter(f => f.path.startsWith(prefix))
+  }, [files, projectFilter])
 
-  // авто-раскрываем папки верхнего уровня при первой загрузке
+  const tree = useMemo(() => buildTree(filteredFiles), [filteredFiles])
+
+  // авто-раскрываем папки верхнего уровня при первой загрузке/смене фильтра
   useEffect(() => {
-    if (files.length && expanded.size === 0) {
+    if (filteredFiles.length) {
       setExpanded(new Set(tree.children.filter(c => c.dir).map(c => c.path)))
     }
-  }, [files.length]) // eslint-disable-line
+  }, [filteredFiles.length, projectFilter]) // eslint-disable-line
 
   async function openFile(path: string) {
     setSelected(path); setRunOut(""); setMode(isHtml(path) || isMd(path) ? "preview" : "code")
@@ -93,9 +107,24 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* дерево папок */}
-        <div style={{ width: 250, flexShrink: 0, borderRight: "1px solid var(--hairline)", overflowY: "auto", padding: "10px 0" }}>
-          <TreeView nodes={tree.children} depth={0} selected={selected} expanded={expanded}
-            onToggle={toggle} onOpen={openFile} />
+        <div style={{ width: 250, flexShrink: 0, borderRight: "1px solid var(--hairline)", overflowY: "auto", padding: "10px 0", display: "flex", flexDirection: "column" }}>
+          {/* Фильтр по проекту — только если реально есть что фильтровать
+              (2+ проекта со своей подпапкой, Фаза 3); один проект — дерево и
+              так читаемо целиком, лишний селектор не нужен. */}
+          {scoped.length > 1 && (
+            <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}
+              style={{
+                margin: "0 12px 8px", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+                borderRadius: "var(--radius-sm)", padding: "6px 8px", color: "var(--text)", fontSize: 11.5, outline: "none",
+              }}>
+              <option value="">Все проекты</option>
+              {scoped.map(p => <option key={p.id} value={p.workspace_dir}>{p.title}</option>)}
+            </select>
+          )}
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            <TreeView nodes={tree.children} depth={0} selected={selected} expanded={expanded}
+              onToggle={toggle} onOpen={openFile} />
+          </div>
         </div>
 
         {/* правая часть: тулбар + код/превью */}
