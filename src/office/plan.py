@@ -163,13 +163,20 @@ def set_tasks(tasks: list[dict]) -> None:
 
 
 def add_task(title: str, role: str, done_criterion: str = "",
-             requested_by: str = "", deps: list[str] | None = None, parent: str = "") -> dict:
+             requested_by: str = "", deps: list[str] | None = None, parent: str = "",
+             project_id: str = "") -> dict:
     """
     Добавляет задачу в доску (например, поставленную КОЛЛЕГОЙ-агентом другому отделу/роли).
     Возвращает созданную задачу. Видна в to-do списке исполнителя и у его лидера.
 
     `parent` — id другой задачи (BOS §5/§1: вложенность произвольной глубины через
     parent_id вместо отдельной сущности Subtask). Пусто — задача верхнего уровня.
+
+    `project_id` — явная принадлежность проекту (см. параллельные Work,
+    projects.active_list()). Пусто — прежнее поведение: задача уходит в
+    ensure_active() (единственный/первый активный проект). Явно указывать
+    нужно там, где задача рождается ДЛЯ конкретного нового Work (например,
+    принятая инициатива), а не для того, что уже само собой активно.
     """
     d = _data()
     tasks = d.get("tasks", [])
@@ -192,7 +199,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "deps": [x for x in (deps or []) if x],
         "done_criterion": (done_criterion or "").strip()[:200],
         "status": "pending", "assignee": "", "requested_by": requested_by,
-        "project": projects.ensure_active()["id"],
+        "project": project_id or projects.ensure_active()["id"],
         "parent": (parent or "").strip(),
         "artifacts": _derive_artifacts(role, title),
         "required_capabilities": _required_caps({"title": title}),

@@ -19,6 +19,8 @@ import time
 from src.saas import context as ctx
 
 _FILE = "projects.json"
+_LIMIT_FILE = "project_limits.json"
+DEFAULT_MAX_ACTIVE = 3
 
 
 def _data() -> dict:
@@ -27,6 +29,17 @@ def _data() -> dict:
 
 def _save(d: dict) -> None:
     ctx.write_json(_FILE, d)
+
+
+def get_limit() -> int:
+    """Сколько проектов офис ведёт ОДНОВРЕМЕННО (параллельные Work, не история).
+    По умолчанию 3 — настраивается владельцем (см. set_limit), не хардкод без выхода."""
+    d = ctx.read_json(_LIMIT_FILE, {})
+    return max(1, int(d.get("max_active", DEFAULT_MAX_ACTIVE)))
+
+
+def set_limit(n: int) -> None:
+    ctx.write_json(_LIMIT_FILE, {"max_active": max(1, int(n))})
 
 
 def all_projects() -> list[dict]:
@@ -41,16 +54,48 @@ def get(pid: str) -> dict | None:
 
 
 def active() -> dict | None:
-    """Текущий активный проект (v1 — максимум один)."""
-    for p in all_projects():
-        if p.get("status") == "active":
-            return dict(p)
-    return None
+    """Первый активный проект — для звонков, которым нужен ОДИН проект "по умолчанию"
+    (site/task без явного project_id и т.п.). При нескольких активных это не
+    "самый важный", а самый старый из активных — вызывающему, которому важен
+    конкретный проект, стоит передавать project_id явно, а не полагаться на active()."""
+    return next((dict(p) for p in all_projects() if p.get("status") == "active"), None)
+
+
+def active_list() -> list[dict]:
+    """ВСЕ проекты в активной работе одновременно (v2: параллельные Work,
+    см. BOS §10 — «параллельные проекты после выноса живости из памяти
+    процесса»). Используется планировщиком (planning_engine), а не только
+    самый первый."""
+    return [dict(p) for p in all_projects() if p.get("status") == "active"]
+
+
+def queued_list() -> list[dict]:
+    return [dict(p) for p in all_projects() if p.get("status") == "queued"]
+
+
+def _promote_queued(items: list[dict]) -> None:
+    """Если после закрытия проекта освободился слот — активирует самый старый
+    проект из очереди (FIFO), а не оставляет его ждать следующего события."""
+    limit = get_limit()
+    n_active = sum(1 for p in items if p.get("status") == "active")
+    queued = sorted((p for p in items if p.get("status") == "queued"),
+                     key=lambda p: p.get("created_ts", 0))
+    for p in queued:
+        if n_active >= limit:
+            break
+        p["status"] = "active"
+        n_active += 1
 
 
 def create(title: str, goal: str = "", type: str = "project") -> dict:
-    """Создаёт Work и делает его активным (прежний активный закрывается как done —
-    v1 не ведёт два активных Work параллельно, см. BOS §5/§14 п.6).
+    """Создаёт Work. Если активных проектов меньше лимита (get_limit(), по
+    умолчанию 3) — становится активным сразу; иначе встаёт в очередь (`queued`)
+    и активируется автоматически, когда освободится слот (см. close()).
+
+    Раньше здесь ЛЮБОЙ новый проект принудительно закрывал текущий активный
+    (v1: "один Work одновременно") — вторая принятая инициатива молча убивала
+    первую, даже недоделанную. Теперь это ограничение явное (лимит), а не
+    побочный эффект создания нового проекта.
 
     `type` — project (разовое, есть конец) | process (никогда не завершается сам,
     v1 пока не реализует Instance-поток — заводится как задел на будущее) |
@@ -58,16 +103,14 @@ def create(title: str, goal: str = "", type: str = "project") -> dict:
     как project; поле подготавливает данные к разделению, не меняя раннее поведение."""
     d = _data()
     items = d.get("items", [])
-    for p in items:
-        if p.get("status") == "active":
-            p["status"] = "done"
-            p["closed_ts"] = time.time()
+    n_active = sum(1 for p in items if p.get("status") == "active")
+    status = "active" if n_active < get_limit() else "queued"
     pid = f"p{len(items) + 1}_{int(time.time()) % 100000}"
     proj = {
         "id": pid, "title": (title or "Проект").strip()[:160],
         "goal": (goal or "").strip()[:300],
         "type": type if type in ("project", "process", "initiative") else "project",
-        "status": "active",
+        "status": status,
         "created_ts": time.time(), "closed_ts": None,
         "left_behind": {},   # что проект оставил после себя (заполняется при закрытии)
     }
@@ -78,8 +121,14 @@ def create(title: str, goal: str = "", type: str = "project") -> dict:
 
 
 def ensure_active() -> dict:
-    """Активный проект или новый из цели брифа. Единая точка: задачи всегда
-    принадлежат какому-то проекту."""
+    """Активный проект (если слот занят — из очереди, если очередь пуста — новый
+    из цели брифа). Единая точка: задачи всегда принадлежат какому-то проекту."""
+    cur = active()
+    if cur:
+        return cur
+    d = _data()
+    _promote_queued(d.get("items", []))
+    _save(d)
     cur = active()
     if cur:
         return cur
@@ -113,7 +162,11 @@ def close(pid: str = "", note: str = "") -> dict | None:
             break
     if not target:
         return None
-    prog = plan.progress()
+    # progress(project_id) — раньше вызывался без project_id (progress()
+    # компании целиком). Пока Work был один это давало тот же результат, но
+    # при параллельных проектах закрытие проекта A показало бы прогресс ПО
+    # ВСЕМ активным проектам, а не только по A.
+    prog = plan.progress(target["id"])
     target["status"] = "done"
     target["closed_ts"] = time.time()
     target["note"] = (note or "")[:300]
@@ -123,25 +176,31 @@ def close(pid: str = "", note: str = "") -> dict | None:
         "sites": [s.get("slug", "") for s in sites.all_sites()],
         "leads_count": leads.count(),
     }
+    _promote_queued(d.get("items", []))
     _save(d)
     world.save_snapshot(f"project_closed:{target['id']}")
     return dict(target)
 
 
 def context_block() -> str:
-    """Блок проектов для промпта CEO: активный + краткая история."""
+    """Блок проектов для промпта CEO: активные + очередь + краткая история."""
     items = all_projects()
     if not items:
         return ""
+    queued = queued_list()
     lines = []
     for p in items[-5:]:
-        mark = "🟢" if p.get("status") == "active" else "✅"
+        mark = "🟢" if p.get("status") == "active" else "⏳" if p.get("status") == "queued" else "✅"
         left = p.get("left_behind") or {}
         tail = (f" (сдано {left.get('tasks_done', 0)} задач, лидов: {left.get('leads_count', 0)})"
                 if p.get("status") == "done" and left else "")
         lines.append(f"{mark} {p['title']}{tail}")
-    return "\n=== ПРОЕКТЫ КОМПАНИИ ===\n" + "\n".join(lines) + "\n"
+    header = f"\n=== ПРОЕКТЫ КОМПАНИИ (лимит одновременных: {get_limit()}) ===\n"
+    if queued:
+        header += f"⏳ В очереди на свободный слот: {len(queued)}\n"
+    return header + "\n".join(lines) + "\n"
 
 
 def reset() -> None:
     ctx.delete_file(_FILE)
+    ctx.delete_file(_LIMIT_FILE)

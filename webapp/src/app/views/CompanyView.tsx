@@ -592,12 +592,24 @@ function LimitsTab() {
   const [total, setTotal] = useState("")
   const [daily, setDaily] = useState("")
   const [saved, setSaved] = useState(false)
+  const [maxActive, setMaxActive] = useState("3")
+  const [activeCount, setActiveCount] = useState(0)
+  const [projSaved, setProjSaved] = useState(false)
 
   useEffect(() => {
     api.get("/api/limits").then(l => {
       if (l) { setLim(l); setTotal(String(l.total_usd || "")); setDaily(String(l.daily_usd || "")) }
     })
+    api.projects().then(d => { setMaxActive(String(d.max_active ?? 3)); setActiveCount(d.active_count ?? 0) })
   }, [])
+
+  function saveProjectLimit() {
+    const n = Math.max(1, parseInt(maxActive) || 3)
+    api.setProjectLimit(n).then(r => {
+      if (r) setMaxActive(String(r.max_active))
+      setProjSaved(true); setTimeout(() => setProjSaved(false), 1600)
+    })
+  }
 
   function save() {
     api.post("/api/limits", { total_usd: parseFloat(total) || 0, daily_usd: parseFloat(daily) || 0 }).then(l => {
@@ -610,6 +622,29 @@ function LimitsTab() {
 
   return (
     <ViewBody style={{ maxWidth: 560 }}>
+      <SectionLabel>Параллельные проекты</SectionLabel>
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 14 }}>
+          Сколько проектов офис ведёт ОДНОВРЕМЕННО. Сверх лимита — новые встают в очередь
+          и стартуют сами, когда освобождается слот.
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", width: 100 }}>Активно сейчас</span>
+          <span className="mono" style={{ fontSize: 13, color: "var(--text)" }}>{activeCount} / {maxActive}</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", width: 100 }}>Лимит</span>
+          <input value={maxActive} onChange={e => setMaxActive(e.target.value)} type="number" min="1" step="1"
+            onKeyDown={e => e.key === "Enter" && saveProjectLimit()}
+            style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+              borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
+          <button onClick={saveProjectLimit}
+            style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "0 18px",
+              background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13 }}>Сохранить</button>
+        </div>
+        {projSaved && <div style={{ fontSize: 11, color: "var(--success)", marginTop: 8 }}>сохранено ✓</div>}
+      </Card>
+
       <SectionLabel>Бюджетный лимит</SectionLabel>
       <Card style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 14 }}>

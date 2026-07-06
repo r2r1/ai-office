@@ -115,7 +115,9 @@ export const api = {
     postJSON<any>("/api/objectives", { title, desired, measured_by }, null),
   updateObjective: (id: string, patch: Record<string, unknown>) =>
     postJSON<any>("/api/objectives", { id, ...patch }, null),
-  projects: () => getJSON<{ projects: any[]; active: any }>("/api/projects", { projects: [], active: null }),
+  projects: () => getJSON<{ projects: any[]; active: any; active_count: number; max_active: number }>(
+    "/api/projects", { projects: [], active: null, active_count: 0, max_active: 3 }),
+  setProjectLimit: (max_active: number) => postJSON<any>("/api/projects/limit", { max_active }, null),
   initiatives: () => getJSON<{ pending: any[]; researching: any[]; pending_count: number; total: number }>("/api/initiatives", { pending: [], researching: [], pending_count: 0, total: 0 }),
   proposeInitiative: (title: string, idea: string) => postJSON<any>("/api/initiatives", { title, idea }, null),
   acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null),

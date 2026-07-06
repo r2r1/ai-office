@@ -1784,10 +1784,24 @@ async def get_intents():
 
 @app.get("/api/projects")
 async def get_projects():
-    """Проекты компании: активный + история с «что оставил после себя»."""
+    """Проекты компании: активные (может быть несколько параллельно, см.
+    project_limits) + очередь + история с «что оставил после себя»."""
     from src.office import projects as projects_module
     return {"projects": projects_module.all_projects(),
-            "active": projects_module.active()}
+            "active": projects_module.active(),
+            "active_count": len(projects_module.active_list()),
+            "max_active": projects_module.get_limit()}
+
+
+@app.post("/api/projects/limit")
+async def set_project_limit(request: Request):
+    """Сколько проектов офис ведёт ОДНОВРЕМЕННО — владелец настраивает сам
+    (по умолчанию 3, см. projects.DEFAULT_MAX_ACTIVE)."""
+    from src.office import projects as projects_module
+    body = await request.json()
+    n = int(body.get("max_active", projects_module.DEFAULT_MAX_ACTIVE))
+    projects_module.set_limit(n)
+    return {"ok": True, "max_active": projects_module.get_limit()}
 
 
 @app.get("/api/processes")
@@ -1986,14 +2000,16 @@ async def propose_initiative(request: Request):
 
 @app.post("/api/initiative/{iid}/accept")
 async def accept_initiative(iid: str, request: Request):
-    """Принятая инициатива — BOS §5: decision spawn_project. Если сейчас нет
-    активного проекта или он пуст (не поглощает чужую работу), заводим/переименовываем
-    Work под эту инициативу — тот же приём, что gap.replan() (см. src/office/gap.py):
-    иначе задачи молча оседали бы в общем контейнере без владельца-структуры."""
+    """Принятая инициатива — BOS §5: decision spawn_project. Каждая принятая
+    инициатива — СВОЙ Work, а не дозапись в первый попавшийся активный проект
+    (раньше вторая инициатива молча растворялась в задачах первой, если та
+    была активна и непуста). Если слоты параллельных проектов заняты
+    (projects.get_limit(), по умолчанию 3) — новый Work встаёт в очередь
+    (status="queued") и активируется сам, когда что-то закроется."""
     from src.office import projects as projects_module
     initiative = next((i for i in initiatives_module.pending() if i["id"] == iid), None)
-    proj_before = projects_module.active()
-    was_empty = (not proj_before) or not plan_module.for_project(proj_before["id"])
+    proj = projects_module.create((initiative or {}).get("title", ""),
+                                   (initiative or {}).get("rationale", ""))
 
     tasks = initiatives_module.accept(iid)
     added = 0
@@ -2008,7 +2024,8 @@ async def accept_initiative(iid: str, request: Request):
         role = (t.get("role") or "").strip()
         title = (t.get("title") or "").strip()
         if role and title:
-            real = plan_module.add_task(title, role, t.get("done_criterion", ""), requested_by="user")
+            real = plan_module.add_task(title, role, t.get("done_criterion", ""),
+                                        requested_by="user", project_id=proj["id"])
             added += 1
             temp_id = (t.get("id") or "").strip()
             if temp_id:
@@ -2021,10 +2038,7 @@ async def accept_initiative(iid: str, request: Request):
         if resolved:
             plan_module.set_deps(real_id, resolved)
 
-    proj_after = projects_module.active() if added else None
-    if added and was_empty and initiative and proj_after:
-        projects_module.rename(proj_after["id"], initiative["title"])
-        proj_after = projects_module.get(proj_after["id"])
+    proj_after = projects_module.get(proj["id"]) if added else proj
 
     office_loop.wake_tenant()
     return {

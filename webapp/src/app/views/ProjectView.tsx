@@ -266,7 +266,11 @@ function ProjectsOnlyTab({ projects, expanded, details, onToggle }: {
   projects: any[]; expanded: string; details: Record<string, any>; onToggle: (id: string) => void
 }) {
   const active = projects.filter((p: any) => p.status === "active")
-  const closed = [...projects.filter((p: any) => p.status !== "active")].reverse()
+  // "queued" — параллельный Work, ждущий свободного слота (см. project_limits) —
+  // раньше падал в ту же корзину, что и "закрытые", и выглядел завершённым,
+  // хотя ещё не начинался.
+  const queued = [...projects.filter((p: any) => p.status === "queued")].reverse()
+  const closed = [...projects.filter((p: any) => p.status !== "active" && p.status !== "queued")].reverse()
 
   if (projects.length === 0) return (
     <ViewBody>
@@ -279,6 +283,10 @@ function ProjectsOnlyTab({ projects, expanded, details, onToggle }: {
     <ViewBody>
       <div style={{ display: "grid", gap: 12 }}>
         {active.map((p: any) => (
+          <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
+            detail={details[p.id]} onToggle={() => onToggle(p.id)} />
+        ))}
+        {queued.map((p: any) => (
           <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
             detail={details[p.id]} onToggle={() => onToggle(p.id)} />
         ))}
@@ -557,6 +565,7 @@ function ProjectAccordionItem({ project: p, isOpen, detail, onToggle }: {
 }) {
   const lb = p.left_behind || {}
   const isActive = p.status === "active"
+  const isQueued = p.status === "queued"
   const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
 
   return (
@@ -565,7 +574,9 @@ function ProjectAccordionItem({ project: p, isOpen, detail, onToggle }: {
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
             <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            {isActive ? <Pill accent>Активный</Pill> : <Pill color="var(--success)">Закрыт</Pill>}
+            {isActive ? <Pill accent>Активный</Pill>
+              : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
+              : <Pill color="var(--success)">Закрыт</Pill>}
           </div>
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
           {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
