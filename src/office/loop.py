@@ -115,6 +115,26 @@ def _engagement_complete() -> bool:
     return complete
 
 
+def _engagement_stuck() -> bool:
+    """План сгенерирован, НЕ завершён, но офис не продвигается: есть заблокированная
+    задача (3 неудачные попытки, plan.block()) и ни одна задача не выполняется прямо
+    сейчас — то есть реального прогресса ждать неоткуда без вмешательства владельца.
+
+    Раньше Gap-driven replanning (gap.replan()) вызывался ТОЛЬКО внутри
+    `_engagement_complete()` — если план не мог завершиться (одна застрявшая
+    задача), Gap Analysis НИКОГДА не срабатывал, даже когда измеримая бизнес-цель
+    («10 заявок/неделю») давно и очевидно не достигнута (docs/prompts/
+    system-audit-prompt.md, «Бизнес-логика: находки», [ВАЖНО] loop.py:280-302).
+    Это не отменяет полноценное завершение плана — просто даёт Gap Analysis
+    отдельный, независимый повод сработать, пока план застрял."""
+    if not plan.is_generated():
+        return False
+    tasks = plan.all_tasks()
+    if not any(t.get("status") == "blocked" for t in tasks):
+        return False
+    return not any(t.get("status") == "in_progress" for t in tasks)
+
+
 async def _set_progress_note(note: str, publish) -> None:
     payload = milestones.progress_payload()
     payload["note"] = note
@@ -350,6 +370,22 @@ async def _run_office(tid: str) -> None:
                                        "прогон нельзя, поэтому двигаемся итерациями."})
             await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
             continue
+        # Gap Analysis НЕ должен ждать полного завершения плана (см. _engagement_stuck
+        # докстринг) — если план застрял на заблокированной задаче и больше ничего не
+        # выполняется, всё равно проверяем незакрытые измеримые цели и создаём под них
+        # работу. gap.replan() сам дедупит по objective (requested_by=`gap:<oid>`), так
+        # что повторный вызов на застрявшем плане безопасен — не спамит.
+        elif _engagement_stuck():
+            from src.office import gap as gap_mod
+            gap_tasks = gap_mod.replan()
+            if gap_tasks:
+                for gt in gap_tasks:
+                    await publish({"type": "system",
+                                   "text": f"🎯 План застрял на заблокированной задаче, но цель ещё "
+                                           f"не достигнута — офис ставит задачу под разрыв: "
+                                           f"{gt['title'][:70]}"})
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
         # Этапы (вехи) — производный ИНДИКАТОР, а не отдельный критерий готовности.
         # Единственный источник правды о завершении — доска задач (_engagement_complete).
         # Раньше этот блок мог объявить «все этапы пройдены» и усыпить офис, пока в плане

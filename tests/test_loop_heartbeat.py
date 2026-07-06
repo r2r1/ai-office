@@ -59,6 +59,70 @@ def test_forget_tenant_clears_heartbeat_state():
     assert "hb_unit_forget" not in loop._last_blocked_heartbeat
 
 
+# ── _engagement_stuck: Gap Analysis не должен ждать полного завершения плана ──
+# (docs/prompts/system-audit-prompt.md, «Путь до идеального SaaS», Шаг 2 —
+# раньше gap.replan() вызывался ТОЛЬКО внутри _engagement_complete(), и один
+# застрявший blocked-таск останавливал Gap-driven replanning навсегда.)
+
+def test_not_stuck_when_no_plan_generated():
+    ctx.set_tenant("stuck_unit_no_plan")
+    context.write_json("plan.json", {"generated": False, "tasks": []})
+    assert not loop._engagement_stuck()
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_not_stuck_when_no_blocked_tasks():
+    ctx.set_tenant("stuck_unit_no_blocked")
+    context.write_json("plan.json", {"generated": True, "tasks": [
+        {"id": "t1", "status": "pending"},
+        {"id": "t2", "status": "done"},
+    ]})
+    assert not loop._engagement_stuck()
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_not_stuck_when_something_still_in_progress():
+    """Заблокированная задача есть, но офис ещё что-то реально делает — не считаем
+    план застрявшим, чтобы не подсовывать gap-задачу поверх легитимной работы."""
+    ctx.set_tenant("stuck_unit_active_elsewhere")
+    context.write_json("plan.json", {"generated": True, "tasks": [
+        {"id": "t1", "status": "blocked"},
+        {"id": "t2", "status": "in_progress"},
+    ]})
+    assert not loop._engagement_stuck()
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_stuck_when_blocked_and_nothing_in_progress():
+    ctx.set_tenant("stuck_unit_real")
+    context.write_json("plan.json", {"generated": True, "tasks": [
+        {"id": "t1", "status": "blocked"},
+        {"id": "t2", "status": "pending"},
+    ]})
+    assert loop._engagement_stuck()
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_stuck_plan_still_triggers_gap_replan():
+    """Интеграционная проверка сквозь границу loop/gap: застрявший план с
+    незакрытой измеримой целью реально порождает задачу через gap.replan() —
+    не просто флаг _engagement_stuck()==True без последствий."""
+    from src.office import gap, objectives
+    ctx.set_tenant("stuck_unit_gap_integration")
+    ctx.wipe()
+    ctx.set_tenant("stuck_unit_gap_integration")
+    objectives.add("Заявки в неделю", desired="10 заявок/неделю",
+                   measured_by="leads.count() за 7 дней")
+    context.write_json("plan.json", {"generated": True, "tasks": [
+        {"id": "t1", "status": "blocked", "role": "developer"},
+    ]})
+    assert loop._engagement_stuck()
+    created = gap.replan()
+    assert created, "gap.replan() должен создать задачу под незакрытый разрыв"
+    assert any(t.get("role") == "marketer" for t in created)
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):
