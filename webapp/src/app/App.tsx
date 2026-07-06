@@ -92,6 +92,13 @@ export default function App() {
   const [officePaused, setOfficePaused] = useState(false)
   // Онбординг показан локально пока бэкенд не подтвердил готовность брифа
   const [onboarded, setOnboarded] = useState(false)
+  // Минимальный онбординг (BOS §5) отправляет бриф СРАЗУ (brief.set_brief
+  // происходит в начале BOOTSTRAP, чтобы офис мог исследовать в фоне, пока
+  // клиент смотрит "Офис изучает…" → результат → интеграции) — ready
+  // становится true задолго до onDone(). Без этого флага гейт ниже терял
+  // OnboardingFlow из-под ног ровно в момент, когда должны были появиться
+  // экраны результата (реальный баг, пойман на живом прогоне).
+  const [onboardingStarted, setOnboardingStarted] = useState(false)
   // Глубокая ссылка «открыть конкретный проект» — например, после принятия
   // инициативы (Сводка), чтобы не заставлять искать его самому в списке Работы.
   const [focusProjectId, setFocusProjectId] = useState<string | undefined>()
@@ -172,8 +179,11 @@ export default function App() {
   const gap = isMobile ? 8 : 12
 
   // Онбординг: офис ещё не получил бриф → ведём клиента через CEO-интервью.
-  if (ready === false && !onboarded) {
-    return <OnboardingFlow onDone={() => { setOnboarded(true); setView("office") }} />
+  // onboardingStarted держит поток на экране, даже когда ready успел стать
+  // true раньше, чем клиент дошёл до "Готово" (см. комментарий у объявления).
+  if ((ready === false || onboardingStarted) && !onboarded) {
+    return <OnboardingFlow onStart={() => setOnboardingStarted(true)}
+      onDone={() => { setOnboarded(true); setView("office") }} />
   }
 
   return (

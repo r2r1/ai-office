@@ -16,10 +16,16 @@ def _all() -> dict:
     return ctx.read_json(_FILE, {})
 
 
-def post(agent_id: str, sender: str, text: str, kind: str = "msg", question_id: str = "") -> dict:
+def post(agent_id: str, sender: str, text: str, kind: str = "msg", question_id: str = "",
+         redirect_agent_id: str = "") -> dict:
+    """`redirect_agent_id` — заполняется для kind="redirect": вопрос сотрудника ушёл
+    руководителю (лидеру отдела/CEO), фронт рисует кнопку «Открыть чат с ...» вместо
+    ожидания ответа в ЭТОМ треде (BOS: эскалация вопросов по иерархии, не пользователю
+    напрямую от каждого рядового сотрудника)."""
     threads = _all()
     msg = {"id": uuid.uuid4().hex[:8], "from": sender, "text": (text or "").strip(),
-           "ts": time.time(), "kind": kind, "question_id": question_id, "answered": False}
+           "ts": time.time(), "kind": kind, "question_id": question_id, "answered": False,
+           "redirect_agent_id": redirect_agent_id}
     thread = threads.setdefault(agent_id, [])
     thread.append(msg)
     if len(thread) > MAX_PER_THREAD:

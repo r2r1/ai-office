@@ -708,7 +708,7 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
           <SectionLabel style={{ marginBottom: 8 }}>Артефакты · {sites.length + deliverables.length}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {sites.map((s: any) => (
-              <a key={s.slug} href={`/site/${s.slug}`} target="_blank" rel="noreferrer"
+              <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
                 style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
                 🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11 }}>↗</span>
               </a>

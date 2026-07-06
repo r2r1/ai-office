@@ -188,6 +188,26 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
           </>
         )}
 
+        {/* Опубликованные сайты — раньше их можно было найти только через
+            глубокую навигацию в файловом хранилище проекта; здесь видно
+            сразу, сколько их и куда каждый ведёт. */}
+        {state.sites.length > 0 && (
+          <>
+            <SectionLabel>🌐 Опубликованные сайты · {state.sites.length}</SectionLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
+              {state.sites.map((s: any) => (
+                <Card key={s.slug} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px" }}>
+                  <span style={{ fontSize: 12.5, color: "var(--text)" }}>{s.title || s.slug}</span>
+                  <a href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                    style={{ fontSize: 12, color: "var(--mercury-a)", textDecoration: "none", display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                    Открыть <span style={{ fontSize: 11 }}>↗</span>
+                  </a>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Метрики */}
         <SectionLabel>Ключевые метрики</SectionLabel>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>

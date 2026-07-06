@@ -1913,12 +1913,14 @@ async def get_project_detail(project_id: str):
     if not proj:
         raise HTTPException(status_code=404, detail="Проект не найден")
     tasks = plan_module.for_project(project_id)
+    tid = saas_context.get_tenant()
+    proj_sites = [{**s, "url": f"/site/{tid}/{s['slug']}"} for s in sites_module.for_project(project_id)]
     return {
         "project": proj,
         "tasks": tasks,
         "progress": plan_module.progress(project_id),
         "milestones": milestones.progress_payload(project_id),
-        "sites": sites_module.for_project(project_id),
+        "sites": proj_sites,
         "deliverables": state.deliverables_for_project(project_id),
     }
 

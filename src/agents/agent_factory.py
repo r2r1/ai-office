@@ -101,6 +101,16 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             except Exception:
                 pass
 
+        # Лидеры отделов (и CEO) спрашивают клиента НАПРЯМУЮ (ask_user) — они и
+        # есть решающий узел иерархии. Рядовые сотрудники и штабные роли
+        # (researcher/strategist/architect/hr) эскалируют вопрос СВОЕМУ
+        # руководителю (ask_leader) — тот либо отвечает сам, либо передаёт
+        # дальше (см. comms_tool_handlers._handle_ask_leader). Не даём одному
+        # агенту оба инструмента — иначе модель иногда просто выбирает более
+        # короткий путь (ask_user) в обход иерархии.
+        from src.office import org as org_module
+        _ask_tool = _ts.ASK_USER_TOOL if role in org_module.LEAD_ROLES or role == "orchestrator" else _ts.ASK_LEADER_TOOL
+
         result = await llm.run_agent(
             system=system,
             user=task,
@@ -112,7 +122,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             on_activity=_touch_liveness,
-            extra_tools=[_ts.REQUEST_RESEARCH_TOOL, _ts.ASK_USER_TOOL, _ts.ASK_COLLEAGUE_TOOL,
+            extra_tools=[_ts.REQUEST_RESEARCH_TOOL, _ask_tool, _ts.ASK_COLLEAGUE_TOOL,
                          _ts.RAISE_EVENT_TOOL, _ts.DELEGATE_TASK_TOOL, _ts.GET_CONNECTION_TOOL,
                          _ts.READ_OFFICE_CHAT_TOOL,
                          _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,

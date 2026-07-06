@@ -46,7 +46,16 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [projectTitles, setProjectTitles] = useState<Record<string, string>>({})
   const feedRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    api.projects().then(d => {
+      const map: Record<string, string> = {}
+      for (const p of d.projects || []) map[p.id] = p.title
+      setProjectTitles(map)
+    })
+  }, [])
 
   // pending — оптимистично отправленные сообщения, ещё не подтверждённые сервером.
   // Держим их отдельно, чтобы фоновый reload (по событиям офиса) не стирал их.
@@ -110,6 +119,24 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
     })
   }, [agents, unread.byAgent, threads])
 
+  // Разные проекты держат ОДНОРОЛЕВЫХ сотрудников (developer_p1_..., developer_p2_...)
+  // одновременно — без папок по проекту список превращается в неразличимых "Разработчик,
+  // Разработчик, Разработчик". "" — штаб/лидеры, общие на всю компанию (без проекта).
+  const groupedByProject = useMemo(() => {
+    const groups = new Map<string, any[]>()
+    for (const a of agentsSorted) {
+      const pid = a.projectId || ""
+      if (!groups.has(pid)) groups.set(pid, [])
+      groups.get(pid)!.push(a)
+    }
+    // Штаб/лидеры (без проекта) — первой группой, дальше проекты по свежести переписки.
+    return [...groups.entries()].sort(([pa], [pb]) => {
+      if (!pa) return -1
+      if (!pb) return 1
+      return 0
+    })
+  }, [agentsSorted])
+
   // Превью последнего сообщения треда (а не служебной активности агента).
   function rowSub(a: any): { text: string; accent: boolean } {
     const t = threads[a.id]
@@ -140,21 +167,24 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
               <Row active={active === "office"} onClick={() => setActive("office")}
                 emoji="🏢" name="Общий чат" sub="Написать всей команде" />
 
-              {/* разделитель */}
-              {agents.length > 0 && (
-                <div className="mono" style={{ fontSize: 9, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "1.5px", padding: "12px 8px 6px" }}>
-                  Агенты
+              {/* группы: штаб/лидеры без папки, дальше — по одной папке на проект
+                  (иначе несколько project-scoped Разработчиков неразличимы в списке) */}
+              {groupedByProject.map(([pid, list]) => (
+                <div key={pid || "hq"}>
+                  <div className="mono" style={{ fontSize: 9, color: "var(--faint)", textTransform: "uppercase",
+                    letterSpacing: "1.5px", padding: "12px 8px 6px" }}>
+                    {pid ? `📁 ${projectTitles[pid] || "Проект"}` : "Штаб"}
+                  </div>
+                  {list.map(a => {
+                    const sub = rowSub(a)
+                    return (
+                      <Row key={a.id} active={active === a.id} onClick={() => setActive(a.id)}
+                        emoji={a.emoji} name={a.name} sub={sub.text} subAccent={sub.accent}
+                        dot={STATUS_COLOR[a.status]} unread={unread.byAgent[a.id] ?? 0} />
+                    )
+                  })}
                 </div>
-              )}
-
-              {agentsSorted.map(a => {
-                const sub = rowSub(a)
-                return (
-                  <Row key={a.id} active={active === a.id} onClick={() => setActive(a.id)}
-                    emoji={a.emoji} name={a.name} sub={sub.text} subAccent={sub.accent}
-                    dot={STATUS_COLOR[a.status]} unread={unread.byAgent[a.id] ?? 0} />
-                )
-              })}
+              ))}
             </div>
           </div>
         )}
@@ -191,6 +221,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
             {allMessages.map((m, i) => {
               const mine = m.from === "user"
               const isQuestion = m.kind === "question"
+              const isRedirect = m.kind === "redirect"
               return (
                 <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
                   {!mine && (
@@ -208,6 +239,16 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                     borderLeft: isQuestion ? "3px solid var(--mercury-a)" : undefined,
                   }}>
                     {m.text}
+                    {isRedirect && m.redirect_agent_id && (
+                      <div style={{ marginTop: 8 }}>
+                        <button onClick={() => setActive(m.redirect_agent_id)}
+                          style={{ fontSize: 11.5, padding: "6px 12px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+                            border: "1px solid rgba(255,172,46,0.4)", background: "rgba(255,172,46,0.1)", color: "var(--mercury-a)" }}>
+                          Открыть чат с {agentsMap[m.redirect_agent_id]?.name
+                            || (m.redirect_agent_id === "orchestrator_1" ? "CEO" : roleName(roleFromAgentId(m.redirect_agent_id)))} →
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {m.ts && (
                     <div style={{ fontSize: 9.5, color: "var(--faint)", marginTop: 4, textAlign: mine ? "right" : "left" }}>

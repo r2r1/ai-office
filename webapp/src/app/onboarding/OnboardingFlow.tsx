@@ -6,7 +6,13 @@ import { IntegCard } from "../views/ConnectionsView"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
-interface Props { onDone: () => void }
+interface Props {
+  onDone: () => void
+  /** Вызывается ДО отправки брифа — App.tsx держит поток на онбординге, даже
+   * если ready успеет стать true раньше, чем клиент дойдёт до onDone (см.
+   * комментарий у onboardingStarted в App.tsx). */
+  onStart: () => void
+}
 
 // Отделы, которые «рождаются» на финале (визуальное строительство).
 const BIRTH = [
@@ -26,7 +32,7 @@ const BIRTH = [
 // молча начинает работу за спиной клиента.
 type Phase = "input" | "analyzing" | "result" | "integrations" | "building"
 
-export function OnboardingFlow({ onDone }: Props) {
+export function OnboardingFlow({ onDone, onStart }: Props) {
   const [phase, setPhase] = useState<Phase>("input")
   const [text, setText] = useState("")
   const [url, setUrl] = useState("")
@@ -37,6 +43,9 @@ export function OnboardingFlow({ onDone }: Props) {
 
   async function start() {
     setBusy(true)
+    onStart()  // ДО await — App.tsx должен зафиксировать "мы в потоке" раньше,
+               // чем ready успеет стать true (brief.set_brief происходит в
+               // начале BOOTSTRAP, не в конце)
     await api.briefStart(text.trim(), url.trim()).catch(() => null)
     setBusy(false)
     setPhase("analyzing")

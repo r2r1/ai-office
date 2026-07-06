@@ -37,13 +37,43 @@ _PLATFORM_WORDS = {
     "wildberries", "wb", "ozon", "озон", "bitrix", "bitrix24",
 }
 
+# Общие факты о бизнесе клиента (не про конкретный проект) — такие вопросы, куда
+# бы их ни эскалировал руководитель, должны попадать к CEO, а не оседать в чате
+# случайного лидера отдела (иначе один и тот же номер телефона будет спрошен и
+# CTO, и CMO — по разу на каждый отдел).
+_GENERAL_FACT_KEYWORDS = {
+    "телефон", "номер", "phone", "почта", "email", "e-mail", "соцсет", "соцсети",
+    "social", "инстаграм", "instagram", "vk", "вконтакте", "адрес", "address",
+    "реквизит", "юрлицо", "ооо", "ип", "инн", "сайт компании", "бренд", "логотип",
+    "контакт", "contact", "whatsapp", "viber", "telegram-канал",
+}
+
+
+def _is_general_fact(question: str) -> bool:
+    q = question.lower()
+    words = set(re.split(r"[^a-zа-я0-9]+", q))
+    return bool(words & _GENERAL_FACT_KEYWORDS)
+
+
+# Отказ/отсутствие доступа — типичные ответы клиента, когда учётки просто нет
+# ("не надо", "нет", "потом") — их НЕЛЬЗЯ сохранять как подключение (баг:
+# такой ответ попадал в connections.save() со статусом «успешная интеграция»).
+_DECLINE_PATTERNS = re.compile(
+    r"^\s*(не\s*надо|не\s*нужно|нет|не\s+сейчас|потом|позже|пропусти(?:ть)?|"
+    r"skip|no|not\s+now|later|нету|не\s+знаю|не\s+будет|отказ)\s*[.!]*\s*$",
+    re.I,
+)
+
 
 def try_extract_connection(question: str, answer: str) -> dict | None:
     """
     Если вопрос звучит как запрос учётных данных — собираем структуру подключения.
     Возвращает dict для connections.save() или None если не похоже на учётные данные.
     """
-    if not answer.strip():
+    answer = answer.strip()
+    if not answer:
+        return None
+    if _DECLINE_PATTERNS.match(answer):
         return None
     q_lower = question.lower()
     words = set(q_lower.replace(":", " ").replace("?", " ").replace(".", " ").split())
@@ -98,25 +128,33 @@ def build(agent_id: str, role: str,
         )
 
     async def _handle_ask_user(args: dict) -> str:
-        import asyncio
         question_text = args.get("question", "")
+        return await _deliver_to_user(question_text, target_agent_id=agent_id)
+
+    async def _deliver_to_user(question_text: str, target_agent_id: str) -> str:
+        """Общий путь «вопрос дошёл до пользователя»: используется и напрямую
+        (_handle_ask_user — для CEO/лидеров), и как ХВОСТ эскалации ask_leader,
+        когда сам руководитель решил, что дальше него вопрос идти некуда, кроме
+        клиента. `target_agent_id` — ЧЕЙ это личный чат/вопрос с точки зрения
+        пользователя (не обязательно тот, кто изначально спросил)."""
+        import asyncio
         # Проверяем память — вдруг на этот вопрос уже отвечали
         cached = memory_module.lookup(question_text)
         if cached:
-            await publish({"type": "speech", "agent_id": agent_id,
+            await publish({"type": "speech", "agent_id": target_agent_id,
                            "text": f"💭 (из памяти): {question_text[:50]} → {cached[:60]}"})
             return cached
-        qid, fut = questions_module.ask(question_text, publish, agent_id=agent_id)
-        # Вопрос попадает в личный чат с агентом — пользователь ответит прямо там
-        threads_module.post(agent_id, "agent", question_text, kind="question", question_id=qid)
-        await publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
+        qid, fut = questions_module.ask(question_text, publish, agent_id=target_agent_id)
+        # Вопрос попадает в личный чат руководителя — пользователь ответит прямо там
+        threads_module.post(target_agent_id, "agent", question_text, kind="question", question_id=qid)
+        await publish({"type": "agent_message", "agent_id": target_agent_id, "from": "agent",
                        "kind": "question", "question_id": qid, "text": question_text})
         try:
             answer = await asyncio.wait_for(fut, timeout=300)  # 5 мин макс
         except asyncio.TimeoutError:
             questions_module.answer(qid, "")
             threads_module.mark_answered(qid)
-            await publish({"type": "question_answered", "question_id": qid, "agent_id": agent_id})
+            await publish({"type": "question_answered", "question_id": qid, "agent_id": target_agent_id})
             return "Пользователь не ответил — продолжай без этих данных."
         if answer:
             memory_module.remember(question_text, answer)
@@ -125,9 +163,9 @@ def build(agent_id: str, role: str,
             if conn:
                 saved = connections.save(conn)
                 await publish({"type": "connection_added", "connection": saved,
-                               "agent_id": agent_id,
+                               "agent_id": target_agent_id,
                                "text": f"🔌 Доступ '{saved['name']}' сохранён в подключения"})
-                await publish({"type": "speech", "agent_id": agent_id,
+                await publish({"type": "speech", "agent_id": target_agent_id,
                                "text": f"✅ Доступ к {saved['name']} сохранён — буду использовать в следующий раз автоматически"})
                 # Оповещаем всех агентов через общий канал
                 office_channel.post(
@@ -137,6 +175,72 @@ def build(agent_id: str, role: str,
                     f"не спрашивайте пользователя повторно."
                 )
         return answer
+
+    async def _handle_ask_leader(args: dict) -> str:
+        """Рядовой сотрудник не спрашивает клиента напрямую — вопрос идёт СВОЕМУ
+        руководителю (лидеру отдела; штабным ролям — сразу CEO, у них manager
+        уже 'orchestrator_1', см. registry.AgentRecord.manager). Руководитель либо
+        отвечает сам (по своему контексту/памяти отдела), либо, если решение
+        реально за клиентом, эскалирует ДАЛЬШЕ сам — с дедупом (questions.py уже
+        схлопывает похожие вопросы разных сотрудников, кто бы их ни задавал)."""
+        question = (args.get("question") or "").strip()
+        if not question:
+            return "Сформулируй вопрос конкретно."
+        rec = registry_module.get(agent_id)
+        leader_id = (rec.manager if rec else "") or "orchestrator_1"
+        if leader_id == agent_id:
+            # Сам лидер/CEO вызвал ask_leader по ошибке — веди себя как ask_user.
+            return await _deliver_to_user(question, target_agent_id=agent_id)
+        leader_rec = registry_module.get(leader_id)
+        leader_role = leader_rec.role if leader_rec else ("orchestrator" if leader_id == "orchestrator_1" else "")
+
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"💬 спрашиваю {leader_role or 'руководителя'}: {question[:60]}"})
+        office_channel.post(agent_id, role, f"@{leader_role}, {question[:200]}")
+        await publish({"type": "office_chat", "from": agent_id, "role": role,
+                       "text": f"@{leader_role}, {question[:200]}"})
+
+        from src.office import prompt_builder, roles as roles_module
+        leader_work = state.result_for(leader_id) if leader_rec else ""
+        leader_base = roles_module.render(leader_role) if leader_role else ""
+        sys = (leader_base + prompt_builder.brief_block()
+               + (f"\n\n=== ТВОЯ ПОСЛЕДНЯЯ РАБОТА ===\n{leader_work[:1200]}" if leader_work else "")
+               + "\n\nСотрудник задаёт вопрос за пределами своей рабочей области. Если ты можешь "
+                 "ответить сам (из своего контекста/знаний по компании) — ответь СРАЗУ, коротко. "
+                 "Если ответ реально знает только сам клиент (владелец бизнеса) — не выдумывай, а "
+                 "ответь ОДНОЙ строкой строго в формате 'ESCALATE: <вопрос клиенту одним предложением>'.")
+        try:
+            raw = await llm.run_agent(
+                system=sys, user=question,
+                model=models_module.for_agent(leader_id),
+                max_tokens=400, use_search=False, agent_id=leader_id,
+            )
+        except Exception as e:
+            raw = f"ESCALATE: {question}"  # руководитель недоступен — не блокируем цепочку молча
+        raw = (raw or "").strip()
+
+        if raw.upper().startswith("ESCALATE:"):
+            client_question = raw.split(":", 1)[1].strip() or question
+            target = "orchestrator_1" if _is_general_fact(client_question) else leader_id
+            # В треде СОТРУДНИКА — не тишина, а явная пометка "куда ушёл вопрос"
+            # и кнопка (фронт рисует по redirect_agent_id) открыть чат с адресатом.
+            threads_module.post(agent_id, "system",
+                                 f"Вопрос передан {'CEO' if target == 'orchestrator_1' else leader_role} — "
+                                 f"ответ придёт в чате с ним.",
+                                 kind="redirect", redirect_agent_id=target)
+            await publish({"type": "agent_message", "agent_id": agent_id, "from": "system",
+                           "kind": "redirect", "redirect_agent_id": target,
+                           "text": f"Вопрос передан {'CEO' if target == 'orchestrator_1' else leader_role}"})
+            answer = await _deliver_to_user(client_question, target_agent_id=target)
+            await publish({"type": "speech", "agent_id": agent_id,
+                           "text": f"✅ Получен ответ через {'CEO' if target == 'orchestrator_1' else leader_role}: {answer[:70]}"})
+            return answer
+
+        await publish({"type": "speech", "agent_id": leader_id, "text": f"💬 → {agent_id}: {raw[:80]}"})
+        office_channel.post(leader_id, leader_role, f"@{role}: {raw[:240]}")
+        await publish({"type": "office_chat", "from": leader_id, "role": leader_role,
+                       "text": f"@{role}: {raw[:240]}"})
+        return raw or "Руководитель не дал содержательного ответа — реши по своему усмотрению."
 
     async def _handle_ask_colleague(args: dict) -> str:
         """Синхронная консультация: коллега нужной роли отвечает на вопрос ОДНИМ
@@ -238,8 +342,8 @@ def build(agent_id: str, role: str,
             available = ", ".join(connections.names()) or "нет сохранённых"
             return (
                 f"Подключение '{name}' не найдено. Доступные: {available}. "
-                f"Используй ask_user чтобы запросить у пользователя API-ключ или логин/пароль — "
-                f"они автоматически сохранятся в подключения."
+                f"Используй ask_user (или ask_leader, если он у тебя есть) чтобы запросить у "
+                f"пользователя API-ключ или логин/пароль — они автоматически сохранятся в подключения."
             )
         return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
                           ensure_ascii=False)
@@ -247,6 +351,7 @@ def build(agent_id: str, role: str,
     return {
         "request_research": _handle_request_research,
         "ask_user": _handle_ask_user,
+        "ask_leader": _handle_ask_leader,
         "ask_colleague": _handle_ask_colleague,
         "raise_event": _handle_raise_event,
         "delegate_task": _handle_delegate_task,
