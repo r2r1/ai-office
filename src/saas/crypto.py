@@ -2,8 +2,15 @@
 Шифрование секретов at-rest (Fernet/AES). Ключ выводится из APP_SECRET.
 
 Используется для API-ключей пользователей (LLM-ключ, креды интеграций), чтобы они
-не лежали на диске открытым текстом. ВАЖНО: при смене APP_SECRET старые секреты
-не расшифруются — задайте стабильный APP_SECRET в .env на проде.
+не лежали на диске открытым текстом. Задайте стабильный APP_SECRET в .env на проде.
+
+Ротация секрета: смена APP_SECRET раньше НАВСЕГДА делала нечитаемыми все уже
+зашифрованные значения — без пути восстановления (docs/audit-dd-2026-07-06.md
+§9/§19 п.9). Теперь decrypt() при неудаче с текущим ключом пробует ключи из
+APP_SECRET_PREVIOUS (через запятую, старые значения APP_SECRET) — это позволяет
+плавно перейти на новый секрет: задать новый APP_SECRET, старый положить в
+APP_SECRET_PREVIOUS, прогнать `scripts/rotate_secret.py` (перешифровывает все
+креды всех тенантов новым ключом), затем убрать APP_SECRET_PREVIOUS.
 """
 
 import base64
@@ -43,10 +50,17 @@ def require_app_secret() -> str:
     )
 
 
-def _fernet() -> Fernet:
-    secret = require_app_secret()
-    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
-    return Fernet(key)
+def _key_for(secret: str) -> bytes:
+    return base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
+
+
+def _fernet(secret: str | None = None) -> Fernet:
+    return Fernet(_key_for(secret if secret is not None else require_app_secret()))
+
+
+def _previous_secrets() -> list[str]:
+    raw = os.getenv("APP_SECRET_PREVIOUS", "")
+    return [s.strip() for s in raw.split(",") if s.strip()]
 
 
 def encrypt(plain: str) -> str:
@@ -61,10 +75,19 @@ def decrypt(value: str) -> str:
         return ""
     if not value.startswith(_PREFIX):
         return value  # совместимость со старыми незашифрованными значениями
+    raw = value[len(_PREFIX):].encode("utf-8")
     try:
-        return _fernet().decrypt(value[len(_PREFIX):].encode("utf-8")).decode("utf-8")
+        return _fernet().decrypt(raw).decode("utf-8")
     except (InvalidToken, ValueError):
-        return ""
+        pass
+    # Текущий APP_SECRET не подошёл — пробуем ключи ротации (APP_SECRET_PREVIOUS),
+    # чтобы значения, зашифрованные ДО ротации, не терялись безвозвратно.
+    for old_secret in _previous_secrets():
+        try:
+            return _fernet(old_secret).decrypt(raw).decode("utf-8")
+        except (InvalidToken, ValueError):
+            continue
+    return ""
 
 
 def mask(plain: str) -> str:

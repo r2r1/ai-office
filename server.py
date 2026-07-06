@@ -97,24 +97,38 @@ _WEBAPP_DIR = Path("static/webapp")
 if _WEBAPP_DIR.is_dir():
     app.mount("/webapp", StaticFiles(directory=str(_WEBAPP_DIR), html=True), name="webapp")
 
-# ---- Rate limiting для /auth/* (без внешних зависимостей) ----
-_auth_attempts: dict[str, list[float]] = {}
+# ---- Rate limiting (без внешних зависимостей) ----
+# Раньше троттлинг был только у /auth/* — /api/terminal, /api/run (дорогое
+# исполнение кода) и публичный /api/lead/{tenant}/{slug} (форма без авторизации)
+# были ничем не ограничены: тенант с ALLOW_CODE_EXECUTION=1 мог долбить
+# execute_code без остановки, а публичную форму лида — спамить с любого IP,
+# засоряя CRM/Gap Analysis (docs/audit-dd-2026-07-06.md §11/§19 п.10).
+# Один универсальный bucket на (namespace, key), тот же приём анти-утечки:
+# чистим мёртвые ключи, только когда bucket раздулся.
+_rate_buckets: dict[str, dict[str, list[float]]] = {}
+
+
+def _rate_limited(namespace: str, key: str, max_per_min: int) -> bool:
+    """True — лимит превышен (запрос НУЖНО отклонить). Иначе засчитывает попытку."""
+    now = time.time()
+    bucket = _rate_buckets.setdefault(namespace, {})
+    if len(bucket) > 1000:
+        for stale in [k for k, ts in bucket.items() if all(now - t >= 60 for t in ts)]:
+            bucket.pop(stale, None)
+    attempts = [t for t in bucket.get(key, []) if now - t < 60]
+    bucket[key] = attempts
+    if len(attempts) >= max_per_min:
+        return True
+    bucket[key].append(now)
+    return False
+
+
 _MAX_AUTH_PER_MIN = 10
 
 
 def _check_rate_limit(ip: str) -> bool:
-    now = time.time()
-    # Не копим мёртвые IP бесконечно: записи чистились только при повторном визите
-    # ТОГО ЖЕ ip — словарь рос на каждом новом посетителе (утечка памяти).
-    if len(_auth_attempts) > 1000:
-        for stale in [k for k, ts in _auth_attempts.items() if all(now - t >= 60 for t in ts)]:
-            _auth_attempts.pop(stale, None)
-    attempts = [t for t in _auth_attempts.get(ip, []) if now - t < 60]
-    _auth_attempts[ip] = attempts
-    if len(attempts) >= _MAX_AUTH_PER_MIN:
-        return False
-    _auth_attempts[ip].append(now)
-    return True
+    """Совместимость со старыми вызовами (/auth/*): True — запрос РАЗРЕШЁН."""
+    return not _rate_limited("auth", ip, _MAX_AUTH_PER_MIN)
 
 
 def _client_ip(request: Request) -> str:
@@ -1021,6 +1035,8 @@ def _extract_lead_fields(data: dict) -> tuple[str, str, str]:
 @app.post("/api/lead/{tenant}/{slug}")
 async def capture_lead(tenant: str, slug: str, request: Request):
     """Приём заявки с формы лендинга — реальный лид для тенанта (публично)."""
+    if _rate_limited("lead", _client_ip(request), 20):
+        return JSONResponse({"error": "слишком много заявок, попробуйте позже"}, status_code=429)
     saas_context.set_tenant(tenant)
     if sites_module.get(slug) is None:
         return JSONResponse({"error": "страница не найдена"}, status_code=404)
@@ -1166,6 +1182,9 @@ async def run_file(request: Request):
         return JSONResponse(
             {"ok": False, "error": "code_execution_disabled",
              "output": workspace_module._DISABLED_MSG}, status_code=403)
+    if _rate_limited("run", saas_context.get_tenant(), 15):
+        return JSONResponse({"ok": False, "output": "Слишком много запусков подряд — подождите минуту."},
+                            status_code=429)
     data = await request.json()
     path = (data.get("path") or "").strip()
     stdin = data.get("stdin") or ""
@@ -1188,6 +1207,9 @@ async def terminal(request: Request):
         return JSONResponse(
             {"ok": False, "error": "code_execution_disabled",
              "output": workspace_module._DISABLED_MSG}, status_code=403)
+    if _rate_limited("terminal", saas_context.get_tenant(), 15):
+        return JSONResponse({"ok": False, "output": "Слишком много команд подряд — подождите минуту."},
+                            status_code=429)
     data = await request.json()
     cmd = (data.get("cmd") or "").strip()
     cwd = (data.get("cwd") or "").strip()
