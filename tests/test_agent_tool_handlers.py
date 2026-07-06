@@ -288,6 +288,43 @@ def test_ask_user_resolves_when_answered():
     assert result == "мой ответ"
 
 
+# ── _handle_ask_colleague: делает СВОЙ, отдельный llm.run_agent-вызов ─────────
+
+def test_ask_colleague_rejects_same_role():
+    _fresh_tenant("af_test_ask_colleague1")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["ask_colleague"]({"role": "developer", "question": "как дела?"}))
+    assert "сам" in result.lower()
+
+
+def test_ask_colleague_returns_answer_from_mocked_llm_call():
+    """ask_colleague делает СВОЙ llm.run_agent (не тот, что уже замокан и вышел
+    из контекста в _captured_handlers) — нужен отдельный patch на момент вызова
+    самого обработчика, иначе тест дёрнул бы реальный API."""
+    _fresh_tenant("af_test_ask_colleague2")
+    handlers, events = _run_async(_captured_handlers(role="developer", agent_id="developer_1"))
+
+    async def fake_colleague_reply(**kwargs):
+        assert kwargs["user"] == "какой у нас оффер?"
+        return "Оффер: бесплатный замер + скидка 10%"
+
+    with patch("src.core.llm.run_agent", side_effect=fake_colleague_reply):
+        result = _run_async(handlers["ask_colleague"]({"role": "marketer", "question": "какой у нас оффер?"}))
+    assert "бесплатный замер" in result
+
+
+def test_ask_colleague_handles_llm_failure_gracefully():
+    _fresh_tenant("af_test_ask_colleague3")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+
+    async def failing_call(**kwargs):
+        raise RuntimeError("provider timeout")
+
+    with patch("src.core.llm.run_agent", side_effect=failing_call):
+        result = _run_async(handlers["ask_colleague"]({"role": "marketer", "question": "?"}))
+    assert "реши сам" in result.lower()
+
+
 # ── _handle_use_capability: реальный роутер + встроенная интеграция website ───
 
 def test_use_capability_finds_website_publish_without_credentials():
