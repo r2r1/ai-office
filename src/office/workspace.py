@@ -283,10 +283,22 @@ def delete_file(path: str) -> str:
 
 
 def _utf8_env() -> dict:
-    """Окружение с UTF-8 для дочерних процессов — иначе русский/эмодзи-вывод
-    падает на Windows (cp1251) с UnicodeEncodeError. Агенты пишут русский код."""
+    """Окружение для дочерних процессов execute_code/run_command — БЕЗ полного
+    наследования os.environ. Раньше env=dict(os.environ) прокидывал в subprocess
+    ВСЁ окружение сервера целиком: APP_SECRET, LLM_API_KEY, APINET_ACCESS_TOKEN,
+    GITHUB_CLIENT_SECRET и т.д. — агенту не нужен даже path traversal (см. docs/
+    audit-dd-2026-07.md §17), чтобы украсть креды: `import os; print(os.environ)`
+    в собственном же коде отдавал их напрямую (найдено при аудите 2026-07-06,
+    docs/audit-dd-2026-07-06.md §11). Allowlist — только то, что реально нужно
+    интерпретатору/шеллу для запуска (PATH и системные переменные ОС), плюс
+    UTF-8-энкодинг (см. ниже, для русского/эмодзи-вывода на Windows)."""
     import os
-    env = dict(os.environ)
+    _ALLOWLIST = {
+        "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
+        "HOMEDRIVE", "HOMEPATH", "USERPROFILE", "HOME", "LANG", "LC_ALL",
+        "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+    }
+    env = {k: v for k, v in os.environ.items() if k.upper() in _ALLOWLIST}
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     return env
