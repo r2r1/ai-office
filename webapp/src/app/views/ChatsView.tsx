@@ -4,7 +4,7 @@ import { api } from "../../data/api"
 import { ViewShell, STATUS_COLOR } from "./ui"
 import { useThrottled } from "../hooks"
 import { motion } from "motion/react"
-import { roleName } from "../../data/roles"
+import { roleName, roleFromAgentId } from "../../data/roles"
 
 // анимированные точки «печатает…»
 function TypingDots() {
@@ -24,7 +24,7 @@ function TypingDots() {
 function senderName(m: any, fallback?: string): string {
   if (m.role && m.role !== "user") return roleName(m.role)
   if (typeof m.from === "string" && !["user", "agent"].includes(m.from)) {
-    return roleName(m.from.replace(/_\d+$/, ""))
+    return roleName(roleFromAgentId(m.from))
   }
   return fallback || m.from || ""
 }

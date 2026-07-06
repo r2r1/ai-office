@@ -19,6 +19,10 @@ export interface Worker {
   role: string
   status: WorkerStatus
   lastMessage?: string
+  /** Проект, за которым закреплён работник (параллельные Work, Фаза 2/4) —
+   * "" у лидеров/служебных ролей (ведут несколько Work сразу) и у легаси-
+   * работников, нанятых до появления параллельных проектов. */
+  projectId?: string
 }
 
 export type Theme = "dark" | "light"

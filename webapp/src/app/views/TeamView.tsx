@@ -66,6 +66,17 @@ export function TeamView({ onOpenChat, onOpenInbox }: TeamViewProps) {
     api.models().then(m => { setModels(m?.per_agent || {}); setPresets(m?.presets || []) })
   }, [agents.length])
 
+  // id проекта → название — для бейджа "закреплён за проектом" на карточке
+  // (параллельные Work, Фаза 2/4): без имени "p1_1143" ничего не говорит.
+  const [projectTitles, setProjectTitles] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.projects().then(d => {
+      const map: Record<string, string> = {}
+      for (const p of d.projects || []) map[p.id] = p.title
+      setProjectTitles(map)
+    })
+  }, [agents.length])
+
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Collapsing-шапка */}
@@ -115,6 +126,7 @@ export function TeamView({ onOpenChat, onOpenInbox }: TeamViewProps) {
               {agents.map((agent, i) => (
                 <AgentCard key={agent.id} agent={agent} index={i} onOpenChat={onOpenChat}
                   initialModel={models[agent.id] || ""} presets={presets}
+                  projectTitle={agent.projectId ? (projectTitles[agent.projectId] || "") : ""}
                   onOpenDetail={() => setDetailId(agent.id)} />
               ))}
             </AnimatePresence>
@@ -153,7 +165,7 @@ const PulsingAvatar = memo(function PulsingAvatar({ emoji, status }: { emoji: st
 })
 
 // ── Карточка агента ──────────────────────────────────────────────────────────
-function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDetail }: { agent: Worker; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[]; onOpenDetail?: () => void }) {
+function AgentCard({ agent, index, onOpenChat, initialModel, presets, projectTitle, onOpenDetail }: { agent: Worker; index: number; onOpenChat?: (id: string) => void; initialModel: string; presets: Preset[]; projectTitle?: string; onOpenDetail?: () => void }) {
   const [model, setModel]       = useState(initialModel)
   const [editModel, setEditModel] = useState(false)
   const [saving, setSaving]     = useState(false)
@@ -199,6 +211,21 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{agent.name}</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>{roleName(agent.role)}</div>
+          {/* Проект, за которым закреплён работник — только у "рабочих" ролей
+              параллельных Work; лидеры/служебные роли ведут несколько Work
+              сразу и не привязаны (agent.projectId пуст, см. registry.py). */}
+          {projectTitle && (
+            <div style={{
+              marginTop: 5, display: "inline-flex", alignItems: "center", gap: 4,
+              fontSize: 10.5, color: "var(--mercury-a)", background: "rgba(255,172,46,0.1)",
+              border: "1px solid rgba(255,172,46,0.25)", borderRadius: "var(--radius-pill)",
+              padding: "2px 9px", maxWidth: "100%",
+            }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                📁 {projectTitle}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Статус-бейдж */}

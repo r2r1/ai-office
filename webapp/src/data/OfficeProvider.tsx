@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react"
 import { api } from "./api"
-import { roleName, roleIcon, workerDisplayName } from "./roles"
+import { roleName, roleIcon, workerDisplayName, roleFromAgentId } from "./roles"
 import type { Worker, WorkerStatus } from "../app/types"
 
 // BOS §12 п.4: backend отдаёт worker_id рядом с deprecated agent_id (см. office/bus.py,
@@ -52,22 +52,25 @@ function feed(state: OfficeState, icon: string, who: string, text: string, kind:
   return [item, ...state.feed].slice(0, 400)
 }
 
-// developer_2 → developer; orchestrator_1 → orchestrator. Чтобы события (thinking/speech)
-// по ещё не «нанятому» агенту не плодили фантомную роль "unknown".
-function roleFromId(id: string): string {
-  const m = id.match(/^(.*?)_\d+$/)
-  return m ? m[1] : id
-}
-
 function upsertAgent(state: OfficeState, id: string, patch: Partial<Worker>): Record<string, Worker> {
   const prev = state.agents[id]
-  const role = patch.role || prev?.role || roleFromId(id) || "unknown"
+  // developer_2 → developer; developer_p1_1143 (project-scoped, Фаза 2) → developer —
+  // чтобы события (thinking/speech) по ещё не «нанятому» агенту не плодили
+  // фантомную роль "unknown" (или, раньше, ложную "developer_p1" — см.
+  // roleFromAgentId docstring в data/roles.ts).
+  const role = patch.role || prev?.role || roleFromAgentId(id) || "unknown"
   const next: Worker = {
     id, role,
     name: workerDisplayName(id, role),
     emoji: roleIcon(role),
     status: (patch.status || prev?.status || "idle") as WorkerStatus,
     lastMessage: patch.lastMessage ?? prev?.lastMessage ?? "",
+    // Раньше upsertAgent НЕ переносил projectId из prev — первое же живое
+    // событие (hired/speech/thinking/task_done) по агенту, уже закреплённому
+    // за проектом (Фаза 2/4), тихо стирало эту привязку в UI-состоянии до
+    // следующего полного /api/agents (реальный баг, пойман при живой проверке
+    // бейджа проекта на карточке команды — TeamView).
+    projectId: patch.projectId ?? prev?.projectId ?? "",
   }
   return { ...state.agents, [id]: next }
 }
@@ -99,6 +102,7 @@ function reducer(state: OfficeState, action: Action): OfficeState {
         agents[id] = {
           id, role: a.role, name: workerDisplayName(id, a.role),
           emoji: roleIcon(a.role), status: (a.status || "idle") as WorkerStatus, lastMessage: a.last_message || "",
+          projectId: a.project_id || "",
         }
       }
       return { ...state, agents }

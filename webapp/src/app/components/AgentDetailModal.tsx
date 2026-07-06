@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Modal, ModalSection, ModalPre } from "./Modal"
 import { api } from "../../data/api"
-import { roleName, roleDesc, roleSkills } from "../../data/roles"
+import { roleName, roleDesc, roleSkills, roleFromAgentId } from "../../data/roles"
 import { STATUS_COLOR } from "../views/ui"
 
 const STATUS_LABEL: Record<string, string> = { active: "В работе", thinking: "Думает", done: "Готов", idle: "Свободен" }
@@ -23,7 +23,7 @@ export function AgentDetailModal({ agentId, emoji, onClose, onOpenChat }: Props)
     api.agentDetail(agentId).then(x => { setD(x); setLoading(false) })
   }, [agentId])
 
-  const role = d?.role || (agentId ? agentId.replace(/_\d+$/, "") : "")
+  const role = d?.role || (agentId ? roleFromAgentId(agentId) : "")
   const status = d?.status || "idle"
   const done = d?.done || []
   const activity = d?.activity || []

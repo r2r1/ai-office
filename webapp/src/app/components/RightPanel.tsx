@@ -3,14 +3,13 @@ import { motion, AnimatePresence } from "motion/react"
 import { useOfficeSelector } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { useThrottled } from "../hooks"
-import { roleName } from "../../data/roles"
+import { roleName, roleFromAgentId } from "../../data/roles"
 
 // дружелюбное имя отправителя в общем чате (CEO вместо orchestrator_1 и т.п.)
 function senderName(m: any): string {
   if (m.role && m.role !== "user") return roleName(m.role)
   if (typeof m.from === "string" && m.from !== "user") {
-    const base = m.from.replace(/_\d+$/, "")
-    return roleName(base)
+    return roleName(roleFromAgentId(m.from))
   }
   return m.from || ""
 }

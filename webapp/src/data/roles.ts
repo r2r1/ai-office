@@ -52,9 +52,29 @@ export function roleIcon(role: string): string  { return ROLE_ICONS[role] || "�
 export function roleDesc(role: string): string  { return ROLE_DESC[role] || "" }
 export function roleSkills(role: string): string[] { return ROLE_SKILLS[role] || [] }
 
+// Самые длинные ключи — первыми: "sales_lead" должен матчиться раньше гипотетического
+// более короткого префикса, если такой когда-нибудь появится.
+const ROLE_KEYS = Object.keys(ROLE_NAMES).sort((a, b) => b.length - a.length)
+
+// Роль по agentId, когда под рукой только он (без отдельного поля role) —
+// например m.from в чате. Раньше это делал /_\d+$/ (срезать хвостовой номер):
+// работало для "developer_2", но ломалось на project-scoped id параллельных
+// Work (Фаза 2) вида "developer_p1_1143" — регэксп срезал только "_1143" и
+// оставлял несуществующую роль "developer_p1". Матчим по известному списку
+// ролей вместо угадывания формы хвоста.
+export function roleFromAgentId(agentId: string): string {
+  for (const key of ROLE_KEYS) {
+    if (agentId === key || agentId.startsWith(key + "_")) return key
+  }
+  return agentId.replace(/_\d+$/, "") // легаси-фолбэк для неизвестной роли
+}
+
 // developer_2 → Разработчик 2 (BOS §12 п.4: agentId → workerId, agentDisplayName →
-// workerDisplayName; терминология агента как контрактного имени уходит из фронта)
+// workerDisplayName; терминология агента как контрактного имени уходит из фронта).
+// project-scoped id ("developer_p1_1143") не получает номер — там разработчиков
+// разных Work отличает бейдж проекта на карточке (TeamView), а не голое число.
 export function workerDisplayName(workerId: string, role: string): string {
-  const m = workerId.match(/_(\d+)$/)
+  const rest = workerId === role ? "" : workerId.slice(role.length + 1)
+  const m = rest.match(/^(\d+)$/)
   return roleName(role) + (m && m[1] !== "1" ? ` ${m[1]}` : "")
 }
