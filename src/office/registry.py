@@ -31,6 +31,13 @@ class AgentRecord:
     department: str = ""   # id отдела ('' = штаб CEO)
     manager: str = ""      # agent_id руководителя ('' = подчиняется CEO)
     paused: bool = False   # поставлен на паузу вручную (см. pause()/resume())
+    # Закреплённый проект ("" = универсальный/legacy работник, годится для
+    # ЛЮБОГО активного проекта — так остаются рабочими тенанты, нанявшие
+    # людей ДО появления параллельных Work). Лидеры отделов (cto/cmo/…) и
+    # служебные роли (researcher/strategist/…) остаются "" всегда — они
+    # ведут несколько Work одновременно, а не дублируются на каждый (см.
+    # planning_engine.hire_leader — project_id туда не передаётся).
+    project_id: str = ""
 
 
 def _load() -> dict:
@@ -45,17 +52,18 @@ def _rec(d: dict) -> AgentRecord:
     return AgentRecord(agent_id=d["agent_id"], role=d.get("role", ""), desk=d.get("desk", 0),
                        status=d.get("status", "idle"), last_message=d.get("last_message", ""),
                        task=d.get("task", ""), department=d.get("department", ""),
-                       manager=d.get("manager", ""), paused=d.get("paused", False))
+                       manager=d.get("manager", ""), paused=d.get("paused", False),
+                       project_id=d.get("project_id", ""))
 
 
 def register(agent_id: str, role: str, task: str = "",
-             department: str = "", manager: str = "") -> Optional[AgentRecord]:
+             department: str = "", manager: str = "", project_id: str = "") -> Optional[AgentRecord]:
     agents = _load()
     used = {a.get("desk", 0) for a in agents.values()}
     desk = next(i for i in range(MAX_DESKS) if i not in used)
     agents[agent_id] = {"agent_id": agent_id, "role": role, "desk": desk,
                         "status": "idle", "last_message": "", "task": task,
-                        "department": department, "manager": manager}
+                        "department": department, "manager": manager, "project_id": project_id}
     _save(agents)
     return _rec(agents[agent_id])
 

@@ -162,15 +162,37 @@ def has_actionable_move() -> bool:
     return any(dept_actionable(did, now) for did in open_depts)
 
 
-def free_worker_of_role(dept_id: str, role: str, now: float):
-    """Свободный (idle, не на паузе, не в cooldown) работник нужной роли в отделе — или None."""
+def free_worker_of_role(dept_id: str, role: str, now: float, project_id: str = ""):
+    """Свободный (idle, не на паузе, не в cooldown) работник нужной роли в отделе.
+
+    `project_id` — параллельные Work: работник, закреплённый ИМЕННО за этим
+    проектом (registry.AgentRecord.project_id), в приоритете; если такого
+    свободного нет — годится универсальный (project_id="", legacy — нанят до
+    появления параллельных проектов или лидер/служебная роль). Работник,
+    закреплённый за ДРУГИМ проектом, не подходит — иначе один "developer_p1"
+    хватал бы задачи и project'а p2 тоже, съедая чужой слот параллельности."""
+    candidates = []
     for a in registry.members_of(dept_id):
         if a.role != role or a.status == "thinking" or a.paused:
             continue
+        if a.project_id and project_id and a.project_id != project_id:
+            continue  # закреплён за ДРУГИМ проектом — не наш кандидат
         if (now - state.last_run_for(a.agent_id)) < AGENT_COOLDOWN_SECS:
             continue
-        return a
-    return None
+        candidates.append(a)
+    if not candidates:
+        return None
+    exact = next((a for a in candidates if project_id and a.project_id == project_id), None)
+    return exact or next((a for a in candidates if not a.project_id), None) or candidates[0]
+
+
+def _has_role_for_project(dept_id: str, role: str, project_id: str) -> bool:
+    """Уже нанят работник ИМЕННО под (отдел, роль, проект) — неважно, свободен
+    он сейчас или занят. Используется перед наймом: если такой уже есть, но
+    занят — просто ждём его, а не заводим второго (MAX_PER_ROLE=1, но теперь
+    на уровне (роль, проект), а не только (роль, компания))."""
+    return any(a.role == role and a.project_id == project_id
+               for a in registry.members_of(dept_id))
 
 
 async def verify_and_fix_if_needed(publish) -> bool:
@@ -213,11 +235,21 @@ async def hire_leader(dept_id: str, objective: str, publish) -> None:
 
 
 async def hire_and_run(role: str, task: str, publish, skill: str = "",
-                       department: str = "", manager: str = "", task_id: str = "") -> None:
-    existing_count = sum(1 for a in registry.all_agents() if a.role == role)
-    agent_id = f"{role}_{existing_count + 1}"
+                       department: str = "", manager: str = "", task_id: str = "",
+                       project_id: str = "") -> None:
+    """`project_id` — нанимает работника, ЗАКРЕПЛЁННОГО за этим проектом (параллельные
+    Work: у каждого активного проекта может быть свой developer/designer/...), а не
+    общего на компанию. Идентификатор строится от project_id, а не от порядкового
+    номера — иначе при параллельном найме двух воркеров одной роли для разных
+    проектов в один цикл возможна гонка за один и тот же agent_id."""
+    if project_id:
+        agent_id = f"{role}_{project_id}"
+    else:
+        existing_count = sum(1 for a in registry.all_agents() if a.role == role)
+        agent_id = f"{role}_{existing_count + 1}"
     full_task = f"[Скилл: {skill}] {task}" if skill else task
-    rec = registry.register(agent_id, role, full_task, department=department, manager=manager)
+    rec = registry.register(agent_id, role, full_task, department=department, manager=manager,
+                            project_id=project_id)
     if rec:
         await publish({"type": "hired", "agent_id": agent_id, "role": role,
                        "desk": rec.desk, "task": full_task[:100], "skill": skill})
@@ -261,35 +293,48 @@ async def run_leaders(goal: str, ms: list, publish) -> None:
             site_busy = plan.site_task_in_progress()
             if site_busy:
                 ready = [t for t in ready if not plan.touches_site(t)]
-            # 1) Назначаем первую готовую задачу, под которую есть свободный работник.
+            # 1) Назначаем КАЖДУЮ готовую задачу, под которую есть свободный работник —
+            # не только первую. Параллельные Work (project_limits): если у отдела
+            # ready-задачи от двух разных активных проектов, оба должны сдвинуться
+            # в этом же цикле, а не по очереди через цикл. registry.update_status
+            # внутри execution.assign синхронна (пишет файл сразу), поэтому уже
+            # занятый в этой же итерации работник не будет назначен дважды.
+            unassigned = []
             for t in ready:
-                free = free_worker_of_role(dept_id, t.get("role", ""), now)
-                if free:
-                    task_txt = t.get("title", "")
-                    if t.get("done_criterion"):
-                        task_txt += f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}"
-                    if t.get("last_feedback"):
-                        # Повторная попытка после провала приёмки: исполнитель видит,
-                        # ЧТО именно не прошло, а не решает задачу вслепую заново.
-                        task_txt += f"\n{t['last_feedback']}"
-                    plan.assign(t["id"], free.agent_id)  # доска: взято в работу
-                    await execution.assign(free.agent_id, free.role, task_txt, publish,
-                                  department=dept_id, objective=objective, task_id=t["id"])
-                    handled = True
-                    break
-            if handled:
-                continue
-            # 2) Никто не свободен — нанимаем недостающую роль под готовую задачу.
-            present = {a.role for a in registry.members_of(dept_id)}
-            for t in ready:
+                proj_id = t.get("project", "")
+                free = free_worker_of_role(dept_id, t.get("role", ""), now, project_id=proj_id)
+                if not free:
+                    unassigned.append(t)
+                    continue
+                task_txt = t.get("title", "")
+                if t.get("done_criterion"):
+                    task_txt += f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}"
+                if t.get("last_feedback"):
+                    # Повторная попытка после провала приёмки: исполнитель видит,
+                    # ЧТО именно не прошло, а не решает задачу вслепую заново.
+                    task_txt += f"\n{t['last_feedback']}"
+                plan.assign(t["id"], free.agent_id)  # доска: взято в работу
+                await execution.assign(free.agent_id, free.role, task_txt, publish,
+                              department=dept_id, objective=objective, task_id=t["id"])
+            if len(unassigned) < len(ready):
+                continue  # хотя бы одну задачу в этом цикле сдвинули
+            # 2) Ни для одной готовой задачи нет свободного работника — нанимаем
+            # недостающую роль, но только под ПРОЕКТ, у которого её ЕЩЁ ВООБЩЕ нет
+            # (не плодим второго work'ера на тот же (роль, проект), если первый
+            # просто занят — тогда просто ждём его). Один найм за цикл — не
+            # наспамить сразу несколькими агентами разом.
+            for t in unassigned:
                 role = t.get("role", "")
-                if role in member_roles and role not in present:
-                    crit = f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}" if t.get("done_criterion") else ""
-                    await hire_and_run(role, t.get("title", f"Задачи {role}") + crit,
-                                        publish, department=dept_id, manager=lead, task_id=t["id"])
-                    handled = True
-                    break
-            # 3) Все нужные роли есть, но заняты — детерминированный wait без LLM.
+                proj_id = t.get("project", "")
+                if role not in member_roles or _has_role_for_project(dept_id, role, proj_id):
+                    continue
+                crit = f"\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: {t['done_criterion']}" if t.get("done_criterion") else ""
+                await hire_and_run(role, t.get("title", f"Задачи {role}") + crit,
+                                    publish, department=dept_id, manager=lead, task_id=t["id"],
+                                    project_id=proj_id)
+                break
+            # 3) Все нужные роли под все проекты уже наняты, но заняты —
+            # детерминированный wait без LLM.
             continue
 
         # План — ЕДИНСТВЕННЫЙ источник работы. Если он сгенерирован, но готовых задач для

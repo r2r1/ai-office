@@ -504,6 +504,7 @@ async def get_agents():
             "status": a.status,
             "last_message": a.last_message,
             "task": a.task,
+            "project_id": a.project_id,
         }
         for a in registry.all_agents()
     ])

@@ -133,6 +133,50 @@ def test_hire_leader_registers_once():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+def test_free_worker_of_role_prefers_exact_project_match():
+    """Параллельные Work: если у отдела есть работник, закреплённый ИМЕННО за
+    project_id задачи, он в приоритете над универсальным/чужим."""
+    ctx.set_tenant("pe_unit_project_exact")
+    registry.register("developer_pA", "developer", department="tech", project_id="pA")
+    registry.register("developer_pB", "developer", department="tech", project_id="pB")
+    import time
+    found = pe.free_worker_of_role("tech", "developer", time.time() + 1000, project_id="pA")
+    assert found is not None and found.agent_id == "developer_pA"
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_free_worker_of_role_falls_back_to_generic_legacy_worker():
+    """Тенант, нанявший работников ДО появления параллельных Work (project_id=""),
+    должен продолжать работать как раньше — универсальный работник годится
+    для любого проекта."""
+    ctx.set_tenant("pe_unit_project_legacy")
+    registry.register("developer_1", "developer", department="tech")  # project_id="" по умолчанию
+    import time
+    found = pe.free_worker_of_role("tech", "developer", time.time() + 1000, project_id="pX")
+    assert found is not None and found.agent_id == "developer_1"
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_free_worker_of_role_excludes_worker_of_other_project():
+    """Работник, закреплённый за ЧУЖИМ проектом, не подходит — иначе один
+    developer съедал бы слот параллельности другого активного проекта."""
+    ctx.set_tenant("pe_unit_project_exclude")
+    registry.register("developer_pB", "developer", department="tech", project_id="pB")
+    import time
+    found = pe.free_worker_of_role("tech", "developer", time.time() + 1000, project_id="pA")
+    assert found is None
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_has_role_for_project():
+    ctx.set_tenant("pe_unit_has_role_for_project")
+    registry.register("developer_pA", "developer", department="tech", project_id="pA")
+    assert pe._has_role_for_project("tech", "developer", "pA") is True
+    assert pe._has_role_for_project("tech", "developer", "pB") is False
+    assert pe._has_role_for_project("tech", "designer", "pA") is False
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def test_forget_tenant_clears_leader_signature():
     pe._last_leader_sig["pe_unit_forget:tech"] = ("assign|x|developer", 2)
     pe._last_leader_sig["board:pe_unit_forget:tech"] = ("board summary", 0)
