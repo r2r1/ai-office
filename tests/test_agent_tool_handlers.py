@@ -23,14 +23,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.saas import context as ctx
 from src.agents import agent_factory
-from src.office import connections, workspace, plan as plan_module
+from src.office import connections, workspace, plan as plan_module, office_channel, questions as questions_module
 
 
 def _fresh_tenant(name: str) -> None:
+    """ctx.wipe() удаляет ВСЮ директорию тенанта на диске (не только
+    отдельные *.reset()) — раньше здесь чистились только workspace/
+    connections/plan, и залипшая запись в memory.json от ОДНОГО out-of-band
+    ручного прогона (см. историю отладки test_ask_user_resolves_when_answered)
+    несколько раз молча ломала повторный запуск того же теста с той же
+    memory-подсказкой «уже отвечали» — реальный, воспроизводимый баг
+    изоляции тестов, не продакшен-кода."""
     ctx.set_tenant(name)
-    workspace.reset()
-    connections.reset()
-    plan_module.reset()
+    ctx.wipe()
+    ctx.set_tenant(name)  # wipe() не трогает ContextVar, но директория пересоздаётся лениво
 
 
 async def _captured_handlers(role="developer", agent_id="developer_1", task="test task") -> dict:
@@ -211,13 +217,142 @@ def test_execute_code_tool_present_when_enabled():
         os.environ["ALLOW_CODE_EXECUTION"] = "0"
 
 
+# ── _handle_read_office_chat ──────────────────────────────────────────────────
+
+def test_read_office_chat_empty():
+    _fresh_tenant("af_test_chat_empty")
+    handlers, _ = _run_async(_captured_handlers(role="marketer"))
+    result = _run_async(handlers["read_office_chat"]({}))
+    assert "пуст" in result.lower()
+
+
+def test_read_office_chat_returns_recent_messages():
+    _fresh_tenant("af_test_chat_msgs")
+    office_channel.post("developer_1", "developer", "собрал лендинг")
+    handlers, _ = _run_async(_captured_handlers(role="marketer"))
+    result = _run_async(handlers["read_office_chat"]({"n": 5}))
+    assert "собрал лендинг" in result
+
+
+# ── _handle_ask_user: путь из памяти (детерминированный, без ожидания future) ─
+
+def test_ask_user_returns_cached_answer_from_memory_without_asking():
+    _fresh_tenant("af_test_ask_user_cache")
+    from src.office import memory as memory_module
+    memory_module.remember("Какой у вас телефон поддержки?", "+7 123 456")
+    handlers, events = _run_async(_captured_handlers(role="salesman"))
+    result = _run_async(handlers["ask_user"]({"question": "Какой у вас телефон поддержки?"}))
+    assert result == "+7 123 456"
+    assert any(e.get("type") == "speech" and "из памяти" in e.get("text", "") for e in events)
+
+
+# ── _handle_ask_user: реальный вопрос → ответ пользователя резолвит future ────
+
+def test_ask_user_resolves_when_answered():
+    """asyncio.sleep(0)-петля для ожидания «дошёл ли обработчик до await» —
+    недетерминированный таймингistov приём (проявилось флейки при прогоне через
+    tests/run_all.py, хотя одиночный запуск файла стабильно проходил) — заменено
+    на явный asyncio.Event, выставляемый publish() РОВНО в момент нужного события."""
+    _fresh_tenant("af_test_ask_user_real2")
+
+    async def scenario():
+        events = []
+        question_published = asyncio.Event()
+
+        async def fake_publish(ev):
+            events.append(ev)
+            if ev.get("type") == "agent_message":
+                question_published.set()
+
+        async def fake_run_agent(**kwargs):
+            return "n/a"
+
+        with patch("src.core.llm.run_agent", side_effect=fake_run_agent):
+            fn = agent_factory.create("developer", "test", "developer_1", fake_publish)
+            captured = {}
+
+            async def fake_run_agent2(**kw):
+                captured.update(kw)
+                return "ok"
+            with patch("src.core.llm.run_agent", side_effect=fake_run_agent2):
+                await fn()
+
+        handler = captured["tool_handlers"]["ask_user"]
+        task = asyncio.ensure_future(handler({"question": "Уникальный вопрос теста?"}))
+        await asyncio.wait_for(question_published.wait(), timeout=5)
+        qid = next(e["question_id"] for e in events if e.get("type") == "agent_message")
+        questions_module.answer(qid, "мой ответ")
+        return await task
+
+    result = _run_async(scenario())
+    assert result == "мой ответ"
+
+
+# ── _handle_use_capability: реальный роутер + встроенная интеграция website ───
+
+def test_use_capability_finds_website_publish_without_credentials():
+    """website — единственная интеграция без cred_fields (всегда «подключена»),
+    удобный детерминированный кандидат для проверки Tool Router без сети."""
+    _fresh_tenant("af_test_use_capability")
+    handlers, events = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["use_capability"]({
+        "need": "опубликовать лендинг", "params": {}}))
+    assert "website" in result.lower() or "не найден" not in result.lower()
+
+
+def test_use_capability_empty_need_asks_to_describe():
+    _fresh_tenant("af_test_use_capability_empty")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["use_capability"]({"need": ""}))
+    assert "опиши" in result.lower()
+
+
+# ── _handle_use_skill / _handle_find_skills ───────────────────────────────────
+
+def test_use_skill_no_match_lists_available_or_says_none():
+    _fresh_tenant("af_test_use_skill")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["use_skill"]({"need": "совершенно случайная тарабарщина xyzzy123"}))
+    assert isinstance(result, str) and result
+
+def test_find_skills_empty_query_lists_catalog_or_says_none():
+    _fresh_tenant("af_test_find_skills")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["find_skills"]({"query": ""}))
+    assert isinstance(result, str) and result
+
+
+# ── _handle_list_integrations ─────────────────────────────────────────────────
+
+def test_list_integrations_mentions_website():
+    _fresh_tenant("af_test_list_integrations")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["list_integrations"]({}))
+    assert "website" in result.lower()
+
+
+def _cleanup_test_tenants() -> None:
+    """Тесты создают реальные data/tenants/af_test_* директории (ctx.wipe() в
+    _fresh_tenant чистит ПЕРЕД тестом, не после) — без этого шага мусор копится
+    на диске с каждым прогоном (найдено при отладке флейки в этом же файле:
+    залипшая запись в memory.json ОДНОГО ручного прогона ломала повторные
+    запуски). data/ в .gitignore, так что в репозиторий это не попадает, но
+    захламляет диск разработчика."""
+    for d in ctx.ROOT.glob("af_test_*"):
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def _run():
     passed = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"  ✓ {name}")
-            passed += 1
+    try:
+        for name, fn in sorted(globals().items()):
+            if name.startswith("test_") and callable(fn):
+                fn()
+                print(f"  ✓ {name}")
+                passed += 1
+    finally:
+        _cleanup_test_tenants()
     print(f"ВСЕ {passed} ТЕСТОВ ПРОШЛИ")
 
 

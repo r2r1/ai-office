@@ -12,6 +12,7 @@ embeddings.embed() возвращает None (insufficient_user_quota). Поэт
 Запуск: python tests/test_knowledge_embeddings.py
 """
 
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -103,13 +104,24 @@ def test_tf_overlap_still_works_with_embeddings_enabled():
     assert any("Bitrix24" in f for f in facts)
 
 
+def _cleanup_test_tenants() -> None:
+    """data/tenants/kn_test_* — реальные файлы на диске, не только in-memory
+    (data/ в .gitignore, но диск разработчика захламляется с каждым прогоном)."""
+    for d in ctx.ROOT.glob("kn_test_*"):
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def _run():
     passed = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"  ✓ {name}")
-            passed += 1
+    try:
+        for name, fn in sorted(globals().items()):
+            if name.startswith("test_") and callable(fn):
+                fn()
+                print(f"  ✓ {name}")
+                passed += 1
+    finally:
+        _cleanup_test_tenants()
     print(f"ВСЕ {passed} ТЕСТОВ ПРОШЛИ")
 
 
