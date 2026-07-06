@@ -12,14 +12,21 @@ Projects — единица работы крупнее задачи (BOS §1, �
 настраивается (get_limit()/set_limit(), по умолчанию 3), сверх лимита новый
 проект встаёт в очередь и активируется сам при освобождении слота. Процессы
 (type="process") лимит не занимают — конвейер продаж/поддержки не должен
-ждать свободного "проектного" слота (см. _is_capped_type). Планировщик,
-ведущий РАБОТНИКОВ параллельно по нескольким активным Work одновременно —
-следующий шаг (registry.py/planning_engine.py пока про один плоский ростер
-на компанию, BOS §10).
+ждать свободного "проектного" слота (см. _is_capped_type). Планировщик уже
+ведёт РАБОТНИКОВ параллельно по нескольким активным Work (planning_engine.py,
+registry.AgentRecord.project_id, Фаза 2).
+
+Каждый проект получает СВОЮ подпапку в workspace/ (workspace_dir, Фаза 3,
+см. src/office/workspace.py) — читаемое имя вида "landing_1", а не голый
+project_id ("p1_1143"): человек должен узнавать папку по смыслу, а не по
+внутреннему идентификатору. Уникальность гарантирует числовой суффикс
+(порядковый номер), а не сам слаг — два проекта с похожим названием получат
+разные папки ("landing_1", "landing_2"), а не тихо смешаются в одну.
 
 Хранилище: data/tenants/<tid>/projects.json — {"items": [...]}.
 """
 
+import re
 import time
 
 from src.saas import context as ctx
@@ -27,6 +34,36 @@ from src.saas import context as ctx
 _FILE = "projects.json"
 _LIMIT_FILE = "project_limits.json"
 DEFAULT_MAX_ACTIVE = 3
+
+# Транслитерация для читаемых ЛАТИНСКИХ имён папок из русских названий проектов
+# (папки/URL — латиница; sites.make_slug для НЕ-латинских титулов деградирует до
+# md5-хеша, что и есть тот самый "нечитаемый формат", от которого уходим здесь).
+_CYR_TO_LAT = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o",
+    "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "ts",
+    "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu",
+    "я": "ya",
+})
+
+
+def _slug(text: str) -> str:
+    """Читаемый ASCII-огрызок названия для имени папки (без транслитерации
+    результат был бы пустым/хешем для русских титулов — см. sites.make_slug)."""
+    t = (text or "").lower().translate(_CYR_TO_LAT)
+    s = re.sub(r"[^a-z0-9]+", "_", t).strip("_")
+    return s[:24] or "work"
+
+
+def _unique_workspace_dir(title: str, existing: set[str]) -> str:
+    """slug + числовой суффикс, уникальный СРЕДИ УЖЕ ЗАНЯТЫХ имён (не просто
+    порядковый номер проекта — иначе переименованный/удалённый проект мог бы
+    оставить дыру и слаг совпал бы с чужой папкой)."""
+    base = _slug(title)
+    n = 1
+    while f"{base}_{n}" in existing:
+        n += 1
+    return f"{base}_{n}"
 
 
 def _data() -> dict:
@@ -68,6 +105,14 @@ def get(pid: str) -> dict | None:
         if p["id"] == pid:
             return dict(p)
     return None
+
+
+def workspace_dir_of(project_id: str) -> str:
+    """Читаемая подпапка workspace/ этого проекта ("landing_1" и т.п.). "" —
+    либо проект не найден, либо создан ДО появления workspace_dir (легаси —
+    продолжает работать в корне workspace/, как раньше)."""
+    p = get(project_id) if project_id else None
+    return (p or {}).get("workspace_dir", "")
 
 
 def active() -> dict | None:
@@ -140,11 +185,14 @@ def create(title: str, goal: str = "", type: str = "project") -> dict:
     else:
         status = "active"
     pid = f"p{len(items) + 1}_{int(time.time()) % 100000}"
+    existing_dirs = {p["workspace_dir"] for p in items if p.get("workspace_dir")}
+    workspace_dir = _unique_workspace_dir(title or "work", existing_dirs)
     proj = {
         "id": pid, "title": (title or "Проект").strip()[:160],
         "goal": (goal or "").strip()[:300],
         "type": norm_type,
         "status": status,
+        "workspace_dir": workspace_dir,  # см. докстринг модуля — читаемая папка в workspace/
         "created_ts": time.time(), "closed_ts": None,
         "left_behind": {},   # что проект оставил после себя (заполняется при закрытии)
     }

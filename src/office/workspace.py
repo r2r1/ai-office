@@ -2,6 +2,23 @@
 Рабочая папка проекта — агенты пишут реальный код. По тенанту:
 data/tenants/<tid>/workspace/. Защита от выхода за пределы каталога.
 
+Параллельные Work (Фаза 3, project_limits): у каждого активного проекта —
+СВОЯ подпапка внутри workspace/ (projects.workspace_dir, читаемое имя вроде
+"landing_1"), а не общий плоский корень на весь тенант. Иначе два одновременно
+активных проекта, пишущих в одинаково называющиеся файлы (app.js, index.html),
+физически затирали бы друг друга — тот же класс бага, что уже был ВНУТРИ
+одного проекта и решался мьютексом артефакта (plan.site_task_in_progress).
+
+Область видимости — ContextVar `_project_dir`, тот же приём, что `saas/context.
+_tenant` для тенанта: устанавливается ОДИН раз в начале исполнения задачи
+(execution.run_task — по project_id этой задачи) и автоматически изолирована
+между параллельными asyncio-тасками (contextvars копируются на
+asyncio.create_task, не расшариваются) — двум задачам разных проектов,
+исполняющимся в один момент, не нужен явный лок или сброс после каждой.
+Пусто ("") — легаси/общий доступ к КОРНЮ workspace (как было раньше,
+для тенантов с одним проектом и для company-wide файлов вроде docs/strategy.md,
+которые пишутся ДО того, как какой-либо проект существует).
+
 execute_code/run_command исполняют процесс (интерпретатор/shell) через
 src/office/exec_sandbox.py. По умолчанию (SANDBOX_MODE=direct) — БЕЗ изоляции
 от файловой системы хоста, как и раньше: `_safe()` защищает только путь
@@ -16,6 +33,8 @@ Python-скрипт или shell-команда внутри workspace могу�
 целиком (opt-in через ALLOW_CODE_EXECUTION=1) независимо от SANDBOX_MODE.
 """
 
+import contextlib
+import contextvars
 import os
 import re
 from pathlib import Path
@@ -23,6 +42,37 @@ from pathlib import Path
 from src.saas import context as ctx
 
 MAX_FILE_BYTES = 200_000
+
+# См. докстринг модуля — область видимости workspace на текущий проект.
+_project_dir: contextvars.ContextVar[str] = contextvars.ContextVar("workspace_project_dir", default="")
+
+
+def set_project_dir(d: str) -> None:
+    """Переключает workspace на подпапку конкретного проекта (или "" — корень/
+    легаси). Вызывать в НАЧАЛЕ исполнения задачи (см. execution.run_task) —
+    контекст изолирован per-asyncio-Task, дальнейший явный сброс не обязателен."""
+    _project_dir.set((d or "").strip())
+
+
+def get_project_dir() -> str:
+    return _project_dir.get()
+
+
+@contextlib.contextmanager
+def project_scope(project_dir: str):
+    """Временно переключает workspace на project_dir, ГАРАНТИРОВАННО возвращая
+    прежнее значение по выходу (даже при исключении/continue) — в отличие от
+    голого set_project_dir(), который остаётся в силе до следующего явного
+    вызова. Нужен там, где сама область — не одноразовый asyncio.Task (как в
+    execution.run_task), а долгоживущая корутина цикла тенанта (office/loop.py):
+    без сброса finalize-блок одной итерации "просачивался" бы в scope
+    следующей итерации того же цикла."""
+    token = _project_dir.set((project_dir or "").strip())
+    try:
+        yield
+    finally:
+        _project_dir.reset(token)
+
 
 # Единая точка правды: разрешено ли исполнение кода/shell-команд из workspace.
 # Читаем ЛЕНИВО (не на импорт модуля) — тесты и .env могут выставлять переменную
@@ -42,6 +92,9 @@ _DISABLED_MSG = (
 
 def _base() -> Path:
     p = ctx.tenant_dir() / "workspace"
+    pd = get_project_dir()
+    if pd:
+        p = p / pd
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -432,7 +485,10 @@ def run_command(cmd: str, cwd_rel: str = "") -> str:
 
 
 def reset() -> None:
+    """Стирает ВЕСЬ workspace тенанта (все проекты), независимо от того, какой
+    project_dir сейчас установлен в контексте вызывающего — "сброс" означает
+    весь тенант, не только текущий проект."""
     import shutil
-    base = _base()
+    base = ctx.tenant_dir() / "workspace"
     if base.exists():
         shutil.rmtree(base, ignore_errors=True)

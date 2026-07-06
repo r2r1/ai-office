@@ -311,72 +311,84 @@ async def _run_office(tid: str) -> None:
                 # Финальная верификация: проверяем сайт перед объявлением готовности.
                 # Если есть незакрытые критические проблемы — добавляем fix-задачу вместо
                 # того чтобы молча считать результат принятым.
-                await execution.publish_site_auto(publish)
-                fix_added = await planning_engine.verify_and_fix_if_needed(publish)
-                if fix_added:
-                    # Задача добавлена — офис продолжит работу, не засыпаем
-                    await asyncio.sleep(LOOP_INTERVAL)
-                    continue
-                # Gap-driven перепланирование (Phase 4, Bootstrapping→Steady State):
-                # план выполнен, но измеримая цель не достигнута → офис САМ создаёт
-                # следующую работу под конкретный разрыв, а не только «жду указаний».
-                from src.office import gap as gap_mod
-                gap_tasks = gap_mod.replan()
-                if gap_tasks:
-                    for gt in gap_tasks:
-                        await publish({"type": "system",
-                                       "text": f"🎯 Цель ещё не достигнута — офис ставит задачу "
-                                               f"под разрыв: {gt['title'][:70]}"})
-                    await asyncio.sleep(LOOP_INTERVAL)
-                    continue
-                _completion_announced[tid] = True
-                # Здесь план ГЕНУИННО завершён (_engagement_complete уже true) — в
-                # отличие от промежуточных циклов, где фейковое авто-завершение будущих
-                # этапов маскирует несделанную работу (тест A3), здесь домысливать
-                # нечего: все задачи доски реально сделаны, а бизнес-этапы (LLM-generated,
-                # milestone_done CEO ведёт по своей дискреции и часто не успевает пройти
-                # их все явно — реальный кейс: designer/developer закрыли t3/t4, но
-                # этапы "Дизайн и визуалы"/"Разработка" остались pending навсегда) обязаны
-                # отражать это состояние, а не застревать как незавершённые в UI.
-                for s in milestones.all_stages():
-                    if s.get("status") != "done":
-                        milestones.set_status(s["id"], "done")
-                # BOS §5: ДО закрытия проекта — CEO решает сам, разовый ли это
-                # результат или на самом деле непрерывный цикл (Process). Смотрим
-                # ПОКА проект ещё активен (задачи ещё принадлежат ему, до close()).
-                from src.office import processes as processes_mod
-                from src.office import projects as projects_mod_peek
-                active_proj = projects_mod_peek.active()
-                if active_proj:
-                    tasks_summary = "\n".join(f"- {t['title']} ({t.get('role','')})"
-                                               for t in plan.for_project(active_proj["id"])[:15])
-                    try:
-                        cls = await orchestrator.classify_recurring(
-                            active_proj["title"], active_proj.get("goal", ""), tasks_summary)
-                    except Exception:
-                        cls = {}
-                    if cls.get("recurring") and cls.get("title") and cls.get("instruction"):
-                        proc = processes_mod.create(
-                            cls["title"], cls.get("role", "marketer"), cls["instruction"])
-                        await publish({"type": "system",
-                                       "text": f"🔄 Офис решил: «{active_proj['title'][:40]}» — это непрерывный "
-                                               f"цикл, запускаю процесс «{proc['title']}»"})
+                # _engagement_complete() смотрит на ВЕСЬ план компании (не per-project) —
+                # унаследованное упрощение v1, ещё не переписанное под несколько
+                # одновременно завершающихся Work (Фаза 4). Здесь корректно то, что
+                # ЕСТЬ: финализируем workspace ПЕРВОГО активного проекта, а не корень
+                # (иначе после Фазы 3 publish_site_auto/critic не нашли бы файлы,
+                # переехавшие в workspace/<project_dir>/). project_scope (НЕ голый
+                # set_project_dir) — эта корутина живёт ВЕСЬ прогон тенанта, без
+                # гарантированного сброса по выходу scope "утёк" бы в СЛЕДУЮЩУЮ
+                # итерацию того же цикла.
+                from src.office import workspace as workspace_module, projects as projects_module
+                proj = projects_module.active()
+                with workspace_module.project_scope(proj.get("workspace_dir", "") if proj else ""):
+                    await execution.publish_site_auto(publish)
+                    fix_added = await planning_engine.verify_and_fix_if_needed(publish)
+                    if fix_added:
+                        # Задача добавлена — офис продолжит работу, не засыпаем
+                        await asyncio.sleep(LOOP_INTERVAL)
+                        continue
+                    # Gap-driven перепланирование (Phase 4, Bootstrapping→Steady State):
+                    # план выполнен, но измеримая цель не достигнута → офис САМ создаёт
+                    # следующую работу под конкретный разрыв, а не только «жду указаний».
+                    from src.office import gap as gap_mod
+                    gap_tasks = gap_mod.replan()
+                    if gap_tasks:
+                        for gt in gap_tasks:
+                            await publish({"type": "system",
+                                           "text": f"🎯 Цель ещё не достигнута — офис ставит задачу "
+                                                   f"под разрыв: {gt['title'][:70]}"})
+                        await asyncio.sleep(LOOP_INTERVAL)
+                        continue
+                    _completion_announced[tid] = True
+                    # Здесь план ГЕНУИННО завершён (_engagement_complete уже true) — в
+                    # отличие от промежуточных циклов, где фейковое авто-завершение будущих
+                    # этапов маскирует несделанную работу (тест A3), здесь домысливать
+                    # нечего: все задачи доски реально сделаны, а бизнес-этапы (LLM-generated,
+                    # milestone_done CEO ведёт по своей дискреции и часто не успевает пройти
+                    # их все явно — реальный кейс: designer/developer закрыли t3/t4, но
+                    # этапы "Дизайн и визуалы"/"Разработка" остались pending навсегда) обязаны
+                    # отражать это состояние, а не застревать как незавершённые в UI.
+                    for s in milestones.all_stages():
+                        if s.get("status") != "done":
+                            milestones.set_status(s["id"], "done")
+                    # BOS §5: ДО закрытия проекта — CEO решает сам, разовый ли это
+                    # результат или на самом деле непрерывный цикл (Process). Смотрим
+                    # ПОКА проект ещё активен (задачи ещё принадлежат ему, до close()).
+                    from src.office import processes as processes_mod
+                    from src.office import projects as projects_mod_peek
+                    active_proj = projects_mod_peek.active()
+                    if active_proj:
+                        tasks_summary = "\n".join(f"- {t['title']} ({t.get('role','')})"
+                                                   for t in plan.for_project(active_proj["id"])[:15])
+                        try:
+                            cls = await orchestrator.classify_recurring(
+                                active_proj["title"], active_proj.get("goal", ""), tasks_summary)
+                        except Exception:
+                            cls = {}
+                        if cls.get("recurring") and cls.get("title") and cls.get("instruction"):
+                            proc = processes_mod.create(
+                                cls["title"], cls.get("role", "marketer"), cls["instruction"])
+                            await publish({"type": "system",
+                                           "text": f"🔄 Офис решил: «{active_proj['title'][:40]}» — это непрерывный "
+                                                   f"цикл, запускаю процесс «{proc['title']}»"})
 
-                # Project закрывается с фиксацией «что оставил после себя» (задачи,
-                # сайты, лиды + срез мира) — история компании ведётся по проектам.
-                from src.office import projects as projects_mod
-                closed = projects_mod.close(note="все задачи плана выполнены")
-                if closed:
-                    lb = closed.get("left_behind") or {}
+                    # Project закрывается с фиксацией «что оставил после себя» (задачи,
+                    # сайты, лиды + срез мира) — история компании ведётся по проектам.
+                    from src.office import projects as projects_mod
+                    closed = projects_mod.close(note="все задачи плана выполнены")
+                    if closed:
+                        lb = closed.get("left_behind") or {}
+                        await publish({"type": "system",
+                                       "text": f"📁 Проект «{closed['title'][:50]}» закрыт: "
+                                               f"{lb.get('tasks_done', 0)} задач, "
+                                               f"лидов: {lb.get('leads_count', 0)}"})
+                    await _set_progress_note("✅ Запланированная работа выполнена. Жду указаний — что делаем дальше.", publish)
                     await publish({"type": "system",
-                                   "text": f"📁 Проект «{closed['title'][:50]}» закрыт: "
-                                           f"{lb.get('tasks_done', 0)} задач, "
-                                           f"лидов: {lb.get('leads_count', 0)}"})
-                await _set_progress_note("✅ Запланированная работа выполнена. Жду указаний — что делаем дальше.", publish)
-                await publish({"type": "system",
-                               "text": "✅ Запланированная работа выполнена. Напишите в чат, что делать "
-                                       "дальше — команда продолжит. Построить полноценную компанию за один "
-                                       "прогон нельзя, поэтому двигаемся итерациями."})
+                                   "text": "✅ Запланированная работа выполнена. Напишите в чат, что делать "
+                                           "дальше — команда продолжит. Построить полноценную компанию за один "
+                                           "прогон нельзя, поэтому двигаемся итерациями."})
             await asyncio.sleep(max(LOOP_INTERVAL * 6, 60))
             continue
         # Gap Analysis НЕ должен ждать полного завершения плана (см. _engagement_stuck

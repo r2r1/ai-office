@@ -385,13 +385,21 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
     эскалация. Была вложенным замыканием _job внутри _assign — вынесена в модульную
     функцию (захватывала только параметры _assign, скрытых локалей нет)."""
     from src.office import trace
+    t_rec_policy = (plan.get_task(task_id) if task_id and plan.is_generated() else None) or {"title": task}
+    # Параллельные Work (Фаза 3): переключаем workspace на подпапку ПРОЕКТА этой
+    # задачи ДО первого write_file/read_file — run_task целиком выполняется в
+    # своём asyncio.Task (создан в assign()), поэтому contextvars.ContextVar
+    # изолирует эту область от параллельно исполняющейся задачи ДРУГОГО проекта
+    # без явного лока (см. workspace.set_project_dir docstring).
+    if task_id and plan.is_generated():
+        from src.office import projects as projects_module
+        workspace.set_project_dir(projects_module.workspace_dir_of(t_rec_policy.get("project", "")))
     registry.update_status(agent_id, "thinking")
     _thinking_since[tk(agent_id)] = time.time()
     _job_t0 = time.time()
     # Execution Policy (BOS §6): модель выбирается ПО ЗАДАЧЕ (рутина → дешёвая),
     # оценка стоимости пишется в trace ДО исполнения. Оверрайды владельца главнее.
     from src.office import execution_policy
-    t_rec_policy = (plan.get_task(task_id) if task_id and plan.is_generated() else None) or {"title": task}
     policy = execution_policy.decide(t_rec_policy, agent_id, role)
     # Анти-заклинивание скилла: 3+ провала задачи с ОДНИМ и тем же скиллом — смени
     # способ, а не ретрай того же пути. Реальный прогон: designer 7 раз подряд брал
