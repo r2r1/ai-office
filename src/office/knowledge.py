@@ -56,8 +56,17 @@ def remember(text: str, department: str = "", tags: str = "") -> None:
     norm = text.lower()
     if any((f.get("text") or "").lower() == norm for f in facts):
         return
-    facts.append({"text": text[:280], "department": department or "",
-                  "tags": tags or "", "ts": time.time()})
+    fact = {"text": text[:280], "department": department or "",
+            "tags": tags or "", "ts": time.time()}
+    # Эмбеддинг считается ОДИН раз при записи (не на каждый retrieve) — дальше
+    # используется как вторичный сигнал ранжирования поверх TF-скора (§8/§19 п.11).
+    # embed() сам деградирует к None при любой ошибке (сеть/баланс/провайдер) —
+    # тогда факт просто участвует в ранжировании как раньше, без семантики.
+    from src.core import embeddings
+    emb = embeddings.embed(text)
+    if emb is not None:
+        fact["emb"] = emb
+    facts.append(fact)
     data["facts"] = facts[-_MAX_FACTS:]
     ctx.write_json(_FILE, data)
 
@@ -140,7 +149,8 @@ def _department_facts(department: str) -> list[dict]:
     for f in _store().get("facts", []):
         same = department and f.get("department") == department
         out.append({"text": f.get("text", ""),
-                    "base": 0.18 if same else 0.06, "src": "dept"})
+                    "base": 0.18 if same else 0.06, "src": "dept",
+                    "emb": f.get("emb")})
     return out
 
 
@@ -170,10 +180,19 @@ def retrieve(task: str, department: str = "", limit: int = _DEFAULT_LIMIT) -> li
     Топ-N фактов под задачу. Раньше глобальные факты (base 0.9+) всегда доминировали и
     съедали все слоты — релевантность почти не работала. Теперь: ≤2 слота резервируем
     под самое важное глобальное (по base), а ОСТАЛЬНОЕ ранжируем по ЧИСТОЙ релевантности
-    к задаче (перекрытие ключевых слов), а не по base.
+    к задаче (перекрытие ключевых слов + семантическая близость эмбеддингов, где есть).
     """
     task_tokens = _tokens(task)
     globals_ = _global_facts()
+
+    # Семантический сигнал — вторичный, поверх TF: факт «клиент недоволен ценой»
+    # раньше не находился по запросу «жалоба на дороговизну» (ноль общих слов),
+    # хотя смысл совпадает. embed() сам вернёт None при недоступности провайдера/
+    # баланса — тогда ранжирование ИДЕНТИЧНО прежнему (чистый TF).
+    from src.core import embeddings as embeddings_mod
+    task_emb = embeddings_mod.embed(task)
+    _SEM_WEIGHT = 0.5
+    _SEM_MIN = 0.35  # порог «семантика одна вытягивает факт без общих слов»
 
     # 1) Резерв под важное глобальное — по базовому приоритету (философия/конституция/
     #    ограничения/ответы клиента идут первыми и не вытесняются).
@@ -185,19 +204,27 @@ def retrieve(task: str, department: str = "", limit: int = _DEFAULT_LIMIT) -> li
             seen.add(key)
             out.append(f["text"])
 
-    # 2) Остальное — по релевантности (перекрытие токенов), а не по base слоя.
+    # 2) Остальное — по релевантности (перекрытие токенов + семантика), а не по base слоя.
     rest = [f for f in (globals_ + _department_facts(department) + _result_facts(department))
             if f["text"].lower() not in seen]
-    def _relevance(f: dict) -> float:
+    def _tf(f: dict) -> float:
         f_tokens = _tokens(f["text"])
         if not f_tokens:
             return 0.0
         overlap = len(task_tokens & f_tokens)
-        return (overlap / (len(f_tokens) ** 0.5 + 1.0)) + 0.001 * f.get("base", 0.0)
+        return overlap / (len(f_tokens) ** 0.5 + 1.0)
+    def _sem(f: dict) -> float:
+        if not task_emb or not f.get("emb"):
+            return 0.0
+        return embeddings_mod.cosine(task_emb, f["emb"])
+    def _relevance(f: dict) -> float:
+        return _tf(f) + _SEM_WEIGHT * _sem(f) + 0.001 * f.get("base", 0.0)
     for f in sorted(rest, key=_relevance, reverse=True):
         if len(out) >= limit:
             break
-        if _relevance(f) <= 0:
+        # Раньше: пропускали факт без единого общего слова. Теперь высокая
+        # семантическая близость (без словесного пересечения) тоже пропускает вперёд.
+        if _tf(f) <= 0 and _sem(f) < _SEM_MIN:
             continue
         key = f["text"].lower()
         if key in seen:

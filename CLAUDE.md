@@ -288,7 +288,7 @@ framer-motion через esm.sh, без шага сборки; доступен 
 | `office/org.py` | Оргструктура: отделы и их лидеры |
 | `office/plan.py` | План-граф задач (id, role, deps, done_criterion, status) |
 | `office/milestones.py` | Бизнес-этапы и прогресс по ним |
-| `office/knowledge.py` | 3-слойная память с retrieval |
+| `office/knowledge.py` | 3-слойная память с retrieval — гибридный скор (TF + эмбеддинги через `core/embeddings.py`, деградирует к чистому TF без провайдера) |
 | `office/events.py` | Event Layer (доменные события для CEO) |
 | `office/tool_router.py` | `use_capability` → подбор интеграции |
 | `office/acceptance.py` | **Acceptance Layer** (BOS §8): задача закрывается ТОЛЬКО приёмкой — build (компиляция py/js), functional (критик сайта/бота), базовый уровень; вердикт пишется в задачу |
