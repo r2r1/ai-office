@@ -133,7 +133,10 @@ function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; 
   )
 }
 
-function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) {
+// Экспортирован — переиспользуется шагом "Интеграции" минимального онбординга
+// (OnboardingFlow.tsx): тот же CTA подключения, momент пиковой мотивации, а не
+// новый компонент карточки интеграции.
+export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => void }) {
   const isOAuth   = Boolean(integ.oauth_url)
   const isGoogle  = GOOGLE_SERVICES.has(integ.name)
   const isTgPersonal = integ.name === "telegram_personal"

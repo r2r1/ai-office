@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { api } from "../../data/api"
+import { useOfficeSelector } from "../../data/OfficeProvider"
+import { IntegCard } from "../views/ConnectionsView"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
-interface Mode { key: string; title: string; icon: string; intro: string; questions: { dimension: string; question: string }[] }
 interface Props { onDone: () => void }
 
-// Отделы, которые «рождаются» на финале (визуальное строительство, item 5).
+// Отделы, которые «рождаются» на финале (визуальное строительство).
 const BIRTH = [
   { role: "orchestrator", icon: "🧭", name: "CEO", lead: true },
   { role: "researcher", icon: "🔍", name: "Ресёрч" },
@@ -16,63 +17,29 @@ const BIRTH = [
   { role: "hr", icon: "👔", name: "HR" },
 ]
 
-const DIM_LABEL: Record<string, string> = {
-  product: "Продукт", client: "Клиент", revenue: "Экономика", goal: "Цель", constraints: "Ограничения",
-}
-
-type Phase = "scan" | "mode" | "interview" | "building"
+// Минимальный онбординг (BOS §5): "широкий, маленький, необязательный".
+// Раньше — 3 жёстких сценария × 5 фиксированных вопросов, скан сайта первым
+// шагом ДАЖЕ для тех, у кого сайта физически нет ("Хочу открыть компанию" /
+// "Есть идея"). Теперь: 1 свободное поле (широкое — пишет как хочет, от
+// одного слова до абзаца) + необязательная ссылка → офис сам исследует и
+// ПРОАКТИВНО показывает результат (аналитика/точки роста/инициативы), а не
+// молча начинает работу за спиной клиента.
+type Phase = "input" | "analyzing" | "result" | "integrations" | "building"
 
 export function OnboardingFlow({ onDone }: Props) {
-  const [modes, setModes] = useState<Mode[]>([])
-  const [phase, setPhase] = useState<Phase>("scan")
-  const [mode, setMode] = useState<Mode | null>(null)
-  const [step, setStep] = useState(0)
-  const [answers, setAnswers] = useState<string[]>([])
-  const [draft, setDraft] = useState("")
+  const [phase, setPhase] = useState<Phase>("input")
+  const [text, setText] = useState("")
+  const [url, setUrl] = useState("")
   const [busy, setBusy] = useState(false)
-  const [siteUrl, setSiteUrl] = useState("")
-  const [scanBusy, setScanBusy] = useState(false)
-  const [scanResult, setScanResult] = useState<any>(null)
+  const [result, setResult] = useState<{ analysis: string[]; growth_points: string[]; initiatives: any[] }>(
+    { analysis: [], growth_points: [], initiatives: [] })
+  const [integrations, setIntegrations] = useState<any[]>([])
 
-  useEffect(() => { api.onboardingModes().then(d => setModes(d.modes || [])) }, [])
-
-  async function runScan() {
-    if (!siteUrl.trim()) { setPhase("mode"); return }
-    setScanBusy(true)
-    const res = await api.onboardingScan(siteUrl.trim()).catch(() => ({ ok: false, findings: [] }))
-    setScanResult(res)
-    setScanBusy(false)
-  }
-
-  const total = mode?.questions.length || 5
-  const studied = useMemo(() => Math.round((answers.filter(a => a && a.trim()).length / total) * 100), [answers, total])
-
-  function pickMode(m: Mode) {
-    setMode(m); setAnswers(new Array(m.questions.length).fill("")); setStep(0); setDraft(""); setPhase("interview")
-  }
-
-  function commitAndNext() {
-    if (!mode) return
-    const next = [...answers]; next[step] = draft; setAnswers(next)
-    if (step + 1 < mode.questions.length) {
-      setStep(step + 1); setDraft(next[step + 1] || "")
-    } else {
-      finish(next)
-    }
-  }
-
-  function back() {
-    if (step === 0) { setPhase("mode"); setMode(null); return }
-    const prev = step - 1; setStep(prev); setDraft(answers[prev] || "")
-  }
-
-  async function finish(finalAnswers: string[]) {
-    if (!mode) return
+  async function start() {
     setBusy(true)
-    const payload = mode.questions.map((q, i) => ({ dimension: q.dimension, question: q.question, answer: finalAnswers[i] || "" }))
-    await api.onboardingFinish(mode.key, payload, scanResult && scanResult.ok ? scanResult : undefined)
+    await api.briefStart(text.trim(), url.trim()).catch(() => null)
     setBusy(false)
-    setPhase("building")
+    setPhase("analyzing")
   }
 
   return (
@@ -87,169 +54,65 @@ export function OnboardingFlow({ onDone }: Props) {
           "radial-gradient(48vw 48vw at 85% 80%, rgba(255,172,46,0.07), transparent 60%)" }} />
 
       <AnimatePresence mode="wait">
-        {phase === "scan" && (
-          <motion.div key="scan" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+        {phase === "input" && (
+          <motion.div key="input" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
             style={{ position: "relative", width: "100%", maxWidth: 560, textAlign: "center" }}>
             <CeoBadge />
             <h1 className="display" style={{ fontSize: 28, margin: "18px 0 8px", fontWeight: 600 }}>
-              Есть уже сайт?
+              Расскажите о деле
             </h1>
             <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 24 }}>
-              Дайте ссылку — офис изучит его прямо сейчас, ещё до первого вопроса.
+              В двух словах или подробно — как удобно. Есть бизнес, только открываетесь
+              или просто идея — офис разберётся сам.
             </p>
 
-            {!scanResult && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <input value={siteUrl} onChange={e => setSiteUrl(e.target.value)} autoFocus
-                  placeholder="например, marco-kmv.ru"
-                  onKeyDown={e => { if (e.key === "Enter") runScan() }}
-                  style={{
-                    flex: 1, padding: "13px 15px", fontSize: 14, borderRadius: "var(--radius-md)",
-                    border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)",
-                    color: "var(--text)", outline: "none",
-                  }} />
-                <motion.button onClick={runScan} disabled={scanBusy} whileTap={{ scale: 0.97 }}
-                  style={{
-                    padding: "10px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
-                    background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600, opacity: scanBusy ? 0.6 : 1,
-                  }}>
-                  {scanBusy ? "Изучаю…" : siteUrl.trim() ? "Изучить" : "Пропустить"}
-                </motion.button>
-              </div>
-            )}
-
-            {scanResult && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "left" }}>
-                {scanResult.ok ? (
-                  <>
-                    <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>
-                      {scanResult.headline}
-                    </div>
-                    <div style={{
-                      padding: "16px 18px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
-                      border: "1px solid var(--hairline-strong)", marginBottom: 16,
-                    }}>
-                      {(scanResult.pain_points || []).length > 0 ? (
-                        scanResult.pain_points.map((f: string, i: number) => (
-                          <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.06 }}
-                            style={{ fontSize: 13, padding: "5px 0", color: "var(--text-dim)" }}>
-                            ⚠ {f}
-                          </motion.div>
-                        ))
-                      ) : (
-                        <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                          Базовые проблемы не найдены — офис изучит остальное в работе.
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{
-                    padding: "16px 18px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
-                    border: "1px solid var(--hairline-strong)", marginBottom: 16, fontSize: 13, color: "var(--muted)",
-                  }}>
-                    Не удалось изучить сайт — продолжим по вашим ответам.
-                  </div>
-                )}
-                <motion.button onClick={() => setPhase("mode")} whileTap={{ scale: 0.97 }}
-                  style={{
-                    width: "100%", padding: "12px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
-                    background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
-                  }}>
-                  Продолжить →
-                </motion.button>
-              </motion.div>
-            )}
-          </motion.div>
-        )}
-
-        {phase === "mode" && (
-          <motion.div key="mode" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
-            style={{ position: "relative", width: "100%", maxWidth: 720, textAlign: "center" }}>
-            <CeoBadge />
-            <h1 className="display" style={{ fontSize: 30, margin: "18px 0 8px", fontWeight: 600 }}>С чего начнём?</h1>
-            <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-              CEO задаст несколько вопросов и соберёт под вас команду.
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
-              {modes.map(m => (
-                <motion.button key={m.key} onClick={() => pickMode(m)}
-                  whileHover={{ y: -4 }} whileTap={{ scale: 0.98 }}
-                  style={{
-                    textAlign: "left", padding: "20px 18px", borderRadius: "var(--radius-lg)", cursor: "pointer",
-                    background: "var(--surface)", border: "1px solid var(--hairline-strong)", color: "var(--text)",
-                  }}>
-                  <div style={{ fontSize: 30, marginBottom: 10 }}>{m.icon}</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{m.title}</div>
-                  <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>{m.intro}</div>
-                </motion.button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-
-        {phase === "interview" && mode && (
-          <motion.div key="interview" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
-            style={{ position: "relative", width: "100%", maxWidth: 560 }}>
-            {/* прогресс «Компания изучена на X%» */}
-            <div style={{ marginBottom: 22 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginBottom: 7 }}>
-                <span>Компания изучена на</span>
-                <span className="mono" style={{ color: studied >= 60 ? "#a0e0ab" : "#ffac2e" }}>{studied}%</span>
-              </div>
-              <div style={{ height: 4, borderRadius: 999, background: "var(--hairline-strong)", overflow: "hidden" }}>
-                <motion.div animate={{ width: `${studied}%` }} transition={{ duration: 0.5 }}
-                  style={{ height: "100%", background: MERCURY, borderRadius: 999 }} />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-              <CeoBadge small />
-              <div className="mono" style={{ fontSize: 10, letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--faint)" }}>
-                {DIM_LABEL[mode.questions[step].dimension] || "Вопрос"} · {step + 1}/{mode.questions.length}
-              </div>
-            </div>
-
-            <AnimatePresence mode="wait">
-              <motion.h2 key={step} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }}
-                transition={{ duration: 0.25 }}
-                style={{ fontSize: 21, fontWeight: 600, lineHeight: 1.35, margin: "0 0 18px" }}>
-                {mode.questions[step].question}
-              </motion.h2>
-            </AnimatePresence>
-
-            <textarea value={draft} onChange={e => setDraft(e.target.value)} autoFocus rows={4}
-              placeholder="Ответьте своими словами…"
-              onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commitAndNext() }}
+            <textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={4}
+              placeholder="Например: делаю торты на заказ, хочу больше клиентов…"
               style={{
                 width: "100%", resize: "vertical", padding: "13px 15px", fontSize: 14, lineHeight: 1.5,
                 borderRadius: "var(--radius-md)", border: "1px solid var(--hairline-strong)",
                 background: "var(--surface-soft)", color: "var(--text)", fontFamily: "inherit", outline: "none",
+                marginBottom: 10,
+              }} />
+            <input value={url} onChange={e => setUrl(e.target.value)}
+              placeholder="Сайт или соцсеть, если есть (необязательно)"
+              onKeyDown={e => { if (e.key === "Enter") start() }}
+              style={{
+                width: "100%", padding: "11px 14px", fontSize: 13, borderRadius: "var(--radius-md)",
+                border: "1px solid var(--hairline)", background: "var(--surface-soft)",
+                color: "var(--text)", outline: "none", marginBottom: 20,
               }} />
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18 }}>
-              <button onClick={back} disabled={busy}
-                style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 13, padding: "8px 4px" }}>
-                ← Назад
-              </button>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                {step + 1 < mode.questions.length && (
-                  <button onClick={() => { setDraft(""); commitAndNext() }} disabled={busy}
-                    style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 12 }}>
-                    Пропустить
-                  </button>
-                )}
-                <motion.button onClick={commitAndNext} disabled={busy} whileTap={{ scale: 0.97 }}
-                  style={{
-                    padding: "10px 22px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
-                    background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1,
-                  }}>
-                  {busy ? "Собираю офис…" : step + 1 < mode.questions.length ? "Дальше" : "Запустить офис →"}
-                </motion.button>
-              </div>
-            </div>
+            <motion.button onClick={start} disabled={busy} whileTap={{ scale: 0.97 }}
+              style={{
+                width: "100%", padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
+                background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1,
+              }}>
+              {busy ? "Запускаю…" : text.trim() ? "Начать →" : "Разберитесь сами →"}
+            </motion.button>
           </motion.div>
+        )}
+
+        {phase === "analyzing" && (
+          <AnalyzingScreen key="analyzing" onReady={r => { setResult(r); setPhase("result") }} />
+        )}
+
+        {phase === "result" && (
+          <ResultScreen key="result" result={result}
+            onContinue={async () => {
+              const d = await api.suggestedIntegrations().catch(() => ({ integrations: [] }))
+              if (d.integrations && d.integrations.length > 0) {
+                setIntegrations(d.integrations)
+                setPhase("integrations")
+              } else {
+                setPhase("building")
+              }
+            }} />
+        )}
+
+        {phase === "integrations" && (
+          <IntegrationsScreen key="integrations" integrations={integrations}
+            onContinue={() => setPhase("building")} />
         )}
 
         {phase === "building" && (
@@ -260,7 +123,185 @@ export function OnboardingFlow({ onDone }: Props) {
   )
 }
 
-/** Финал: CEO появляется первым, отделы рождаются каскадом (item 5). */
+// ── "Офис изучает…" — живой статус вместо немой анимации ────────────────────
+// Опрашивает /api/onboarding/result (готовность) и параллельно показывает
+// РЕАЛЬНЫЕ события из общей ленты офиса (useOfficeSelector — тот же SSE-поток,
+// что и остальное приложение, уже подключён к этому моменту), а не выдуманный
+// прогресс-бар.
+function AnalyzingScreen({ onReady }: { onReady: (r: any) => void }) {
+  const feed = useOfficeSelector(s => s.feed)
+  const latest = feed[0]?.text || ""
+  const pollRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function poll() {
+      const d = await api.onboardingResult().catch(() => ({ ready: false }))
+      if (cancelled) return
+      if (d.ready) { onReady(d); return }
+      pollRef.current = window.setTimeout(poll, 2500)
+    }
+    poll()
+    return () => { cancelled = true; if (pollRef.current) clearTimeout(pollRef.current) }
+  }, []) // eslint-disable-line
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{ position: "relative", textAlign: "center", width: "100%", maxWidth: 480 }}>
+      <motion.div animate={{ scale: [1, 1.12, 1] }} transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
+        style={{
+          width: 64, height: 64, borderRadius: "50%", margin: "0 auto 20px", display: "flex",
+          alignItems: "center", justifyContent: "center", fontSize: 28,
+          background: "var(--surface)", border: "1px solid rgba(255,172,46,0.6)",
+          boxShadow: "0 0 26px rgba(255,172,46,0.3)",
+        }}>🧭</motion.div>
+      <h1 className="display" style={{ fontSize: 22, fontWeight: 600, marginBottom: 10 }}>Офис изучает ваше дело…</h1>
+      <AnimatePresence mode="wait">
+        <motion.p key={latest} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+          style={{ color: "var(--muted)", fontSize: 13, minHeight: 20, padding: "0 20px" }}>
+          {latest || "Собираю команду и провожу первое исследование рынка…"}
+        </motion.p>
+      </AnimatePresence>
+    </motion.div>
+  )
+}
+
+// ── Результат: аналитика + точки роста + инициативы на выбор ────────────────
+function ResultScreen({ result, onContinue }: { result: any; onContinue: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [decided, setDecided] = useState<Set<string>>(new Set())
+
+  async function decide(id: string, action: "accept" | "reject") {
+    setBusy(id)
+    await api.post(`/api/initiative/${id}/${action}`, {}).catch(() => null)
+    setDecided(prev => new Set(prev).add(id))
+    setBusy(null)
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+      style={{ position: "relative", width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }}>
+      <div style={{ textAlign: "center", marginBottom: 22 }}>
+        <CeoBadge small />
+        <h1 className="display" style={{ fontSize: 24, fontWeight: 600, margin: "14px 0 6px" }}>Вот что понял офис</h1>
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>Дальше решаете вы — можно принять, отклонить или пропустить всё</p>
+      </div>
+
+      {result.analysis?.length > 0 && (
+        <Section title="Аналитика">
+          {result.analysis.map((a: string, i: number) => (
+            <Bullet key={i} icon="📊" text={a} delay={i * 0.06} />
+          ))}
+        </Section>
+      )}
+
+      {result.growth_points?.length > 0 && (
+        <Section title="Точки роста">
+          {result.growth_points.map((g: string, i: number) => (
+            <Bullet key={i} icon="🌱" text={g} delay={i * 0.06} />
+          ))}
+        </Section>
+      )}
+
+      {result.initiatives?.length > 0 && (
+        <Section title="Предложенные инициативы">
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {result.initiatives.map((ini: any) => (
+              <div key={ini.id} style={{
+                padding: "14px 16px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
+                border: "1px solid var(--hairline-strong)", opacity: decided.has(ini.id) ? 0.45 : 1,
+                transition: "opacity 0.2s",
+              }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 5 }}>{ini.title}</div>
+                {ini.rationale && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 8 }}>{ini.rationale}</div>}
+                {ini.expected_outcome && (
+                  <div style={{ fontSize: 11, color: "var(--mercury-a)", marginBottom: 10 }}>📈 {ini.expected_outcome}</div>
+                )}
+                {!decided.has(ini.id) && (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => decide(ini.id, "accept")} disabled={busy === ini.id}
+                      style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                        border: "1px solid #a0e0ab", background: "rgba(160,224,171,0.15)", color: "#a0e0ab" }}>
+                      ✅ Начать с этого
+                    </button>
+                    <button onClick={() => decide(ini.id, "reject")} disabled={busy === ini.id}
+                      style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                        border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+                      Не сейчас
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {!result.analysis?.length && !result.growth_points?.length && !result.initiatives?.length && (
+        <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 13, padding: "20px 0" }}>
+          Офис пока не набрал материала для анализа — начнём работу, дальше он изучит всё сам.
+        </div>
+      )}
+
+      <motion.button onClick={onContinue} whileTap={{ scale: 0.97 }}
+        style={{
+          width: "100%", marginTop: 22, padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none",
+          cursor: "pointer", background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
+        }}>
+        Продолжить →
+      </motion.button>
+    </motion.div>
+  )
+}
+
+// ── Интеграции в момент пиковой мотивации (не спрятаны в настройках) ─────────
+function IntegrationsScreen({ integrations, onContinue }: { integrations: any[]; onContinue: () => void }) {
+  const [, force] = useState(0)
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+      style={{ position: "relative", width: "100%", maxWidth: 520, textAlign: "center" }}>
+      <CeoBadge small />
+      <h1 className="display" style={{ fontSize: 22, fontWeight: 600, margin: "14px 0 6px" }}>Подключим сразу?</h1>
+      <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 20 }}>
+        По вашему описанию офису пригодятся эти сервисы — можно позже, в «Компания → Доступы»
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, textAlign: "left", marginBottom: 20 }}>
+        {integrations.map(i => (
+          <IntegCard key={i.name} integ={i} onRefresh={() => force(n => n + 1)} />
+        ))}
+      </div>
+      <motion.button onClick={onContinue} whileTap={{ scale: 0.97 }}
+        style={{
+          width: "100%", padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
+          background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
+        }}>
+        Готово →
+      </motion.button>
+    </motion.div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div className="mono" style={{ fontSize: 10, letterSpacing: "1.5px", textTransform: "uppercase",
+        color: "var(--faint)", marginBottom: 10 }}>{title}</div>
+      {children}
+    </div>
+  )
+}
+
+function Bullet({ icon, text, delay }: { icon: string; text: string; delay: number }) {
+  return (
+    <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay }}
+      style={{ display: "flex", gap: 10, fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, padding: "5px 0" }}>
+      <span style={{ flexShrink: 0 }}>{icon}</span>
+      <span>{text}</span>
+    </motion.div>
+  )
+}
+
+/** Финал: CEO появляется первым, отделы рождаются каскадом. */
 function BuildingScene({ onDone }: { onDone: () => void }) {
   const [shown, setShown] = useState(0)
   useEffect(() => {

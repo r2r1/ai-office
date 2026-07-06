@@ -138,6 +138,12 @@ export const api = {
   onboardingScan: (url: string) => postJSON<any>("/api/onboarding/scan", { url }, null),
   onboardingFinish: (mode: string, answers: any[], scan?: any) =>
     postJSON<any>("/api/onboarding/finish", { mode, answers, scan }, null),
+  // Минимальный онбординг (BOS §5): 1 необязательное поле + необязательная ссылка.
+  briefStart: (input: string, url = "") => postJSON<any>("/api/brief/start", { input, url }, null),
+  onboardingResult: () => getJSON<any>("/api/onboarding/result",
+    { ready: false, analysis: [], growth_points: [], initiatives: [] }),
+  suggestedIntegrations: () => getJSON<{ integrations: any[] }>(
+    "/api/onboarding/suggested-integrations", { integrations: [] }),
   officeStatus: () => getJSON<any>("/api/office/status", { paused: false, reason: "" }),
   officePause: () => postJSON<any>("/api/office/pause", {}, null),
   officeResume: () => postJSON<any>("/api/office/resume", {}, null),
