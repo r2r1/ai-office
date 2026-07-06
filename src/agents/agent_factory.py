@@ -5,95 +5,38 @@
 Любой агент может запросить ресёрчера через инструмент request_research.
 """
 
-import json
-import re
 from typing import Callable, Awaitable
 
 from src.core import llm
-from src.agents import researcher as researcher_agent
 from src.agents import tool_schemas as _ts
 from src.agents import file_tool_handlers
-from src.office import questions as questions_module
-from src.office import state
-from src.office import connections
-from src.office import memory as memory_module
+from src.agents import comms_tool_handlers
+from src.agents import integration_tool_handlers
 from src.office import models as models_module
 from src.office import office_channel
-from src.office import threads as threads_module
+from src.office import state
 from src.office import workspace as workspace_module
-from src.office import registry as registry_module
-from src.office import tool_router
-from src.office import skills as skills_module
-from src.office import events as events_module
-from src.integrations import registry as integrations_registry
 
 # Тексты ролей и командные политики переехали в файлы (Prompt Builder — единая
 # сборка): роли — src/office/builtin_roles/<role>.md (читает roles.py), политики
 # (автономность, «артефакты только через инструменты», межагентность, правила
-# лидера) — src/office/policies/*.md (читает prompt_builder.policy). JSON-схемы
-# инструментов — src/agents/tool_schemas.py (были здесь же, ~330 строк чистых
-# данных внутри 901-строчного god-модуля, docs/audit-dd-2026-07-06.md §1/§19
-# п.6). Здесь остались обработчики (замыкания над agent_id/role/publish
-# конкретного вызова create()) и диспетчеризация.
+# лидера) — src/office/policies/*.md (читает prompt_builder.policy). Инструменты
+# агента вынесены в отдельные модули (этот файл был 901-строчным god-модулем,
+# docs/audit-dd-2026-07-06.md §1/§19 п.6):
+#   tool_schemas.py             — JSON-схемы 19 инструментов (чистые данные)
+#   file_tool_handlers.py       — write_file/read_file/list_files/verify_code/
+#                                  execute_code/delete_file/configure_bot
+#   comms_tool_handlers.py      — request_research/ask_user/ask_colleague/
+#                                  raise_event/delegate_task/read_office_chat/
+#                                  get_connection (+ try_extract_connection)
+#   integration_tool_handlers.py — list_integrations/use_integration/
+#                                  use_capability/use_skill/find_skills
+# Каждый проход декомпозиции делался ПОСЛЕ того, как tests/test_agent_tool_
+# handlers.py фиксировал текущее поведение — иначе рефакторинг замыканий над
+# agent_id/role/publish рисковал тихо сломать wiring без единого сигнала.
 
-_CRED_KEYWORDS = {
-    "api", "key", "ключ", "token", "токен", "secret", "пароль", "password",
-    "логин", "login", "access", "доступ", "credentials", "учётные", "oauth",
-    "telegram", "instagram", "vk", "вконтакте", "openai", "anthropic",
-    "notion", "airtable", "google", "youtube", "tiktok", "facebook",
-}
-
-_PLATFORM_WORDS = {
-    "telegram", "instagram", "vk", "вконтакте", "openai", "anthropic",
-    "google", "youtube", "tiktok", "facebook", "notion", "airtable",
-    "twitter", "linkedin", "whatsapp", "viber", "discord", "slack",
-    "github", "gitlab", "stripe", "yandex", "яндекс", "авито", "avito",
-    "wildberries", "wb", "ozon", "озон", "bitrix", "bitrix24",
-}
-
-_CRED_TYPES = {"key", "ключ", "token", "токен", "secret"} | {"password", "пароль"} | {"login", "логин"}
-
-
-def _try_extract_connection(question: str, answer: str) -> dict | None:
-    """
-    Если вопрос звучит как запрос учётных данных — собираем структуру подключения.
-    Возвращает dict для connections.save() или None если не похоже на учётные данные.
-    """
-    if not answer.strip():
-        return None
-    q_lower = question.lower()
-    words = set(q_lower.replace(":", " ").replace("?", " ").replace(".", " ").split())
-
-    # Нужен хотя бы один кред-ключевик
-    if not (words & _CRED_KEYWORDS):
-        return None
-
-    # Определяем название платформы (первое совпадение из известных)
-    platform = next((w.capitalize() for w in words if w in _PLATFORM_WORDS), None)
-    if not platform:
-        # Ищем слово после "для" / "к" / "of" / "for"
-        m = re.search(r'(?:для|к|for|of)\s+([a-zа-я0-9_\-]+)', q_lower)
-        platform = m.group(1).capitalize() if m else "Сервис"
-
-    # Тип подключения
-    if words & {"password", "пароль", "login", "логин"}:
-        conn_type = "login"
-        # Пробуем разобрать "login: X password: Y" или "логин: X пароль: Y"
-        l = re.search(r'(?:login|логин)[:\s]+([^\s,]+)', answer, re.I)
-        p = re.search(r'(?:password|пароль)[:\s]+([^\s,]+)', answer, re.I)
-        if l and p:
-            fields = {"login": l.group(1), "password": p.group(1)}
-        else:
-            fields = {"value": answer.strip()}
-    else:
-        conn_type = "api"
-        fields = {"key": answer.strip()}
-
-    # Дедуп по имени+значениям — уже делает connections.save() (сравнивает ВСЕ
-    # поля, не только key/value) при создании; отдельная проверка здесь была
-    # дублирующей и более узкой копией той же логики в двух местах.
-    return {"name": platform, "type": conn_type, "fields": fields,
-            "note": "Автосохранено агентом при ответе на вопрос"}
+# Backward-compat: старые тесты/код могли ссылаться на приватное имя здесь.
+_try_extract_connection = comms_tool_handlers.try_extract_connection
 
 
 def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaitable[None]],
@@ -112,314 +55,6 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
     from src.office import prompt_builder
     system = prompt_builder.build(role, task, agent_id, skill=skill)
     prompt_builder.log_prompt(agent_id, role, system, task)
-
-    async def _handle_request_research(args: dict) -> str:
-        question = args.get("question", "")
-        depth = args.get("depth", "quick")
-        await publish({"type": "speech", "agent_id": agent_id,
-                       "text": f"📡 Запрашиваю ресёрчера [{depth}]: {question[:60]}"})
-        # видно в общем чате: кто у кого что запросил
-        office_channel.post(agent_id, role, f"@ресёрчер, нужны данные: {question[:160]}")
-        await publish({"type": "office_chat", "from": agent_id, "role": role,
-                       "text": f"@ресёрчер, нужны данные: {question[:160]}"})
-        return await researcher_agent.run_async(
-            question=question, depth=depth, publish=publish, agent_id="researcher_1",
-        )
-
-    async def _handle_ask_user(args: dict) -> str:
-        import asyncio
-        question_text = args.get("question", "")
-        # Проверяем память — вдруг на этот вопрос уже отвечали
-        cached = memory_module.lookup(question_text)
-        if cached:
-            await publish({"type": "speech", "agent_id": agent_id,
-                           "text": f"💭 (из памяти): {question_text[:50]} → {cached[:60]}"})
-            return cached
-        qid, fut = questions_module.ask(question_text, publish, agent_id=agent_id)
-        # Вопрос попадает в личный чат с агентом — пользователь ответит прямо там
-        threads_module.post(agent_id, "agent", question_text, kind="question", question_id=qid)
-        await publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
-                       "kind": "question", "question_id": qid, "text": question_text})
-        try:
-            answer = await asyncio.wait_for(fut, timeout=300)  # 5 мин макс
-        except asyncio.TimeoutError:
-            questions_module.answer(qid, "")
-            threads_module.mark_answered(qid)
-            await publish({"type": "question_answered", "question_id": qid, "agent_id": agent_id})
-            return "Пользователь не ответил — продолжай без этих данных."
-        if answer:
-            memory_module.remember(question_text, answer)
-            # Автосохранение в подключения если вопрос про учётные данные
-            conn = _try_extract_connection(question_text, answer)
-            if conn:
-                saved = connections.save(conn)
-                await publish({"type": "connection_added", "connection": saved,
-                               "agent_id": agent_id,
-                               "text": f"🔌 Доступ '{saved['name']}' сохранён в подключения"})
-                await publish({"type": "speech", "agent_id": agent_id,
-                               "text": f"✅ Доступ к {saved['name']} сохранён — буду использовать в следующий раз автоматически"})
-                # Оповещаем всех агентов через общий канал
-                office_channel.post(
-                    "system", "system",
-                    f"🔑 API-ключ для '{saved['name']}' получен и сохранён. "
-                    f"Все агенты могут использовать get_connection('{saved['name']}') — "
-                    f"не спрашивайте пользователя повторно."
-                )
-        return answer
-
-    async def _handle_ask_colleague(args: dict) -> str:
-        """Синхронная консультация: коллега нужной роли отвечает на вопрос ОДНИМ
-        бесшумным LLM-вызовом (без инструментов → без рекурсии и циклов)."""
-        col_role = (args.get("role") or "").strip()
-        question = (args.get("question") or "").strip()
-        if not col_role or not question:
-            return "Укажи роль коллеги и конкретный вопрос."
-        if col_role == role:
-            return "Это твоя же роль — реши сам, без консультации."
-        # Находим коллегу этой роли (или отвечаем «от лица роли», если он ещё не нанят)
-        colleague = next((a for a in registry_module.all_agents() if a.role == col_role), None)
-        col_id = colleague.agent_id if colleague else f"{col_role}_1"
-        col_work = state.result_for(col_id) if colleague else ""
-        from src.office import roles as roles_module
-        col_base = roles_module.render(col_role)
-        await publish({"type": "speech", "agent_id": agent_id,
-                       "text": f"💬 спрашиваю {col_role}: {question[:60]}"})
-        # вопрос коллеге виден в общем чате
-        office_channel.post(agent_id, role, f"@{col_role}, {question[:200]}")
-        await publish({"type": "office_chat", "from": agent_id, "role": role,
-                       "text": f"@{col_role}, {question[:200]}"})
-        sys = (col_base + prompt_builder.brief_block()
-               + ("\n\n=== ТВОЯ ПОСЛЕДНЯЯ РАБОТА (опирайся на неё) ===\n" + col_work[:1500]
-                  if col_work else "")
-               + "\n\nКоллега по команде задаёт тебе вопрос. Ответь КОРОТКО, конкретно и по делу "
-                 "(без воды), чтобы он сразу мог использовать ответ в работе.")
-        try:
-            answer = await llm.run_agent(
-                system=sys, user=question,
-                model=models_module.for_agent(col_id),
-                max_tokens=600, use_search=False, agent_id=col_id,
-            )
-        except Exception as e:
-            return f"Коллега {col_role} не смог ответить: {str(e)[:80]}. Реши сам."
-        answer = (answer or "").strip() or "Коллега не дал содержательного ответа — реши сам."
-        await publish({"type": "speech", "agent_id": col_id,
-                       "text": f"💬 → {agent_id}: {answer[:80]}"})
-        # ответ коллеги виден в общем чате
-        office_channel.post(col_id, col_role, f"@{role}: {answer[:240]}")
-        await publish({"type": "office_chat", "from": col_id, "role": col_role,
-                       "text": f"@{role}: {answer[:240]}"})
-        return f"Ответ {col_role}: {answer}"
-
-    async def _handle_raise_event(args: dict) -> str:
-        kind = (args.get("kind") or "signal").strip()
-        summary = (args.get("summary") or "").strip()
-        detail = (args.get("detail") or "").strip()
-        if not summary:
-            return "Опиши суть сигнала одной фразой."
-        ev = events_module.raise_event(kind, summary, detail, from_role=role, from_agent=agent_id)
-        if not ev:
-            return "Событие не создано (пустая суть)."
-        label = events_module.KINDS.get(ev["kind"], ev["kind"])
-        await _publish_and_log({"type": "speech", "agent_id": agent_id,
-                                "text": f"📨 Сигнал компании [{label}]: {summary[:70]}"})
-        await publish({"type": "department_event", "agent_id": agent_id, "kind": ev["kind"],
-                       "text": f"{label} от {role}: {summary[:120]}"})
-        return ("Событие передано CEO — он интерпретирует его и при необходимости поручит "
-                "нужному отделу. Продолжай свою задачу.")
-
-    async def _handle_delegate_task(args: dict) -> str:
-        from src.office import plan as plan_module
-        from src.office import roles as roles_module
-        col_role = (args.get("role") or "").strip()
-        title = (args.get("title") or "").strip()
-        if not col_role or not title:
-            return "Укажи роль исполнителя и что нужно сделать."
-        if col_role == role:
-            return "Это твоя зона — сделай сам, не делегируй себе."
-        if col_role not in roles_module.known_roles():
-            valid = ", ".join(sorted(roles_module.known_roles()))
-            return (f"Роли «{col_role}» не существует в офисе — задача НЕ поставлена. "
-                    f"Реальные роли: {valid}.")
-        t = plan_module.add_task(title, col_role, args.get("done_criterion", ""),
-                                 requested_by=agent_id)
-        await publish({"type": "speech", "agent_id": agent_id,
-                       "text": f"📌 Поставил задачу {col_role}: {title[:50]}"})
-        office_channel.post(agent_id, role, f"📌 @{col_role}, задача: {title[:160]}")
-        await publish({"type": "office_chat", "from": agent_id, "role": role,
-                       "text": f"📌 @{col_role}, задача: {title[:160]}"})
-        return (f"Задача поставлена {col_role} (id={t['id']}) и добавлена на доску — "
-                f"его лидер назначит исполнителя. Можешь продолжать своё.")
-
-    async def _handle_read_office_chat(args: dict) -> str:
-        n = args.get("n", 20)
-        msgs = office_channel.recent(n)
-        if not msgs:
-            return "Общий чат пуст."
-        lines = [f"[{m['from']}]: {m['text']}" for m in msgs]
-        return "\n".join(lines)
-
-    async def _handle_get_connection(args: dict) -> str:
-        name = args.get("name", "")
-        conn = connections.get_by_name(name)
-        if not conn:
-            available = ", ".join(connections.names()) or "нет сохранённых"
-            return (
-                f"Подключение '{name}' не найдено. Доступные: {available}. "
-                f"Используй ask_user чтобы запросить у пользователя API-ключ или логин/пароль — "
-                f"они автоматически сохранятся в подключения."
-            )
-        return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
-                          ensure_ascii=False)
-
-    # write_file/read_file/list_files/verify_code/execute_code/delete_file/
-    # configure_bot — вынесены в file_tool_handlers.py (второй проход декомпозиции
-    # agent_factory.py, см. tests/test_agent_tool_handlers.py — зафиксировал
-    # поведение ДО извлечения). Фабрика вызывается ниже, после определения
-    # _publish_and_log (её замыкания используют этот колбэк).
-
-    async def _handle_list_integrations(args: dict) -> str:
-        lines = []
-        for integ in integrations_registry.all_integrations():
-            status = "✅ подключено" if integrations_registry.is_connected(integ) else "⚪ не подключено"
-            acts = ", ".join(
-                f"{a.name}({', '.join(a.required) or '—'})" for a in integ.actions.values()
-            )
-            lines.append(f"• {integ.name} [{status}] — {integ.description}\n    действия: {acts}")
-        if not lines:
-            return "Пока нет доступных интеграций."
-        return "Доступные интеграции:\n" + "\n".join(lines)
-
-    async def _execute_integration(name: str, action_name: str, params: dict) -> str:
-        """Ядро вызова интеграции — общее для use_integration и use_capability."""
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except json.JSONDecodeError:
-                params = {}
-
-        integ = integrations_registry.get(name)
-        if not integ:
-            avail = ", ".join(i.name for i in integrations_registry.all_integrations()) or "нет"
-            return f"Интеграция '{name}' не найдена. Доступные: {avail}."
-        action = integ.actions.get(action_name)
-        if not action:
-            acts = ", ".join(integ.actions.keys())
-            return f"У '{integ.name}' нет действия '{action_name}'. Доступные действия: {acts}."
-
-        # Гейт автономии для ВНЕШНЕ-видимых действий: на уровнях ниже требуемого офис
-        # не выполняет действие сам, а просит OK клиента. website публикует через свой
-        # гейт (loop._publish_site_auto), поэтому его здесь не дублируем.
-        if integ.name != "website":
-            from src.office import autonomy
-            act_type = autonomy._action_type_for(action_name)
-            if autonomy.needs_approval(act_type):
-                return (f"Действие «{integ.title}.{action_name}» затрагивает внешний мир, а уровень "
-                        f"автономии «{autonomy.get_level()}» (только рекомендации) не позволяет офису "
-                        f"делать это самостоятельно. НЕ повторяй вызов: сообщи клиенту через ask_user, "
-                        f"что рекомендуешь сделать, и предложи повысить уровень автономии в «Компания», "
-                        f"если он хочет, чтобы офис выполнял такое сам.")
-
-        creds = integrations_registry.credentials_for(integ)
-        if not integrations_registry.is_connected(integ):
-            if getattr(integ, "oauth_url", ""):
-                return (
-                    f"Сервис '{integ.title}' не подключён. НЕ проси API-ключ. "
-                    f"Попроси пользователя через ask_user нажать кнопку «Подключить {integ.title}» "
-                    f"в разделе «Доступы» (вход по аккаунту, OAuth). После подключения повтори действие."
-                )
-            return (
-                f"Сервис '{integ.title}' ещё не подключён — нет учётных данных. "
-                f"Запроси их у пользователя через ask_user. Как получить:\n{integ.how_to}"
-            )
-
-        await _publish_and_log({"type": "speech", "agent_id": agent_id,
-                                "text": f"⚙️ {integ.title}.{action_name}…"})
-        try:
-            result = await action.handler(creds, params or {})
-        except Exception as e:
-            err = str(e)[:200]
-            await _report_connection_error(integ.title, err)
-            return f"Ошибка при вызове {integ.name}.{action_name}: {err}"
-
-        await _publish_and_log({"type": "speech", "agent_id": agent_id,
-                                "text": f"✅ {integ.title}.{action_name}: {result[:80]}"})
-        await publish({"type": "integration_used", "agent_id": agent_id,
-                       "integration": integ.name, "action": action_name,
-                       "text": f"⚙️ {integ.title}.{action_name} → {result[:120]}"})
-        return result
-
-    async def _handle_use_integration(args: dict) -> str:
-        return await _execute_integration(
-            (args.get("name") or "").strip(),
-            (args.get("action") or "").strip(),
-            args.get("params") or {},
-        )
-
-    async def _handle_use_capability(args: dict) -> str:
-        """Tool Router: потребность словами → подбор интеграции+действия → исполнение."""
-        need = (args.get("need") or "").strip()
-        params = args.get("params") or {}
-        if not need:
-            return "Опиши потребность словами (например «опубликовать лендинг»)."
-        match = tool_router.best(need)
-        if match:
-            await _publish_and_log({"type": "speech", "agent_id": agent_id,
-                                    "text": f"🧭 «{need[:50]}» → {match['title']}.{match['action']}"})
-            return await _execute_integration(match["integration"], match["action"], params)
-        # Неоднозначно или нет совпадений — показываем варианты, пусть агент выберет
-        cands = tool_router.route(need, top=3)
-        if not cands:
-            avail = ", ".join(i.name for i in integrations_registry.all_integrations())
-            return (f"Под потребность «{need}» не нашёл готового инструмента. "
-                    f"Доступные интеграции: {avail}. Посмотри list_integrations.")
-        lines = "\n".join(
-            f"- {c['integration']}.{c['action']} ({c['title']}, {'✅' if c['connected'] else '⚪'})"
-            for c in cands
-        )
-        return ("Уточни — под эту потребность подходят несколько инструментов. "
-                f"Вызови use_integration с нужным:\n{lines}")
-
-    async def _handle_use_skill(args: dict) -> str:
-        """Skills: потребность словами → подбор скилла → его экспертный плейбук."""
-        need = (args.get("need") or "").strip()
-        if not need:
-            return "Опиши потребность словами (например «3D-лендинг с анимациями»)."
-        skill = skills_module.match(need, role)
-        if skill:
-            await _publish_and_log({"type": "speech", "agent_id": agent_id,
-                                    "text": f"🧩 Беру скилл «{skill.title}»"})
-            await publish({"type": "skill_used", "agent_id": agent_id,
-                           "skill": skill.id, "text": f"🧩 Скилл «{skill.title}»"})
-            if skill.handler:
-                return await skill.handler({"need": need})
-            return skill.playbook or f"Скилл «{skill.title}»: {skill.description}"
-        cands = skills_module.suggestions(need, role, top=3)
-        if not cands:
-            avail = skills_module.catalog_for(role) or "пока нет подходящих"
-            return (f"Под потребность «{need}» готового скилла нет — делай напрямую "
-                    f"своими инструментами. Доступные скиллы: {avail}.")
-        lines = "\n".join(f"- {s.title}: {s.description}" for s in cands)
-        return f"Уточни — подходят несколько скиллов:\n{lines}"
-
-    async def _handle_find_skills(args: dict) -> str:
-        """Дискавери каталога скиллов (внутренний find-skills): вернуть СПИСОК
-        подходящих способов, чтобы воркер/лидер выбрал и взял через use_skill."""
-        query = (args.get("query") or "").strip()
-        found = skills_module.search(query, role, top=6)
-        if not found:
-            return "В каталоге пока нет скиллов, доступных твоей роли — делай напрямую."
-        lines = "\n".join(f"• {s.title} — {s.description}" for s in found)
-        head = (f"Скиллы под «{query}»:" if query else "Доступные тебе скиллы:")
-        return (f"{head}\n{lines}\n\nЧтобы взять нужный — вызови use_skill с "
-                f"потребностью словами, получишь его экспертный плейбук.")
-
-    async def _report_connection_error(platform: str, error: str) -> None:
-        """Публикует событие ошибки подключения чтобы пользователь видел в интерфейсе."""
-        await publish({"type": "connection_error", "agent_id": agent_id,
-                       "platform": platform, "error": error,
-                       "text": f"❌ Ошибка подключения к {platform}: {error}"})
-        await publish({"type": "speech", "agent_id": agent_id,
-                       "text": f"❌ Не могу подключиться к {platform}: {error[:100]}"})
 
     async def _publish_and_log(event: dict) -> None:
         """Обёртка над publish: speech-события агентов дублируются в общий канал."""
@@ -453,6 +88,9 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         if not workspace_module.code_execution_allowed():
             _file_handlers.pop("execute_code", None)
 
+        _comms_handlers = comms_tool_handlers.build(agent_id, role, publish, _publish_and_log)
+        _integration_handlers = integration_tool_handlers.build(agent_id, role, publish, _publish_and_log)
+
         def _touch_liveness() -> None:
             # Каждый ответ API/инструмента = «агент жив»: продлеваем watchdog, чтобы
             # длинная ЗАКОННАЯ работа (десяток правок сайта) не считалась зависанием
@@ -482,18 +120,8 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                          _ts.WRITE_FILE_TOOL, _ts.READ_FILE_TOOL, _ts.LIST_FILES_TOOL, _ts.VERIFY_CODE_TOOL,
                          *_code_exec_tools, _ts.DELETE_FILE_TOOL, _ts.CONFIGURE_BOT_TOOL],
             tool_handlers={
-                "request_research": _handle_request_research,
-                "ask_user": _handle_ask_user,
-                "ask_colleague": _handle_ask_colleague,
-                "raise_event": _handle_raise_event,
-                "delegate_task": _handle_delegate_task,
-                "read_office_chat": _handle_read_office_chat,
-                "get_connection": _handle_get_connection,
-                "list_integrations": _handle_list_integrations,
-                "use_capability": _handle_use_capability,
-                "use_skill": _handle_use_skill,
-                "find_skills": _handle_find_skills,
-                "use_integration": _handle_use_integration,
+                **_comms_handlers,
+                **_integration_handlers,
                 **_file_handlers,
             },
         )
