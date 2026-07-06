@@ -77,6 +77,38 @@ def test_custom_limit_respected_on_create():
     assert b["status"] == "queued"
 
 
+def test_process_type_ignores_limit():
+    """Процессы (продажи, поддержка) — непрерывные, не должны вставать в очередь
+    только потому, что заняты слоты под разовые проекты."""
+    _fresh("proj_test_process_no_limit")
+    projects.set_limit(1)
+    projects.create("Проект A", type="project")
+    proc = projects.create("Процесс продаж", type="process")
+    assert proc["status"] == "active"
+
+
+def test_process_does_not_count_toward_project_limit():
+    _fresh("proj_test_process_not_counted")
+    projects.set_limit(1)
+    projects.create("Процесс продаж", type="process")
+    a = projects.create("Проект A", type="project")
+    assert a["status"] == "active"
+    assert projects.active_project_count() == 1
+
+
+def test_process_does_not_block_project_queue():
+    """Занятый лимит проектов не блокирует независимые процессы, и наоборот —
+    активный процесс не мешает следующему проекту встать в очередь по СВОЕЙ
+    (проектной) причине, а не из-за процесса."""
+    _fresh("proj_test_process_independent")
+    projects.set_limit(1)
+    projects.create("Процесс продаж", type="process")
+    a = projects.create("Проект A", type="project")
+    b = projects.create("Проект B", type="project")
+    assert a["status"] == "active"
+    assert b["status"] == "queued"
+
+
 def test_active_returns_first_active_not_none_with_multiple():
     _fresh("proj_test_active_singular")
     projects.create("A")

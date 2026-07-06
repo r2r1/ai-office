@@ -1789,7 +1789,7 @@ async def get_projects():
     from src.office import projects as projects_module
     return {"projects": projects_module.all_projects(),
             "active": projects_module.active(),
-            "active_count": len(projects_module.active_list()),
+            "active_count": projects_module.active_project_count(),
             "max_active": projects_module.get_limit()}
 
 
