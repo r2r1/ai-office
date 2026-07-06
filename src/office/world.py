@@ -14,8 +14,17 @@ events, autonomy, trust) и собирает из них ОДИН копируе
 
 Snapshot+diff — фундамент обоих Sandbox-механизмов (BOS §9): решение проверяется
 на копии среза, merge — это применение diff.
+
+Кеш на цикл (docs/prompts/system-audit-prompt.md, «Путь до идеального SaaS»,
+Шаг 3): snapshot() читает 16 модулей-источников БЕЗ кеша, а вызывается минимум
+трижды за один цикл CEO-решения — orchestrator.py (через context_block()),
+decision_engine.py (Sandbox-проверки) и planning_engine.py (save_snapshot()
+после решения). invalidate_cache() вызывается loop.py в начале каждого цикла
+(до первого возможного вызова snapshot() этого цикла) — снимок остаётся
+консистентным ВНУТРИ цикла и гарантированно свежим на следующем.
 """
 
+import copy
 import json
 import time
 import uuid
@@ -26,11 +35,33 @@ from src.saas import context as ctx
 _SNAP_FILE = "world_snapshots.jsonl"
 _KEEP_SNAPSHOTS = 100
 
+# Кеш снимка на текущий цикл, по тенанту. Хранит deepcopy — snapshot() отдаёт
+# КОПИЮ из кеша, а не тот же объект: save_snapshot() мутирует свою копию
+# (добавляет snapshot_id), и без deepcopy это тихо просочилось бы в кеш для
+# всех остальных читателей того же цикла.
+_cache: dict[str, dict] = {}
+
+
+def invalidate_cache(tid: str | None = None) -> None:
+    """Сбросить кеш снимка — loop.py вызывает в начале КАЖДОГО цикла, до
+    первого возможного вызова snapshot() этого цикла. Без аргумента чистит
+    кеш всех тенантов (тесты/reset)."""
+    if tid:
+        _cache.pop(tid, None)
+    else:
+        _cache.clear()
+
 
 # ─────────────────────────── снапшот ───────────────────────────
 
 def snapshot() -> dict:
-    """Полный срез мира текущего тенанта. Только чтение источников истины."""
+    """Полный срез мира текущего тенанта. Только чтение источников истины.
+    Кешируется на время одного цикла (см. invalidate_cache) — повторные вызовы
+    в рамках цикла не перечитывают все 16 источников заново."""
+    tid = ctx.get_tenant()
+    if tid in _cache:
+        return copy.deepcopy(_cache[tid])
+
     from src.office import (brief, objectives, philosophy, constitution, plan,
                             costs, sites, leads, events, autonomy, trust, org,
                             registry, questions, projects, metrics, gap)
@@ -47,7 +78,7 @@ def snapshot() -> dict:
     totals = costs.totals()
     lim = costs.limits()
 
-    return {
+    snap = {
         "ts": round(time.time(), 3),
         "tenant": ctx.get_tenant(),
         # Identity (DNA v1 = философия + конституция; отдельная сущность DNA — след. шаг)
@@ -105,6 +136,8 @@ def snapshot() -> dict:
             "team_size": len(registry.all_agents()),
         },
     }
+    _cache[tid] = snap
+    return snap
 
 
 # ─────────────────────────── diff ───────────────────────────
@@ -233,6 +266,7 @@ def context_block() -> str:
 
 
 def reset() -> None:
+    invalidate_cache(ctx.get_tenant())
     try:
         ctx.delete_file(_SNAP_FILE)
     except Exception:

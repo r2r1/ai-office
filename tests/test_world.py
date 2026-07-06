@@ -44,6 +44,12 @@ def test_diff_detects_added_objective():
     a = world.snapshot()
     from src.office import objectives
     objectives.add("Новая цель", desired="X", measured_by="Y")
+    # snapshot() кеширует на "цикл" (см. world.invalidate_cache докстринг) —
+    # без явной инвалидации между чтениями второй вызов вернул бы ТУ ЖЕ
+    # закешированную копию из `a`, и diff() всегда был бы пустым. loop.py
+    # вызывает invalidate_cache() в начале каждого цикла — здесь эмулируем
+    # переход к "следующему циклу".
+    world.invalidate_cache("world_test_diff_add")
     b = world.snapshot()
     d = world.diff(a, b)
     assert not d["empty"]
@@ -60,6 +66,62 @@ def test_diff_empty_when_nothing_changed():
     # по всем полям, КРОМЕ верхнеуровневого "ts" самого снапшота, который diff()
     # тоже исключает явно (world.py:126-127: not k.startswith(("ts","tenant"))).
     assert d["empty"], f"unexpected diff: {d}"
+
+
+# ── Шаг 3 (docs/prompts/system-audit-prompt.md): кеш snapshot() на цикл ──────
+
+def test_snapshot_is_cached_within_same_cycle():
+    """Мутация данных МЕЖДУ двумя snapshot() без invalidate_cache() не должна
+    быть видна во втором вызове — это и есть смысл кеша "на цикл": повторные
+    чтения внутри одного decision-цикла CEO видят консистентную картину, не
+    перечитывая 16 источников заново на каждый вызов (orchestrator.py→
+    decision_engine.py→planning_engine.py — 3 вызова за один цикл)."""
+    _fresh("world_test_cache_hit")
+    from src.office import objectives
+    a = world.snapshot()
+    objectives.add("Цель, которую кеш не должен увидеть", desired="X", measured_by="Y")
+    b = world.snapshot()  # БЕЗ invalidate_cache() — должен вернуть закешированное a
+    assert b == a
+    assert not any(o["title"] == "Цель, которую кеш не должен увидеть" for o in b["objectives"])
+
+
+def test_invalidate_cache_makes_next_snapshot_fresh():
+    _fresh("world_test_cache_invalidate")
+    from src.office import objectives
+    world.snapshot()
+    objectives.add("Свежая цель", desired="X", measured_by="Y")
+    world.invalidate_cache("world_test_cache_invalidate")
+    fresh = world.snapshot()
+    assert any(o["title"] == "Свежая цель" for o in fresh["objectives"])
+
+
+def test_cached_snapshot_is_independent_copy_not_shared_mutable_object():
+    """save_snapshot() мутирует свою копию (добавляет snapshot_id) — это НЕ
+    должно просочиться в кеш, который увидит следующий вызов snapshot()."""
+    _fresh("world_test_cache_no_alias")
+    world.snapshot()
+    mutated = world.save_snapshot(reason="test")
+    assert "snapshot_id" in mutated
+    again = world.snapshot()
+    assert "snapshot_id" not in again, "мутация save_snapshot() просочилась в кеш"
+
+
+def test_invalidate_cache_without_tenant_clears_all():
+    _fresh("world_test_cache_clear_all_a")
+    world.snapshot()
+    _fresh("world_test_cache_clear_all_b")
+    world.snapshot()
+    world.invalidate_cache()
+    assert "world_test_cache_clear_all_a" not in world._cache
+    assert "world_test_cache_clear_all_b" not in world._cache
+
+
+def test_reset_invalidates_cache_for_current_tenant():
+    _fresh("world_test_cache_reset")
+    world.snapshot()
+    assert "world_test_cache_reset" in world._cache
+    world.reset()
+    assert "world_test_cache_reset" not in world._cache
 
 
 def test_save_snapshot_appends_to_journal_and_caps_at_limit():

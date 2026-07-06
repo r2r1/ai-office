@@ -262,6 +262,15 @@ async def _run_office(tid: str) -> None:
     while True:
         cycle += 1
 
+        # World Model кешируется НА ЦИКЛ (docs/prompts/system-audit-prompt.md,
+        # Шаг 3): snapshot() вызывается минимум трижды за один decision-цикл
+        # CEO (orchestrator.py→decision_engine.py→planning_engine.py) — без
+        # инвалидации в начале цикла все три читали бы 16 источников заново
+        # КАЖДЫЙ раз. Инвалидируем ДО первого возможного вызова snapshot()
+        # этого цикла, чтобы следующий цикл видел свежие данные.
+        from src.office import world as world_mod
+        world_mod.invalidate_cache(tid)
+
         # Проверка паузы — пользователь или quota-стоп
         if control.is_paused():
             await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
