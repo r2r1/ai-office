@@ -391,7 +391,7 @@ export default function App() {
           )}
 
           {isMobile && (
-            <div style={{ display: "flex", justifyContent: "center", paddingBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "center", paddingBottom: 4, width: "100%", minWidth: 0 }}>
               <NavRail active={view} onChange={changeView} orientation="horizontal" badges={navBadges} />
             </div>
           )}

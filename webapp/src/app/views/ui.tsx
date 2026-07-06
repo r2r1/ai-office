@@ -89,12 +89,16 @@ export function SubTabs({ tabs, active, onChange }: { tabs: TabDef[]; active: st
   // (найдено при мобильном аудите после карты сайта). Затухание справа
   // показывается, только если реально есть что докрутить — не декорация.
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [canScroll, setCanScroll] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const check = () => setCanScroll(el.scrollWidth - el.scrollLeft - el.clientWidth > 4)
+    const check = () => {
+      setCanScrollRight(el.scrollWidth - el.scrollLeft - el.clientWidth > 4)
+      setCanScrollLeft(el.scrollLeft > 4)
+    }
     check()
     el.addEventListener("scroll", check, { passive: true })
     const ro = new ResizeObserver(check)
@@ -130,7 +134,13 @@ export function SubTabs({ tabs, active, onChange }: { tabs: TabDef[]; active: st
           )
         })}
       </div>
-      {canScroll && (
+      {canScrollLeft && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, bottom: 1, width: 28, pointerEvents: "none", zIndex: 4,
+          background: "linear-gradient(to left, transparent, var(--surface))",
+        }} />
+      )}
+      {canScrollRight && (
         <div style={{
           position: "absolute", top: 0, right: 0, bottom: 1, width: 32, pointerEvents: "none", zIndex: 4,
           background: "linear-gradient(to right, transparent, var(--surface))",

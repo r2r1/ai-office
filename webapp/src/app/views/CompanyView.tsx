@@ -131,15 +131,16 @@ function GoalsTab() {
           <input value={title} onChange={e => setTitle(e.target.value)}
             placeholder="Цель — например: заявки с сайта каждую неделю"
             style={inputStyle} />
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             <input value={desired} onChange={e => setDesired(e.target.value)}
-              placeholder="Целевое значение (10/нед)" style={{ ...inputStyle, flex: 1 }} />
+              placeholder="Целевое значение (10/нед)" style={{ ...inputStyle, flex: "1 1 160px", minWidth: 0 }} />
             <input value={measuredBy} onChange={e => setMeasuredBy(e.target.value)}
               onKeyDown={e => e.key === "Enter" && addObjective()}
-              placeholder="Как измеряем (лиды за 7 дней)" style={{ ...inputStyle, flex: 1 }} />
+              placeholder="Как измеряем (лиды за 7 дней)" style={{ ...inputStyle, flex: "1 1 160px", minWidth: 0 }} />
             <button onClick={addObjective}
               style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "0 16px",
-                background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13 }}>Добавить</button>
+                background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13, flex: "1 1 auto",
+                minHeight: 36 }}>Добавить</button>
           </div>
         </div>
       </Card>

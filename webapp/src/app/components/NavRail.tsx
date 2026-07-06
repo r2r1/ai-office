@@ -136,33 +136,67 @@ function NavBadge({ count, compact }: { count: number; compact?: boolean }) {
 export function NavRail({ active, onChange, orientation = "vertical", badges }: NavRailProps) {
   if (orientation === "horizontal") {
     return (
-      <div className="glass" style={{
-        display: "flex", gap: 2, borderRadius: "var(--radius-pill)",
-        padding: "5px 7px", overflowX: "auto",
-      }}>
-        {NAV.map(item => {
-          const isActive = item.id === active
-          const badge = badges?.[item.id] ?? 0
-          return (
-            <button key={item.id} onClick={() => onChange(item.id)}
-              aria-label={badge > 0 ? `${item.label}, непрочитанных: ${badge}` : item.label}
-              style={{
-                position: "relative",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-                padding: "6px 12px", borderRadius: "var(--radius-pill)", border: "none",
-                cursor: "pointer", background: "transparent",
-                color: isActive ? AMBER : "var(--muted)",
-                transition: "color 0.2s", fontFamily: "var(--font-sans)", minWidth: 52,
-              }}>
-              <Icon name={item.id} size={17} />
-              <NavBadge count={badge} compact />
-              <span style={{
-                fontSize: 8.5, letterSpacing: "0.4px", textTransform: "uppercase",
-                fontWeight: isActive ? 500 : 400, color: isActive ? "var(--text)" : "inherit",
-              }}>{item.label}</span>
-            </button>
-          )
-        })}
+      <div style={{ position: "relative", width: "100%", maxWidth: "100%", minWidth: 0 }}>
+        <div className="glass" style={{
+          display: "flex", alignItems: "center", gap: 2, borderRadius: "var(--radius-pill)",
+          padding: "6px 8px", overflowX: "auto", maxWidth: "100%",
+          WebkitOverflowScrolling: "touch", scrollbarWidth: "none",
+          // Растягиваем маску прозрачности по краям — визуальный намёк, что
+          // список скроллится (найдено в аудите: обрезанные вкладки без
+          // подсказки о скролле).
+          maskImage: "linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+          WebkitMaskImage: "linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+        }}>
+          {NAV.map(item => {
+            const isActive = item.id === active
+            const badge = badges?.[item.id] ?? 0
+            return (
+              <button key={item.id} onClick={() => onChange(item.id)}
+                aria-label={badge > 0 ? `${item.label}, непрочитанных: ${badge}` : item.label}
+                style={{
+                  position: "relative", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  height: 40, border: "none", cursor: "pointer", background: "transparent",
+                  fontFamily: "var(--font-sans)", WebkitTapHighlightColor: "transparent",
+                }}>
+                {/* Индикатор активной вкладки — узнаваемый паттерн (Material 3
+                    NavigationBar): растущая амбер-пилюля позади иконки, а не
+                    просто смена цвета текста. Общий layoutId даёт пилюле
+                    плавно "переезжать" между вкладками вместо перескока. */}
+                {isActive && (
+                  <motion.span layoutId="mobile-nav-pill"
+                    transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                    style={{
+                      position: "absolute", inset: 0, borderRadius: "var(--radius-pill)",
+                      background: `rgba(${AMBER_RGB},0.16)`,
+                      border: `1px solid rgba(${AMBER_RGB},0.3)`,
+                    }} />
+                )}
+                <span style={{
+                  position: "relative", zIndex: 1,
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: isActive ? "0 14px" : "0 11px",
+                  color: isActive ? AMBER : "var(--muted)",
+                  transition: "color 0.2s",
+                }}>
+                  <span style={{ position: "relative", display: "flex" }}>
+                    <Icon name={item.id} size={17} strokeWidth={isActive ? 2.2 : 1.8} />
+                    <NavBadge count={badge} compact />
+                  </span>
+                  {isActive && (
+                    <motion.span
+                      initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: "auto" }}
+                      exit={{ opacity: 0, width: 0 }} transition={{ duration: 0.16 }}
+                      style={{
+                        fontSize: 11, letterSpacing: "0.2px", fontWeight: 600,
+                        color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden",
+                      }}>{item.label}</motion.span>
+                  )}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     )
   }
