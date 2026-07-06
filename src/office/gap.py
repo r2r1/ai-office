@@ -13,9 +13,34 @@ Bootstrapping-режимом (Intent→Plan→Execution→Acceptance) без о�
 Резолвер метрики по objective.measured_by пока покрывает «заявки/лиды» (единственная
 измеримая цель, которую офис создаёт сам — objectives.ensure_leads_objective). Новая
 измеримая цель → новая ветка резолвера, а не «ощущение».
+
+⚠️ Раньше owner мог задать ЛЮБОЙ текст в measured_by через objectives.add() (например
+«MRR», «конверсия в оплату») — objective проходила валидацию схемы, попадала в
+world.snapshot() и показывалась в промпте CEO как «измеримая», но _current_value()
+для неё молча возвращала None, и compute() тихо ИСКЛЮЧАЛ её из Gap Analysis —
+владелец видел цель как отслеживаемую, а система её никогда не проверяла (реальная
+находка docs/prompts/system-audit-prompt.md, «Бизнес-логика: находки», [КРИТИЧНО]
+gap.py:31). `resolvable()` — явная точка правды «какие measured_by реально
+поддерживаются», используемая и здесь, и в objectives.context_block()/world.snapshot()
+для показа "измеримо по описанию, но резолвер не подключён" вместо тихого исчезновения.
 """
 
 import re
+
+# Единственный источник правды «какие measured_by реально резолвятся» — раньше
+# было неявно зашито внутри _current_value(), теперь явная, переиспользуемая
+# точка (см. предупреждение в докстринге модуля выше).
+_METRIC_RESOLVERS: dict[str, tuple[str, ...]] = {
+    "leads_7d": ("leads", "заявк", "лид"),
+}
+
+
+def resolvable(measured_by: str) -> bool:
+    """Есть ли у measured_by реальный резолвер метрики (см. _METRIC_RESOLVERS)."""
+    mb = (measured_by or "").lower()
+    if not mb:
+        return False
+    return any(any(kw in mb for kw in keywords) for keywords in _METRIC_RESOLVERS.values())
 
 
 def _first_number(text: str) -> float | None:
@@ -33,7 +58,7 @@ def _current_value(objective: dict) -> float | None:
     (тогда цель в gap-анализ не попадает, а не даёт ложный ноль)."""
     from src.office import metrics
     mb = (objective.get("measured_by") or "").lower()
-    if "leads" in mb or "заявк" in mb or "лид" in mb:
+    if any(kw in mb for kw in _METRIC_RESOLVERS["leads_7d"]):
         return float(metrics.latest("leads_7d") or 0)
     return None
 

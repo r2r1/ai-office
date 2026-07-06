@@ -105,12 +105,22 @@ def unmeasurable() -> list[dict]:
 
 def context_block() -> str:
     """Блок целей для промпта CEO (desired state — верх иерархии после Constitution/Owner)."""
+    from src.office import gap
     items = [o for o in all_objectives() if o.get("status") == "active"]
     if not items:
         return ""
     lines = []
     for o in sorted(items, key=lambda x: -x.get("priority", 50)):
-        measured = f" (метрика: {o['measured_by']})" if o.get("measured_by") else " (пока НЕ измерима)"
+        mb = o.get("measured_by")
+        if not mb:
+            measured = " (пока НЕ измерима)"
+        elif gap.resolvable(mb):
+            measured = f" (метрика: {mb})"
+        else:
+            # measured_by задан, но резолвера нет (см. gap.py:_METRIC_RESOLVERS) —
+            # раньше это выглядело как обычная отслеживаемая цель и молча
+            # выпадало из Gap Analysis без единого сигнала владельцу/CEO.
+            measured = f" (метрика заявлена «{mb}», но НЕ отслеживается автоматически — резолвер не подключён)"
         lines.append(f"- {o['title']}" + (f" → {o['desired']}" if o.get("desired") else "") + measured)
     return "\n=== ЦЕЛИ КОМПАНИИ (Objectives — desired state) ===\n" + "\n".join(lines) + "\n"
 

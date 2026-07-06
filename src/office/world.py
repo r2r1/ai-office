@@ -33,7 +33,7 @@ def snapshot() -> dict:
     """Полный срез мира текущего тенанта. Только чтение источников истины."""
     from src.office import (brief, objectives, philosophy, constitution, plan,
                             costs, sites, leads, events, autonomy, trust, org,
-                            registry, questions, projects, metrics)
+                            registry, questions, projects, metrics, gap)
 
     b = brief.get()
     phil = philosophy.load()
@@ -70,11 +70,15 @@ def snapshot() -> dict:
         # ts у метрик снимаем — у снапшота свой ts; иначе world.diff() считал бы
         # метрики «изменёнными» на каждом срезе (шум в decision_chain).
         "metrics": [{k: v for k, v in m.items() if k != "ts"} for m in metrics.current()],
-        # Objectives: desired state
+        # Objectives: desired state. resolvable=False означает measured_by задан,
+        # но резолвера метрики нет (см. gap.resolvable) — objective технически
+        # НЕ участвует в Gap Analysis, хотя выглядит как измеримая (см. gap.py
+        # докстринг про находку docs/prompts/system-audit-prompt.md).
         "objectives": [
             {"id": o["id"], "title": o["title"], "desired": o.get("desired", ""),
              "measured_by": o.get("measured_by", ""), "current_value": o.get("current_value", ""),
-             "priority": o.get("priority", 50), "status": o.get("status", "active")}
+             "priority": o.get("priority", 50), "status": o.get("status", "active"),
+             "resolvable": gap.resolvable(o.get("measured_by", "")) if o.get("measured_by") else None}
             for o in objectives.all_objectives()
         ],
         # Projects: активный + история (что каждый оставил после себя)
