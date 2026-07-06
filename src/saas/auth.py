@@ -18,11 +18,16 @@ import time
 import httpx
 import jwt
 
+from src.saas.crypto import require_app_secret
+
 SESSION_COOKIE = "ai_office_session"
 SESSION_TTL = 60 * 60 * 24 * 14  # 14 дней
 STATE_TTL = 600  # 10 минут на завершение OAuth
 
-APP_SECRET = os.getenv("APP_SECRET", "dev-insecure-change-me")
+# Единый резолв через crypto.require_app_secret(): раньше здесь был свой
+# независимый дефолт "dev-insecure-change-me" — падать при отсутствии
+# APP_SECRET нужно ОДИН раз и в одном месте, не в двух модулях по-разному.
+APP_SECRET = require_app_secret()
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "")

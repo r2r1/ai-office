@@ -292,8 +292,17 @@ async def run_agent(
                 try:
                     from src.office import costs
                     costs.record(agent_id, model, pin, pout)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Раньше падало молча (except: pass) — если запись в costs.json
+                    # сбоила (например файл временно занят конкурентной записью),
+                    # расход тихо занижался без единого следа в логах. Учёт расхода —
+                    # обещание продукта клиенту, тихий сбой здесь недопустим.
+                    try:
+                        from src.office import trace as _trace
+                        _trace.log("cost_record_error", agent=agent_id, model=model,
+                                  error=f"{type(e).__name__}: {e}"[:200])
+                    except Exception:
+                        pass
         msg = resp.choices[0].message
         if on_activity:
             try:
@@ -435,8 +444,13 @@ async def run_agent(
                     try:
                         from src.office import costs
                         costs.record(agent_id, model, pin, pout)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        try:
+                            from src.office import trace as _trace
+                            _trace.log("cost_record_error", agent=agent_id, model=model,
+                                      error=f"{type(e).__name__}: {e}"[:200])
+                        except Exception:
+                            pass
             msg = resp.choices[0].message
             if msg.content and msg.content.strip():
                 final_text = msg.content

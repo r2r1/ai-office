@@ -9,6 +9,7 @@ HTTP-запрос и офис-задачей на каждый цикл). Все
 без глобального состояния в памяти (нет утечки между клиентами).
 """
 
+import asyncio
 import contextvars
 import copy
 import json
@@ -17,6 +18,23 @@ import time
 from pathlib import Path
 
 _tenant: contextvars.ContextVar[str] = contextvars.ContextVar("tenant", default="default")
+
+# Локи per (tenant, filename): страховка на будущее. Сегодня все read-modify-write
+# функции офиса (plan.py, state.py и т.п.) синхронны от _data() до _save() — без
+# await внутри — и потому атомарны под однопоточным asyncio без явных локов. Но
+# это неявный инвариант, не гарантия: один случайно добавленный await внутри такой
+# функции тихо откроет гонку (A читает → B читает тот же снапшот → A пишет → B
+# затирает A). locked() делает эту гарантию явной и переживёт будущий рефакторинг.
+_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def locked(name: str):
+    """Async context manager: `async with ctx.locked("plan.json"): ...read-modify-write...`
+    Оборачивает произвольный блок кода локом по (tenant, filename) — используйте
+    вокруг read-modify-write, который содержит await между чтением и записью."""
+    key = _cache_key(name)
+    lock = _locks.setdefault(key, asyncio.Lock())
+    return lock
 
 ROOT = Path("data/tenants")
 

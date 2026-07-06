@@ -10,6 +10,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# ВАЖНО: load_dotenv() ДО импорта src.saas.auth — тот резолвит APP_SECRET
+# (crypto.require_app_secret()) прямо при импорте модуля и падает, если секрет
+# не задан. Если .env грузится позже импорта, переменная ещё не видна
+# os.environ, и процесс падает даже при корректно заполненном .env.
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
@@ -48,8 +55,6 @@ from src.office import health as health_module
 from src.office import quality_modes as quality_modes_module
 from src.office import skills as skills_module
 from src.office import roles as roles_module
-
-load_dotenv()
 
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 

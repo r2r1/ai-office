@@ -9,14 +9,42 @@
 import base64
 import hashlib
 import os
+import sys
 
 from cryptography.fernet import Fernet, InvalidToken
 
 _PREFIX = "enc::"
+_INSECURE_DEFAULT = "dev-insecure-change-me"
+_warned = False
+
+
+def require_app_secret() -> str:
+    """Единая точка резолва APP_SECRET для всего процесса (auth.py и crypto.py
+    используют её же). Раньше оба модуля независимо подставляли захардкоженный
+    дефолт при отсутствии переменной — сервер тихо стартовал в проде без секрета,
+    и все сессии/шифрование at-rest оказывались на известном всем ключе. Теперь
+    без APP_SECRET процесс падает при старте, если явно не включён DEV_MODE."""
+    global _warned
+    secret = os.getenv("APP_SECRET", "")
+    if secret:
+        return secret
+    if os.getenv("DEV_MODE", "0") == "1":
+        if not _warned:
+            print("⚠️  APP_SECRET не задан — используется НЕБЕЗОПАСНЫЙ dev-ключ "
+                  "(DEV_MODE=1). Все сессии/шифрование предсказуемы. "
+                  "НЕ используйте это на проде.", file=sys.stderr)
+            _warned = True
+        return _INSECURE_DEFAULT
+    raise RuntimeError(
+        "APP_SECRET не задан. Укажите длинную случайную строку в .env "
+        "(например: APP_SECRET=$(openssl rand -hex 32)) — иначе все сессии "
+        "подделываемы, а зашифрованные креды тенантов читаемы известным ключом. "
+        "Для локальной разработки без секрета явно выставьте DEV_MODE=1."
+    )
 
 
 def _fernet() -> Fernet:
-    secret = os.getenv("APP_SECRET", "dev-insecure-change-me")
+    secret = require_app_secret()
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
     return Fernet(key)
 
