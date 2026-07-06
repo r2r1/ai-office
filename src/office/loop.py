@@ -260,6 +260,39 @@ async def _run_office(tid: str) -> None:
     else:
         strategy = await bootstrap.run(publish)
 
+    # ---- Первое впечатление клиента (BOS §5) ----
+    # Минимальный онбординг (1 поле, необязательно) отдаёт клиенту не список
+    # сотрудников, а РЕЗУЛЬТАТ: аналитику, точки роста, 2-3 готовые инициативы
+    # на выбор — сразу после стратегии, один раз на тенанта (onboarding_result.
+    # exists() — идемпотентность: рестарт офиса с уже сохранённой strategy.md
+    # не должен снова дёргать LLM и плодить дубли инициатив).
+    from src.office import onboarding_result, initiatives as initiatives_mod
+    if strategy and not onboarding_result.exists():
+        goal = brief.effective_goal()
+        try:
+            result = await orchestrator.generate_onboarding_result(goal, strategy, publish)
+        except Exception as e:
+            await publish({"type": "error", "agent_id": "orchestrator_1",
+                           "text": f"Анализ для клиента не сгенерирован: {str(e)[:100]}"})
+            result = {}
+        analysis = result.get("analysis") or []
+        growth = result.get("growth_points") or []
+        iids = []
+        for ini in (result.get("initiatives") or [])[:3]:
+            if not ini.get("title"):
+                continue
+            iid = initiatives_mod.add(
+                title=ini["title"], rationale=ini.get("rationale", ""),
+                expected_outcome=ini.get("expected_outcome", ""),
+                estimated_effort=ini.get("estimated_effort", "1-2 цикла"),
+                tasks=ini.get("tasks", []), source="ceo", needs_research=False)
+            iids.append(iid)
+        onboarding_result.save(analysis, growth, iids)
+        if analysis or growth or iids:
+            await publish({"type": "system",
+                           "text": "📊 Офис подготовил анализ компании и предложил "
+                                   f"{len(iids)} инициативы для старта — см. «Сводка»"})
+
     tech_design = architect.load()
     if not tech_design:
         goal = brief.effective_goal()

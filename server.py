@@ -532,14 +532,34 @@ async def brief_questions(request: Request):
 
 @app.post("/api/brief/start")
 async def brief_start(request: Request):
-    """Шаг 2: клиент ответил на вопросы → формируем бриф и запускаем офис."""
+    """Минимальный онбординг (BOS §5): 1 необязательное поле + необязательная
+    ссылка → бриф и старт офиса. Уточняющие вопросы (make_questions) больше не
+    обязательный шаг — answers пуст в большинстве случаев, build_brief() уже
+    умеет работать с пустым qa_pairs (см. докстринг). Пустой client_input и url
+    одновременно раньше отклонялись 400 — теперь честно "разбирайтесь сами":
+    build_brief() имеет подстраховку (summary = client_input[:500]), просто
+    даём ей плейсхолдер вместо ошибки — иначе кнопка "Пропустить" в UI была бы
+    ложью."""
     data = await request.json()
     client_input = (data.get("input") or "").strip()
+    url = (data.get("url") or "").strip()
     qa_pairs = data.get("answers", [])
-    if not client_input:
-        return JSONResponse({"error": "пустой ввод"}, status_code=400)
+
+    effective_input = client_input
+    scan_url = ""
+    if url:
+        from src.office import company_scan
+        scan_result = await company_scan.scan(url)
+        if scan_result.get("ok"):
+            scan_url = scan_result.get("url", "")
+            effective_input = (effective_input + "\n\n" + company_scan.summary_line(scan_result)).strip()
+    if not effective_input:
+        effective_input = "Клиент не описал бизнес словами — общий старт, офис исследует сам."
+
     try:
-        brief_data = await onboarding.build_brief(client_input, qa_pairs, publish=bus.publish)
+        brief_data = await onboarding.build_brief(effective_input, qa_pairs, publish=bus.publish)
+        if scan_url:
+            brief_data["scan_url"] = scan_url
         brief.set_brief(brief_data)  # сигналит офису о старте
         return {"ok": True, "brief": brief_data}
     except Exception as e:
@@ -595,6 +615,33 @@ async def onboarding_finish(request: Request):
     await bus.publish({"type": "speech", "agent_id": "orchestrator_1",
                        "text": f"Компания изучена. Запускаю офис: {brief_data.get('goal', '')[:80]}"})
     return {"ok": True, "brief": brief_data}
+
+
+@app.get("/api/onboarding/result")
+async def get_onboarding_result():
+    """Первое впечатление клиента (BOS §5) — аналитика + точки роста +
+    инициативы, сгенерированные один раз сразу после стратегии (см.
+    office/loop.py, office/onboarding_result.py). ready=False, пока BOOTSTRAP
+    ещё не дошёл до этого шага — фронт показывает "офис изучает..."."""
+    from src.office import onboarding_result as onboarding_result_module, initiatives as initiatives_module
+    d = onboarding_result_module.get()
+    if not d:
+        return {"ready": False, "analysis": [], "growth_points": [], "initiatives": []}
+    ini_ids = set(d.get("initiative_ids") or [])
+    inis = [i for i in initiatives_module.pending() if i["id"] in ini_ids]
+    return {"ready": True, "analysis": d.get("analysis", []),
+            "growth_points": d.get("growth_points", []), "initiatives": inis}
+
+
+@app.get("/api/onboarding/suggested-integrations")
+async def get_suggested_integrations():
+    """Интеграции, подобранные под текст брифа — момент пиковой мотивации
+    сразу после результата онбординга (см. integrations/registry.suggested_for),
+    не спрятаны в «Компания → Доступы»."""
+    from src.integrations import registry as integrations_registry
+    b = brief.get()
+    text = " ".join(str(b.get(k, "")) for k in ("summary", "goal", "niche", "audience"))
+    return {"integrations": integrations_registry.suggested_for(text)}
 
 
 @app.get("/api/history")

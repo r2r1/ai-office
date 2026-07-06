@@ -340,6 +340,43 @@ async def generate_initiative(
     return _parse_json(raw) or {}
 
 
+async def generate_onboarding_result(
+    goal: str,
+    strategy: str,
+    publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+) -> dict:
+    """Момент первого впечатления (BOS §5, минимальный онбординг): клиент дал
+    пару предложений — офис сразу после стратегии отдаёт аналитику, точки
+    роста и 2-3 готовые инициативы на выбор, а не молча начинает работу за
+    его спиной. Раньше инициативы рождались ТОЛЬКО реактивно из opportunity-
+    событий в циклах CEO — первый визит клиента был пуст."""
+    user = (
+        f"Цель клиента: {goal[:400]}\n\n"
+        f"Стратегия (кратко):\n{strategy[:1200]}\n\n"
+        "Дай аналитику, точки роста и 2-3 инициативы для первого шага."
+    )
+    if publish:
+        await publish({"type": "thinking", "agent_id": "orchestrator_1",
+                       "text": "Готовлю анализ и первые предложения для клиента..."})
+    system, _pid = prompt_builder.company_system(
+        "onboarding_result", "orchestrator_1", "orchestrator", user)
+    raw = await llm.run_agent(
+        system=system,
+        user=user,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=1200,
+        use_search=False,
+        agent_id="orchestrator_1",
+    )
+    result = _parse_json(raw)
+    if not result:
+        return {"analysis": [], "growth_points": [], "initiatives": []}
+    result.setdefault("analysis", [])
+    result.setdefault("growth_points", [])
+    result.setdefault("initiatives", [])
+    return result
+
+
 async def classify_recurring(project_title: str, goal: str, tasks_summary: str) -> dict:
     """BOS §5: по завершении Project CEO сам решает — разовый результат (в архив)
     или на самом деле непрерывный цикл (Process, запускается автоматически).
