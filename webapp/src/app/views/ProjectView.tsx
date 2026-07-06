@@ -232,7 +232,7 @@ function NewInitiativeForm({ onPropose }: { onPropose: (title: string, idea: str
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={submit} disabled={busy || !title.trim()}
           style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-            border: "none", background: "var(--mercury-a)", color: "#1a1408", fontWeight: 600,
+            border: "none", background: "var(--mercury-a)", color: "var(--on-accent)", fontWeight: 600,
             opacity: busy || !title.trim() ? 0.6 : 1 }}>
           {busy ? "…" : "Отправить на анализ"}
         </button>
@@ -376,7 +376,7 @@ function NewProcessForm({ onCreate }: { onCreate: (title: string, role: string, 
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={submit} disabled={busy || !title.trim() || !instruction.trim()}
           style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-            border: "none", background: "var(--mercury-a)", color: "#1a1408", fontWeight: 600,
+            border: "none", background: "var(--mercury-a)", color: "var(--on-accent)", fontWeight: 600,
             opacity: busy || !title.trim() || !instruction.trim() ? 0.6 : 1 }}>
           {busy ? "…" : "Создать процесс"}
         </button>
@@ -401,7 +401,7 @@ function RecurringProcessAccordionItem({ proc, isOpen, onToggle, onPause, onResu
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
             <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            {isActive ? <Pill color="#a0e0ab">Идёт постоянно</Pill> : <Pill>На паузе</Pill>}
+            {isActive ? <Pill color="var(--success)">Идёт постоянно</Pill> : <Pill>На паузе</Pill>}
           </div>
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{proc.title}</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
@@ -427,7 +427,7 @@ function RecurringProcessAccordionItem({ proc, isOpen, onToggle, onPause, onResu
                 border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
             ) : (
               <button onClick={onResume} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
-                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "#a0e0ab" }}>▶ Возобновить</button>
+                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
             )}
             <button onClick={onDelete} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
               border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)" }}>Удалить</button>
@@ -493,7 +493,7 @@ function InitiativeAccordionItem({ initiative: ini, isOpen, onToggle, onAccept, 
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onAccept}
               style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-                border: "1px solid #a0e0ab", background: "rgba(160,224,171,0.15)", color: "#a0e0ab", fontWeight: 500 }}>
+                border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)", fontWeight: 500 }}>
               ✅ Принять → создать проект
             </button>
             <button onClick={onReject}
@@ -527,7 +527,7 @@ function ProcessAccordionItem({ summary, isOpen, onToggle }: {
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
             <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            <Pill color="#a0e0ab">Идёт постоянно</Pill>
+            <Pill color="var(--success)">Идёт постоянно</Pill>
           </div>
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>Продажи</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>{summary.leads.length} лид(ов) в потоке — у процесса нет «% выполнено», только стадия каждого элемента</div>
@@ -565,7 +565,7 @@ function ProjectAccordionItem({ project: p, isOpen, detail, onToggle }: {
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
             <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            {isActive ? <Pill accent>Активный</Pill> : <Pill color="#a0e0ab">Закрыт</Pill>}
+            {isActive ? <Pill accent>Активный</Pill> : <Pill color="var(--success)">Закрыт</Pill>}
           </div>
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
           {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
@@ -667,7 +667,7 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {stages.map((s: any) => (
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                <span style={{ color: s.status === "done" ? "#a0e0ab" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
+                <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
                   {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
                 </span>
                 <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
@@ -768,8 +768,8 @@ function TaskGraph({ tasks }: { tasks: any[] }) {
   const columns: Record<number, any[]> = {}
   tasks.forEach((t: any) => { const l = levelOf(t); (columns[l] = columns[l] || []).push(t) })
   const maxLevel = Math.max(0, ...Object.keys(columns).map(Number))
-  const dotColor = (t: any) => t.status === "done" ? "#a0e0ab" : t.status === "in_progress" ? "var(--mercury-a)"
-    : t.status === "blocked" ? "#e08a8a" : "var(--whisper)"
+  const dotColor = (t: any) => t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
+    : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"
 
   return (
     <div style={{ display: "flex", gap: 18, overflowX: "auto", paddingBottom: 6, marginBottom: 14 }}>
@@ -800,8 +800,8 @@ function TaskGraph({ tasks }: { tasks: any[] }) {
 const COLS = [
   { key: "pending",     label: "В очереди",  dot: "var(--whisper)" },
   { key: "in_progress", label: "В работе",   dot: "var(--mercury-a)" },
-  { key: "done",        label: "Готово",      dot: "#a0e0ab" },
-  { key: "blocked",     label: "Заблокированы", dot: "#e08a8a" },
+  { key: "done",        label: "Готово",      dot: "var(--success)" },
+  { key: "blocked",     label: "Заблокированы", dot: "var(--danger-soft)" },
   // skipped — задача снята офисом (роль без отдела-исполнителя), НЕ выполнена.
   { key: "skipped",     label: "Пропущены",  dot: "var(--muted)" },
 ]
@@ -843,16 +843,16 @@ function ProjectTaskTree({ tasks }: { tasks: any[] }) {
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <Pill accent={t.status === "in_progress"}>{roleName(t.role)}</Pill>
             {(t.attempts || 0) > 0 && t.status !== "done" && (
-              <Pill color="#e0b06a">попытка {t.attempts}</Pill>
+              <Pill color="var(--warning)">попытка {t.attempts}</Pill>
             )}
             {t.done_criterion && t.status !== "done" && t.status !== "blocked" && (
-              <span style={{ fontSize: 10, color: "#6f8a6a", lineHeight: 1.3 }}>✓ {t.done_criterion}</span>
+              <span style={{ fontSize: 10, color: "var(--success-dim)", lineHeight: 1.3 }}>✓ {t.done_criterion}</span>
             )}
           </div>
           {t.status === "blocked" && (
             <div style={{ marginTop: 8 }}>
               {t.blocked_reason && (
-                <div style={{ fontSize: 10.5, color: "#e08a8a", lineHeight: 1.4, marginBottom: 8 }}>
+                <div style={{ fontSize: 10.5, color: "var(--danger-soft)", lineHeight: 1.4, marginBottom: 8 }}>
                   ⛔ {t.blocked_reason}
                 </div>
               )}
@@ -933,10 +933,10 @@ function SpecTab({ tick }: { tick: number }) {
               Что офис собирается сделать и по каким критериям работа считается выполненной.
             </div>
           </div>
-          {confirmed ? <Pill color="#a0e0ab">✓ Подтверждена</Pill> : (
+          {confirmed ? <Pill color="var(--success)">✓ Подтверждена</Pill> : (
             <button onClick={confirm} disabled={confirming}
               style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
-                background: "var(--mercury-a)", border: "none", color: "#1a1408", fontWeight: 600 }}>
+                background: "var(--mercury-a)", border: "none", color: "var(--on-accent)", fontWeight: 600 }}>
               {confirming ? "…" : "Подтвердить спецификацию"}
             </button>
           )}
@@ -963,7 +963,7 @@ function SpecTab({ tick }: { tick: number }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             {(spec.success_criteria || []).map((c: string, i: number) => (
               <div key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45 }}>
-                <span style={{ color: "#6f8a6a", marginRight: 6 }}>✓</span>{c}
+                <span style={{ color: "var(--success-dim)", marginRight: 6 }}>✓</span>{c}
               </div>
             ))}
             {(spec.success_criteria || []).length === 0 && (

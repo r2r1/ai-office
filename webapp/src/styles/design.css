@@ -21,6 +21,17 @@
   /* Mercury Flow — органический акцент */
   --mercury: linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25);
   --mercury-a: #ffac2e;
+  /* Семантические статусные токены — раньше эти же hex были раскиданы по
+     ProjectView/CompanyView/DashboardView как одинаковые строковые литералы
+     (найдено при UX-аудите: "инлайн-стили доминируют"); значение цвета
+     остаётся тем же в обеих темах (это акцентные, не фоновые цвета), но
+     теперь у "успеха"/"опасности"/"предупреждения" одно место правки. */
+  --success: #a0e0ab;
+  --success-dim: #6f8a6a;
+  --danger: #e05a5a;
+  --danger-soft: #e08a8a;
+  --warning: #e0b06a;
+  --on-accent: #1a1408;
 }
 
 :root[data-theme="dark"] {

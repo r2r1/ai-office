@@ -98,7 +98,7 @@ function GoalsTab() {
           </div>
           {(bs.blockers || []).length > 0 && (
             <Card style={{ marginBottom: 20, borderColor: "rgba(224,138,138,0.35)" }}>
-              <div style={{ fontSize: 12, color: "#e08a8a", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12, color: "var(--danger-soft)", lineHeight: 1.5 }}>
                 ⛔ {(bs.blockers || []).map((b: any) => b.summary).join(" · ")}
               </div>
             </Card>
@@ -123,11 +123,11 @@ function GoalsTab() {
                 <div style={{ color: "var(--text)", marginBottom: 3 }}>
                   {o.title}{o.desired ? <span style={{ color: "var(--mercury-a)" }}> → {o.desired}</span> : null}
                 </div>
-                <div style={{ fontSize: 11, color: o.measured_by ? "#6f8a6a" : "#e0b06a" }}>
+                <div style={{ fontSize: 11, color: o.measured_by ? "var(--success-dim)" : "var(--warning)" }}>
                   {o.measured_by ? `📏 ${o.measured_by}` : "⚠ пока не измерима — офис сначала создаст измеримость"}
                 </div>
                 {g && (
-                  <div style={{ fontSize: 11, marginTop: 3, color: g.met ? "#6f8a6a" : "var(--mercury-a)" }}>
+                  <div style={{ fontSize: 11, marginTop: 3, color: g.met ? "var(--success-dim)" : "var(--mercury-a)" }}>
                     {g.met
                       ? `✅ достигнута: ${g.current} из ${g.desired}`
                       : `📊 разрыв ${g.gap} — сейчас ${g.current} из ${g.desired}`}
@@ -213,7 +213,7 @@ function ProfileTab() {
 
   return (
     <ViewBody style={{ maxWidth: 620 }}>
-      {saved && <div style={{ fontSize: 11, color: "#a0e0ab", marginBottom: 10 }}>сохранено ✓</div>}
+      {saved && <div style={{ fontSize: 11, color: "var(--success)", marginBottom: 10 }}>сохранено ✓</div>}
       <SectionLabel>Философия компании</SectionLabel>
       <Card style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 14 }}>
         <TextField label="Миссия — зачем компания существует" value={phil.mission}
@@ -284,7 +284,7 @@ function IntellectTab() {
 
   return (
     <ViewBody style={{ maxWidth: 640 }}>
-      {saved && <div style={{ fontSize: 11, color: "#a0e0ab", marginBottom: 10 }}>сохранено ✓</div>}
+      {saved && <div style={{ fontSize: 11, color: "var(--success)", marginBottom: 10 }}>сохранено ✓</div>}
 
       <SectionLabel>Режим качества</SectionLabel>
       <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 14 }}>
@@ -375,7 +375,7 @@ function RolesTab() {
                 ))}
               </div>
               {(r.constraints || []).length > 0 && (
-                <div style={{ fontSize: 10.5, color: "#ffac2e", marginTop: 8 }}>🚫 {(r.constraints || []).join(" · ")}</div>
+                <div style={{ fontSize: 10.5, color: "var(--mercury-a)", marginTop: 8 }}>🚫 {(r.constraints || []).join(" · ")}</div>
               )}
             </Card>
           ))}
@@ -536,7 +536,7 @@ function SkillsTab() {
             style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-pill)", padding: "9px 20px",
               background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13,
               opacity: busy ? 0.5 : 1 }}>{busy ? "Устанавливаю…" : "Установить"}</button>
-          {msg && <span style={{ fontSize: 12, color: msg.ok ? "#a0e0ab" : "#e05a5a" }}>{msg.text}</span>}
+          {msg && <span style={{ fontSize: 12, color: msg.ok ? "var(--success)" : "var(--danger)" }}>{msg.text}</span>}
         </div>
       </Card>
 
@@ -633,21 +633,21 @@ function LimitsTab() {
             style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "0 18px",
               background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13 }}>Сохранить</button>
         </div>
-        {saved && <div style={{ fontSize: 11, color: "#a0e0ab", marginTop: 8 }}>сохранено ✓</div>}
+        {saved && <div style={{ fontSize: 11, color: "var(--success)", marginTop: 8 }}>сохранено ✓</div>}
       </Card>
 
       <SectionLabel>Текущий расход</SectionLabel>
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <span style={{ fontSize: 13, color: "var(--text)" }}>Потрачено</span>
-          <span className="mono" style={{ fontSize: 13, color: lim.over_limit ? "#e05a5a" : "var(--text-dim)" }}>
+          <span className="mono" style={{ fontSize: 13, color: lim.over_limit ? "var(--danger)" : "var(--text-dim)" }}>
             ${lim.spent.toFixed(4)}{lim.total_usd > 0 ? ` / $${lim.total_usd}` : ""}
           </span>
         </div>
         {lim.total_usd > 0 && (
           <div style={{ height: 4, background: "var(--hairline)", borderRadius: 2, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${pct}%`, transition: "width 0.5s",
-              background: pct >= 100 ? "#e05a5a" : pct >= 75 ? "#ffac2e" : "#a0e0ab" }} />
+              background: pct >= 100 ? "var(--danger)" : pct >= 75 ? "var(--mercury-a)" : "var(--success)" }} />
           </div>
         )}
         {typeof lim.spent_today === "number" && (
@@ -658,7 +658,7 @@ function LimitsTab() {
             </span>
           </div>
         )}
-        {lim.over_limit && <div style={{ fontSize: 11, color: "#e05a5a", marginTop: 8 }}>⛔ Лимит достигнут — офис на паузе</div>}
+        {lim.over_limit && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 8 }}>⛔ Лимит достигнут — офис на паузе</div>}
       </Card>
     </ViewBody>
   )

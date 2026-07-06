@@ -65,7 +65,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
             <div style={{ display: "grid", gap: 10 }}>
               {gaps.map((g: any, i: number) => (
                 <Card key={i} style={{
-                  borderLeft: `3px solid ${g.met ? "#a0e0ab" : "var(--mercury-a)"}`,
+                  borderLeft: `3px solid ${g.met ? "var(--success)" : "var(--mercury-a)"}`,
                   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
                 }}>
                   <div style={{ fontSize: 13, color: "var(--text)" }}>{g.title}</div>
@@ -73,7 +73,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                     <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>
                       {g.current} <span style={{ color: "var(--faint)" }}>из</span> {g.desired}
                     </span>
-                    {g.met ? <Pill color="#a0e0ab">✓ достигнута</Pill> : <Pill accent>разрыв {g.gap}</Pill>}
+                    {g.met ? <Pill color="var(--success)">✓ достигнута</Pill> : <Pill accent>разрыв {g.gap}</Pill>}
                   </div>
                 </Card>
               ))}
@@ -93,7 +93,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
 
         {/* Результат последнего accept — куда делась принятая инициатива */}
         {acceptedResult && (
-          <Card style={{ borderLeft: "3px solid #a0e0ab", padding: "12px 16px", marginBottom: 18,
+          <Card style={{ borderLeft: "3px solid var(--success)", padding: "12px 16px", marginBottom: 18,
             display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
               ✅ «{acceptedResult.title}» стала проектом «<b style={{ color: "var(--text)" }}>{acceptedResult.projectTitle}</b>»
@@ -130,7 +130,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                       <button onClick={() => handleInitiative(ini.id, "accept")}
                         style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
-                          border: "1px solid #a0e0ab", background: "rgba(160,224,171,0.15)", color: "#a0e0ab" }}>✅ Принять</button>
+                          border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)" }}>✅ Принять</button>
                       <button onClick={() => handleInitiative(ini.id, "reject")}
                         style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
                           border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>✖</button>
@@ -154,10 +154,10 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                     <span>{ds.status} <span className="mono" style={{ fontSize: 12, color: "var(--text-dim)" }}>{ds.score}</span></span>
                   </div>
                   <div style={{ height: 4, background: "var(--hairline)", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${ds.score}%`, background: ds.score >= 75 ? "#a0e0ab" : ds.score >= 45 ? "#ffac2e" : "#e05a5a", transition: "width 0.5s" }} />
+                    <div style={{ height: "100%", width: `${ds.score}%`, background: ds.score >= 75 ? "var(--success)" : ds.score >= 45 ? "var(--mercury-a)" : "var(--danger)", transition: "width 0.5s" }} />
                   </div>
                   {ds.issues?.length > 0 && (
-                    <div style={{ marginTop: 6, fontSize: 10, color: "#ffac2e" }}>⚠ {ds.issues.join(" · ")}</div>
+                    <div style={{ marginTop: 6, fontSize: 10, color: "var(--mercury-a)" }}>⚠ {ds.issues.join(" · ")}</div>
                   )}
                 </Card>
               ))}
