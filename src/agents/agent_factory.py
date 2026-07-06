@@ -12,6 +12,7 @@ from typing import Callable, Awaitable
 from src.core import llm
 from src.agents import researcher as researcher_agent
 from src.agents import tool_schemas as _ts
+from src.agents import file_tool_handlers
 from src.office import questions as questions_module
 from src.office import state
 from src.office import connections
@@ -270,65 +271,11 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         return json.dumps({"name": conn["name"], "type": conn["type"], "fields": conn["fields"]},
                           ensure_ascii=False)
 
-    async def _handle_write_file(args: dict) -> str:
-        path = (args.get("path") or "").strip()
-        content = args.get("content", "")
-        # Самолечение: developer/designer/integrator иногда забывают префикс site/ у
-        # веб-файла (видели в проде: 9 html-страниц подряд ушли в корень workspace
-        # вместо site/) — тогда авто-публикация начинает читать/показывать клиенту
-        # РАСХОДЯЩУЮСЯ копию, а правки в реальном site/ становятся невидимы. Нормализуем
-        # путь ДО записи, а не патчим последствия на стороне чтения.
-        if (role in ("developer", "designer", "integrator") and path
-                and "/" not in path and path.lower().endswith((".html", ".css", ".js"))):
-            path = f"site/{path}"
-        res = workspace_module.write_file(path, content)
-        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📝 {res}"})
-        if res.startswith("Файл сохранён:"):
-            # Извлекаем реальный путь из ответа: «Файл сохранён: <path> (N символов).»
-            actual_path = res.split(":", 1)[1].strip().split(" (")[0]
-            await publish({"type": "file_written", "agent_id": agent_id, "path": actual_path,
-                           "text": f"📝 {agent_id}: {res}"})
-        return res
-
-    async def _handle_read_file(args: dict) -> str:
-        return workspace_module.read_file(args.get("path", ""))
-
-    async def _handle_list_files(args: dict) -> str:
-        return workspace_module.tree_text()
-
-    async def _handle_verify_code(args: dict) -> str:
-        res = workspace_module.verify_text()
-        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🧪 {res}"})
-        return res
-
-    async def _handle_execute_code(args: dict) -> str:
-        path = args.get("path", "")
-        stdin = args.get("stdin", "")
-        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"▶️ Запускаю {path}…"})
-        res = workspace_module.execute_code(path, stdin)
-        short = res.replace("\n", " ")
-        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📤 {short}"})
-        await publish({"type": "code_executed", "agent_id": agent_id, "path": path,
-                       "text": f"▶️ {agent_id}: {path} → {short}"})
-        return res
-
-    async def _handle_delete_file(args: dict) -> str:
-        path = args.get("path", "")
-        res = workspace_module.delete_file(path)
-        await _publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🗑 {res}"})
-        return res
-
-    async def _handle_configure_bot(args: dict) -> str:
-        from src.office import bot_config
-        patch = {}
-        for k in ("services", "ask_fields", "greeting", "success_message"):
-            if args.get(k) is not None:
-                patch[k] = args[k]
-        cfg = bot_config.update(patch)
-        await _publish_and_log({"type": "speech", "agent_id": agent_id,
-                                "text": f"⚙️ Настроил бота: услуги={cfg.get('services') or '—'}"})
-        return (f"Конфиг бота обновлён. Услуги: {cfg.get('services') or 'нет (спросит имя+телефон)'}, "
-                f"поля: {cfg.get('ask_fields')}. Теперь можно launch_bot.")
+    # write_file/read_file/list_files/verify_code/execute_code/delete_file/
+    # configure_bot — вынесены в file_tool_handlers.py (второй проход декомпозиции
+    # agent_factory.py, см. tests/test_agent_tool_handlers.py — зафиксировал
+    # поведение ДО извлечения). Фабрика вызывается ниже, после определения
+    # _publish_and_log (её замыкания используют этот колбэк).
 
     async def _handle_list_integrations(args: dict) -> str:
         lines = []
@@ -501,9 +448,10 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         # прячем из каталога ЦЕЛИКОМ (не только блокируем вызов): модель не тратит
         # токены/итерации на действие, которое ей всё равно откажут (workspace.
         # execute_code вернул бы _DISABLED_MSG, но лучше вообще не предлагать выбор).
+        _file_handlers = file_tool_handlers.build(agent_id, role, publish, _publish_and_log)
         _code_exec_tools = [_ts.EXECUTE_CODE_TOOL] if workspace_module.code_execution_allowed() else []
-        _code_exec_handlers = ({"execute_code": _handle_execute_code}
-                               if workspace_module.code_execution_allowed() else {})
+        if not workspace_module.code_execution_allowed():
+            _file_handlers.pop("execute_code", None)
 
         def _touch_liveness() -> None:
             # Каждый ответ API/инструмента = «агент жив»: продлеваем watchdog, чтобы
@@ -546,13 +494,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                 "use_skill": _handle_use_skill,
                 "find_skills": _handle_find_skills,
                 "use_integration": _handle_use_integration,
-                "write_file": _handle_write_file,
-                "read_file": _handle_read_file,
-                "list_files": _handle_list_files,
-                "verify_code": _handle_verify_code,
-                **_code_exec_handlers,
-                "delete_file": _handle_delete_file,
-                "configure_bot": _handle_configure_bot,
+                **_file_handlers,
             },
         )
 
