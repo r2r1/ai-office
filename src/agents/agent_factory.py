@@ -11,6 +11,7 @@ from typing import Callable, Awaitable
 
 from src.core import llm
 from src.agents import researcher as researcher_agent
+from src.agents import tool_schemas as _ts
 from src.office import questions as questions_module
 from src.office import state
 from src.office import connections
@@ -28,343 +29,11 @@ from src.integrations import registry as integrations_registry
 # Тексты ролей и командные политики переехали в файлы (Prompt Builder — единая
 # сборка): роли — src/office/builtin_roles/<role>.md (читает roles.py), политики
 # (автономность, «артефакты только через инструменты», межагентность, правила
-# лидера) — src/office/policies/*.md (читает prompt_builder.policy). Здесь остались
-# только инструменты агентов и их обработчики.
-
-# Инструмент: задать вопрос пользователю
-_ASK_USER_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "ask_user",
-        "description": "Задаёт вопрос пользователю (только для API-ключей или бизнес-уточнений).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "question": {"type": "string", "description": "Вопрос пользователю"},
-            },
-            "required": ["question"],
-        },
-    },
-}
-
-# Инструмент: СПРОСИТЬ коллегу и сразу получить ответ (синхронная консультация)
-_ASK_COLLEAGUE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "ask_colleague",
-        "description": "Задать КОНКРЕТНЫЙ вопрос коллеге нужной роли и СРАЗУ получить ответ "
-                       "(он отвечает на основе своей работы и контекста). Используй, когда тебе "
-                       "нужен вход другого специалиста: текст/оффер у marketer, данные у analyst, "
-                       "дизайн и тех-проверка сайта у developer, проектное решение у architect. "
-                       "Это не передача задачи — это короткая консультация по делу.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "role": {"type": "string", "description": "Роль коллеги: marketer, developer, "
-                         "analyst, architect, integrator, salesman, researcher"},
-                "question": {"type": "string", "description": "Конкретный вопрос (одно-два предложения)"},
-            },
-            "required": ["role", "question"],
-        },
-    },
-}
-
-# Инструмент: поднять СОБЫТИЕ в компанию (Event Layer) — не конкретному коллеге, а CEO
-_RAISE_EVENT_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "raise_event",
-        "description": "Сообщить КОМПАНИИ важный сигнал, не дёргая конкретного коллегу: "
-                       "проблему, блокер, найденную возможность или наблюдение, которое "
-                       "касается других отделов. CEO увидит это, интерпретирует и решит, "
-                       "что делать (поставит задачу нужному отделу). Используй, когда "
-                       "обнаружил что-то выходящее за рамки твоей задачи: «конверсия лендинга "
-                       "низкая», «нашёл прибыльный канал», «нет данных от аналитика».",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string", "enum": ["problem", "blocker", "opportunity", "signal", "info"],
-                         "description": "Тип сигнала"},
-                "summary": {"type": "string", "description": "Суть одной фразой"},
-                "detail": {"type": "string", "description": "Детали и рекомендация (опционально)"},
-            },
-            "required": ["kind", "summary"],
-        },
-    },
-}
-
-# Инструмент: поставить задачу коллеге на общую доску (видна в его to-do и у его лидера)
-_DELEGATE_TASK_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "delegate_task",
-        "description": "Поставить ЗАДАЧУ коллеге другой роли на общую доску задач. В отличие от "
-                       "ask_colleague (быстрый вопрос-ответ) это полноценная задача: попадёт в "
-                       "to-do исполнителя нужной роли и будет отслеживаться его лидером. Используй, "
-                       "когда тебе нужно, чтобы коллега ЧТО-ТО СДЕЛАЛ (а не просто ответил).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "role": {"type": "string", "description": "Роль исполнителя (developer, "
-                         "marketer, analyst, integrator, salesman)"},
-                "title": {"type": "string", "description": "Что нужно сделать (конкретно)"},
-                "done_criterion": {"type": "string", "description": "Когда задача считается выполненной"},
-            },
-            "required": ["role", "title"],
-        },
-    },
-}
-
-# Прямые send_message/read_messages у воркеров убраны: межагентка идёт через
-# ask_colleague (синхронная консультация) и delegate_task (задача на доску) —
-# см. tool_handlers ниже. Свои копии этих инструментов остались только в chat.py
-# (диалог пользователя с агентом), там они живые.
-
-# Инструмент: получить доступ/учётные данные к внешней платформе
-_GET_CONNECTION_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "get_connection",
-        "description": "Возвращает сохранённые учётные данные платформы (API-ключ/токен). Если нет — запроси через ask_user.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Название платформы (например: Instagram, OpenAI, Telegram)"},
-            },
-            "required": ["name"],
-        },
-    },
-}
-
-# Инструмент: читать общий чат офиса
-_READ_OFFICE_CHAT_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "read_office_chat",
-        "description": "Читает общий чат офиса. Проверяй перед ask_user — ключ мог получить другой агент.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "n": {"type": "integer", "description": "Количество последних сообщений (по умолчанию 20)", "default": 20},
-            },
-            "required": [],
-        },
-    },
-}
-
-# Инструмент: список доступных интеграций
-_LIST_INTEGRATIONS_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "list_integrations",
-        "description": "Список интеграций с внешними сервисами: доступные действия и статус подключения. Вызови перед use_integration.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-}
-
-# Инструмент: Tool Router — опиши потребность словами, инструмент подберётся сам
-_USE_CAPABILITY_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "use_capability",
-        "description": "Опиши ПОТРЕБНОСТЬ обычными словами («опубликовать лендинг», "
-                       "«отправить сообщение в telegram», «создать репозиторий»), а система "
-                       "сама подберёт нужный внешний инструмент и выполнит. Не нужно знать "
-                       "точные имена интеграций/действий — это делает роутер. Если нужен "
-                       "конкретный сервис с параметрами — используй use_integration.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "need": {"type": "string", "description": "Что нужно сделать, своими словами"},
-                "params": {"type": "object", "description": "Параметры для действия (если знаешь): "
-                           "например {chat_id, text} для сообщения, {slug, html} для лендинга"},
-            },
-            "required": ["need"],
-        },
-    },
-}
-
-# Инструмент: Skills — получить экспертный плейбук «как делать» под тип работы.
-# Роль больше не держит «как» в промпте: воркер описывает потребность и берёт скилл.
-_USE_SKILL_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "use_skill",
-        "description": "Когда задача требует специального подхода (например «3D-сайт с "
-                       "анимациями», «лендинг на framer motion»), опиши потребность словами — "
-                       "система подберёт готовый СКИЛЛ и вернёт экспертный плейбук: структуру "
-                       "файлов, приёмы и проверки. Дальше выполняй плейбук своими инструментами "
-                       "(write_file и т.д.). Вызывай ПЕРЕД тем как писать код, если сомневаешься «как».",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "need": {"type": "string", "description": "Что нужно сделать, своими словами"},
-            },
-            "required": ["need"],
-        },
-    },
-}
-
-# Инструмент: ПОСМОТРЕТЬ каталог скиллов (дискавери, внутренний find-skills).
-# В отличие от use_skill (сразу берёт один плейбук) — показывает СПИСОК доступных
-# способов под запрос, чтобы лидер/воркер понял, что вообще умеет офис, и выбрал.
-_FIND_SKILLS_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "find_skills",
-        "description": "Ищет по каталогу готовых скиллов офиса и возвращает СПИСОК подходящих "
-                       "(название + что делает). Используй для разведки: понять, какие способы "
-                       "есть под задачу, прежде чем брать конкретный через use_skill. Пустой "
-                       "запрос → покажет все доступные тебе скиллы.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Что ищешь, своими словами (можно пусто — покажет весь каталог)"},
-            },
-            "required": [],
-        },
-    },
-}
-
-# Инструмент: выполнить реальное действие во внешнем сервисе
-_USE_INTEGRATION_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "use_integration",
-        "description": "Выполняет действие во внешнем сервисе. Учётные данные подтягиваются автоматически. Перед вызовом смотри list_integrations.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Имя интеграции (например 'telegram')"},
-                "action": {"type": "string", "description": "Имя действия (например 'send_message')"},
-                "params": {"type": "object", "description": "Аргументы действия (см. list_integrations)"},
-            },
-            "required": ["name", "action"],
-        },
-    },
-}
-
-# Инструменты: писать реальный код в рабочую папку проекта
-_WRITE_FILE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "write_file",
-        "description": "Создаёт/перезаписывает файл в рабочей папке проекта. Пиши реальный код, а не описание.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Путь файла внутри проекта (относительный, НЕ пустой). Примеры: index.html, bot.py, styles.css, src/app.js"},
-                "content": {"type": "string", "description": "Полное содержимое файла"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-}
-
-_READ_FILE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "read_file",
-        "description": "Читает файл из рабочей папки проекта по относительному пути.",
-        "parameters": {
-            "type": "object",
-            "properties": {"path": {"type": "string", "description": "Путь файла"}},
-            "required": ["path"],
-        },
-    },
-}
-
-_LIST_FILES_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "list_files",
-        "description": "Показывает все файлы проекта в рабочей папке (что уже написано).",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-}
-
-_VERIFY_CODE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "verify_code",
-        "description": "Проверяет компиляцию .py файлов. Вызывай после write_file и до предложения пушить в GitHub.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-}
-
-_EXECUTE_CODE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "execute_code",
-        "description": "Запускает файл из рабочей папки (ТОЛЬКО .py, .js, .sh) и возвращает вывод. "
-                       "НЕ вызывай на .html/.css — их запустить нельзя, для сайта это всегда «Неизвестный "
-                       "тип файла»; для проверки HTML используй verify_code или просто перечитай файл. "
-                       "НЕ вызывай на site/*.js — это браузерный скрипт (document/window), Node выдаст "
-                       "«document is not defined», это НЕ значит, что код сломан — просто перечитай файл.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Путь файла (например 'main.py', 'scripts/calc.py')"},
-                "stdin": {"type": "string", "description": "Входные данные для скрипта (опционально)"},
-            },
-            "required": ["path"],
-        },
-    },
-}
-
-_DELETE_FILE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "delete_file",
-        "description": "Удаляет файл из рабочей папки проекта.",
-        "parameters": {
-            "type": "object",
-            "properties": {"path": {"type": "string", "description": "Путь файла для удаления"}},
-            "required": ["path"],
-        },
-    },
-}
-
-# Инструмент: настроить встроенного бота записи (услуги/приветствие) перед launch_bot
-_CONFIGURE_BOT_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "configure_bot",
-        "description": "Настраивает встроенного Telegram-бота записи ПЕРЕД launch_bot: список услуг "
-                       "(кнопки), какие поля собирать, приветствие. Бери значения из разговора с "
-                       "пользователем, НЕ из брифа. Без вызова бот спрашивает имя+телефон по умолчанию.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "services": {"type": "array", "items": {"type": "string"},
-                             "description": "Список услуг для кнопок (например: ['Кухня','Шкаф-купе'])"},
-                "ask_fields": {"type": "array", "items": {"type": "string"},
-                               "description": "Какие поля собрать (по умолчанию ['Имя','Телефон'])"},
-                "greeting": {"type": "string", "description": "Приветствие бота"},
-                "success_message": {"type": "string", "description": "Сообщение после оформления заявки"},
-            },
-            "required": [],
-        },
-    },
-}
-
-# Инструмент: запросить ресёрчера
-_REQUEST_RESEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "request_research",
-        "description": "Запрашивает ресёрчера. depth='quick' (по умолчанию) или 'deep'.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "question": {"type": "string", "description": "Вопрос для исследования"},
-                "depth": {"type": "string", "enum": ["quick", "deep"]},
-            },
-            "required": ["question"],
-        },
-    },
-}
-
+# лидера) — src/office/policies/*.md (читает prompt_builder.policy). JSON-схемы
+# инструментов — src/agents/tool_schemas.py (были здесь же, ~330 строк чистых
+# данных внутри 901-строчного god-модуля, docs/audit-dd-2026-07-06.md §1/§19
+# п.6). Здесь остались обработчики (замыкания над agent_id/role/publish
+# конкретного вызова create()) и диспетчеризация.
 
 _CRED_KEYWORDS = {
     "api", "key", "ключ", "token", "токен", "secret", "пароль", "password",
@@ -832,7 +501,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         # прячем из каталога ЦЕЛИКОМ (не только блокируем вызов): модель не тратит
         # токены/итерации на действие, которое ей всё равно откажут (workspace.
         # execute_code вернул бы _DISABLED_MSG, но лучше вообще не предлагать выбор).
-        _code_exec_tools = [_EXECUTE_CODE_TOOL] if workspace_module.code_execution_allowed() else []
+        _code_exec_tools = [_ts.EXECUTE_CODE_TOOL] if workspace_module.code_execution_allowed() else []
         _code_exec_handlers = ({"execute_code": _handle_execute_code}
                                if workspace_module.code_execution_allowed() else {})
 
@@ -857,13 +526,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             on_activity=_touch_liveness,
-            extra_tools=[_REQUEST_RESEARCH_TOOL, _ASK_USER_TOOL, _ASK_COLLEAGUE_TOOL,
-                         _RAISE_EVENT_TOOL, _DELEGATE_TASK_TOOL, _GET_CONNECTION_TOOL,
-                         _READ_OFFICE_CHAT_TOOL,
-                         _LIST_INTEGRATIONS_TOOL, _USE_CAPABILITY_TOOL, _USE_INTEGRATION_TOOL,
-                         _USE_SKILL_TOOL, _FIND_SKILLS_TOOL,
-                         _WRITE_FILE_TOOL, _READ_FILE_TOOL, _LIST_FILES_TOOL, _VERIFY_CODE_TOOL,
-                         *_code_exec_tools, _DELETE_FILE_TOOL, _CONFIGURE_BOT_TOOL],
+            extra_tools=[_ts.REQUEST_RESEARCH_TOOL, _ts.ASK_USER_TOOL, _ts.ASK_COLLEAGUE_TOOL,
+                         _ts.RAISE_EVENT_TOOL, _ts.DELEGATE_TASK_TOOL, _ts.GET_CONNECTION_TOOL,
+                         _ts.READ_OFFICE_CHAT_TOOL,
+                         _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,
+                         _ts.USE_SKILL_TOOL, _ts.FIND_SKILLS_TOOL,
+                         _ts.WRITE_FILE_TOOL, _ts.READ_FILE_TOOL, _ts.LIST_FILES_TOOL, _ts.VERIFY_CODE_TOOL,
+                         *_code_exec_tools, _ts.DELETE_FILE_TOOL, _ts.CONFIGURE_BOT_TOOL],
             tool_handlers={
                 "request_research": _handle_request_research,
                 "ask_user": _handle_ask_user,
