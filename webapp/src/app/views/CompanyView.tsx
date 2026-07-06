@@ -57,6 +57,7 @@ export function CompanyView() {
 function GoalsTab() {
   const [objectives, setObjectives] = useState<any[]>([])
   const [world, setWorld] = useState<any>(null)
+  const [gaps, setGaps] = useState<any[]>([])
   const [title, setTitle] = useState("")
   const [desired, setDesired] = useState("")
   const [measuredBy, setMeasuredBy] = useState("")
@@ -64,6 +65,7 @@ function GoalsTab() {
   const load = () => {
     api.objectives().then(d => setObjectives(d.objectives || []))
     api.world().then(w => w && setWorld(w))
+    api.gap().then(d => setGaps(d.gaps || []))
   }
   useEffect(load, [])
 
@@ -111,22 +113,32 @@ function GoalsTab() {
             Целей пока нет. Добавьте измеримую цель — офис будет сверять с ней работу.
           </div>
         )}
-        {active.map((o: any) => (
-          <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 12.5,
-            color: "var(--text-dim)", paddingBottom: 10, borderBottom: "1px solid var(--hairline)" }}>
-            <span style={{ color: "var(--mercury-a)", marginTop: 1 }}>◎</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: "var(--text)", marginBottom: 3 }}>
-                {o.title}{o.desired ? <span style={{ color: "var(--mercury-a)" }}> → {o.desired}</span> : null}
+        {active.map((o: any) => {
+          const g = gaps.find((x: any) => x.objective_id === o.id)
+          return (
+            <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 12.5,
+              color: "var(--text-dim)", paddingBottom: 10, borderBottom: "1px solid var(--hairline)" }}>
+              <span style={{ color: "var(--mercury-a)", marginTop: 1 }}>◎</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "var(--text)", marginBottom: 3 }}>
+                  {o.title}{o.desired ? <span style={{ color: "var(--mercury-a)" }}> → {o.desired}</span> : null}
+                </div>
+                <div style={{ fontSize: 11, color: o.measured_by ? "#6f8a6a" : "#e0b06a" }}>
+                  {o.measured_by ? `📏 ${o.measured_by}` : "⚠ пока не измерима — офис сначала создаст измеримость"}
+                </div>
+                {g && (
+                  <div style={{ fontSize: 11, marginTop: 3, color: g.met ? "#6f8a6a" : "var(--mercury-a)" }}>
+                    {g.met
+                      ? `✅ достигнута: ${g.current} из ${g.desired}`
+                      : `📊 разрыв ${g.gap} — сейчас ${g.current} из ${g.desired}`}
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 11, color: o.measured_by ? "#6f8a6a" : "#e0b06a" }}>
-                {o.measured_by ? `📏 ${o.measured_by}` : "⚠ пока не измерима — офис сначала создаст измеримость"}
-              </div>
+              <button onClick={() => archive(o.id)} title="Архивировать"
+                style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 14 }}>×</button>
             </div>
-            <button onClick={() => archive(o.id)} title="Архивировать"
-              style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 14 }}>×</button>
-          </div>
-        ))}
+          )
+        })}
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
           <input value={title} onChange={e => setTitle(e.target.value)}
             placeholder="Цель — например: заявки с сайта каждую неделю"
