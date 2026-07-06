@@ -195,10 +195,18 @@ def _has_role_for_project(dept_id: str, role: str, project_id: str) -> bool:
                for a in registry.members_of(dept_id))
 
 
-async def verify_and_fix_if_needed(publish) -> bool:
+async def verify_and_fix_if_needed(publish, project_id: str = "") -> bool:
     """Финальная верификация: если сайт есть и у него критические проблемы —
     добавляем fix-задачу на доску вместо того чтобы объявить работу готовой.
-    Возвращает True если задача добавлена (офис продолжит работу)."""
+    Возвращает True если задача добавлена (офис продолжит работу).
+
+    `project_id` — параллельные Work: фикс-задача должна попасть в ТОТ ЖЕ
+    проект, чей сайт проверяли (workspace уже переключён вызывающим на его
+    подпапку — см. workspace.project_scope), а не в "первый попавшийся
+    активный" (было бы неверно с несколькими активными проектами сразу).
+    Дедуп по незакрытым fix-задачам тоже смотрит только на ЭТОТ проект —
+    иначе fix-задача, уже стоящая у проекта A, молча блокировала бы такую же
+    доработку для проекта B."""
     problems = critic.check_site()
     critical = [p for p in problems if critic.is_critical(p)]
     if not critical:
@@ -209,16 +217,17 @@ async def verify_and_fix_if_needed(publish) -> bool:
     # цикл исключён эскалацией приёмки: 3 провала → задача блокируется сама.
     crit_text = "; ".join(critic.text_of(p) for p in critical[:2])
     fix_title = "Исправить критические проблемы сайта: " + crit_text[:120]
+    scope_tasks = plan.for_project(project_id) if project_id else plan.all_tasks()
     if any("исправить критические" in (t.get("title", "").lower())
            and t.get("status") in ("pending", "in_progress", "blocked")
-           for t in plan.all_tasks()):
+           for t in scope_tasks):
         return False  # доработка уже в очереди/в работе/у владельца — не дублируем
     await publish({"type": "system",
                    "text": f"🔍 Финальная проверка нашла проблемы: {crit_text[:100]} — "
                            "добавляю задачу на исправление"})
     plan.add_task(fix_title, "developer",
                   "форма шлёт на /api/site-lead, сайт открывается без ошибок",
-                  requested_by="orchestrator_1")
+                  requested_by="orchestrator_1", project_id=project_id)
     return True
 
 
