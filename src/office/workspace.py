@@ -2,15 +2,18 @@
 Рабочая папка проекта — агенты пишут реальный код. По тенанту:
 data/tenants/<tid>/workspace/. Защита от выхода за пределы каталога.
 
-⚠️ execute_code/run_command исполняют процесс (интерпретатор/shell) БЕЗ
-изоляции от файловой системы хоста — `_safe()` защищает только путь ФАЙЛА,
-который запускается, а не то, что делает запущенный код/команда. Python-скрипт
-или shell-команда внутри workspace могут прочитать `../../<чужой-tenant>/
-connections.json`, `.env` и т.д. с правами процесса сервера (реальная находка
-DD-аудита, docs/audit-dd-2026-07.md §17 — критический security-долг). Полная
-изоляция (контейнер/sandbox) — отдельная задача; v1-фикс: обе функции по
-умолчанию ВЫКЛЮЧЕНЫ (opt-in через ALLOW_CODE_EXECUTION=1), пока изоляция не
-построена. НЕ снимай это ограничение без контейнеризации исполнения.
+execute_code/run_command исполняют процесс (интерпретатор/shell) через
+src/office/exec_sandbox.py. По умолчанию (SANDBOX_MODE=direct) — БЕЗ изоляции
+от файловой системы хоста, как и раньше: `_safe()` защищает только путь
+ФАЙЛА, который запускается, а не то, что делает запущенный код/команда —
+Python-скрипт или shell-команда внутри workspace могут прочитать
+`../../<чужой-tenant>/connections.json`, `.env` и т.д. с правами процесса
+сервера (реальная находка DD-аудита, docs/audit-dd-2026-07.md §17). Реальная
+изоляция — SANDBOX_MODE=docker (контейнер без сети, read-only ФС, лимиты
+ресурсов, см. exec_sandbox.py и docker/sandbox.Dockerfile) — требует
+установленного Docker и собранного образа, не включена по умолчанию, чтобы
+не ломать деплои без Docker. Обе функции по-прежнему по умолчанию ВЫКЛЮЧЕНЫ
+целиком (opt-in через ALLOW_CODE_EXECUTION=1) независимо от SANDBOX_MODE.
 """
 
 import os
@@ -307,7 +310,7 @@ def _utf8_env() -> dict:
 def execute_code(path: str, stdin_input: str = "") -> str:
     """Запускает файл из рабочей папки, возвращает stdout+stderr (макс. 30 сек)."""
     import subprocess
-    import sys
+    from src.office import exec_sandbox
 
     if not code_execution_allowed():
         return _DISABLED_MSG
@@ -317,6 +320,7 @@ def execute_code(path: str, stdin_input: str = "") -> str:
         return f"Файл не найден: {path}"
 
     ext = full.suffix.lower()
+    rel = full.relative_to(_base().resolve()).as_posix()
     # Долгоживущий Telegram-бот (long polling) НЕЛЬЗЯ запускать здесь: процесс висит
     # до таймаута, а под uvicorn --reload запись bot.py и так перезагружает сервер.
     # Боты запускаются штатно через integrations.telegram.launch_bot, не через execute_code.
@@ -331,7 +335,7 @@ def execute_code(path: str, stdin_input: str = "") -> str:
                     "здесь только повис бы. Синтаксис проверь через verify_code, а сам бот "
                     "запусти штатно через интеграцию Telegram (launch_bot), не execute_code.")
     if ext == ".py":
-        cmd = [sys.executable, str(full)]
+        lang = "python"
     elif ext in (".js", ".mjs", ".ts"):
         # Клиентский JS сайта (site/*.js) выполняется в браузере, а не в Node — там нет
         # document/window/navigator. Реальный кейс: developer гонял site/script.js через
@@ -343,7 +347,6 @@ def execute_code(path: str, stdin_input: str = "") -> str:
             js_code = full.read_text(encoding="utf-8", errors="replace")
         except Exception:
             js_code = ""
-        rel = full.relative_to(_base().resolve()).as_posix()
         is_site_js = rel.startswith("site/") or "/site/" in rel
         uses_browser_globals = bool(re.search(r"\b(document|window|navigator|localStorage)\b", js_code))
         if is_site_js and uses_browser_globals:
@@ -351,24 +354,15 @@ def execute_code(path: str, stdin_input: str = "") -> str:
                     "а execute_code запускает через Node, где их нет — «document is not defined» "
                     "здесь НЕ означает, что код сломан. Проверяй такой JS через verify_code "
                     "(синтаксис) или глазами при открытии сайта, не через execute_code.")
-        cmd = ["node", str(full)]
+        lang = "node"
     elif ext == ".sh":
-        cmd = ["bash", str(full)]
+        lang = "bash"
     else:
         return f"Неизвестный тип файла: {ext}. Поддерживаются: .py .js .sh"
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-            cwd=str(_base()),
-            input=stdin_input or None,
-            env=_utf8_env(),
-        )
+        result = exec_sandbox.run_script(lang, rel, workdir=_base(), timeout=30,
+                                         stdin_input=stdin_input)
         out = result.stdout[-3000:] if result.stdout else ""
         err = result.stderr[-1500:] if result.stderr else ""
         code = result.returncode
@@ -383,6 +377,8 @@ def execute_code(path: str, stdin_input: str = "") -> str:
         return f"{status}\n" + "\n".join(parts)
     except subprocess.TimeoutExpired:
         return "❌ Таймаут: скрипт работал более 30 секунд и был остановлен."
+    except exec_sandbox.SandboxUnavailable as e:
+        return f"❌ {e}"
     except FileNotFoundError as e:
         return f"❌ Интерпретатор не найден: {e}"
     except Exception as e:
@@ -396,6 +392,7 @@ def run_command(cmd: str, cwd_rel: str = "") -> str:
     Ограничения: таймаут 30 сек, рабочая директория — внутри workspace.
     """
     import subprocess
+    from src.office import exec_sandbox
 
     if not code_execution_allowed():
         return _DISABLED_MSG
@@ -404,7 +401,9 @@ def run_command(cmd: str, cwd_rel: str = "") -> str:
     if not cmd:
         return "(пустая команда)"
 
-    # Рабочая директория: подпапка внутри workspace (или корень)
+    # Рабочая директория: подпапка внутри workspace (или корень) — в
+    # docker-режиме монтируется как /workspace целиком, так что команда
+    # физически не видит ничего за пределами ЭТОЙ директории.
     workdir = _base().resolve()
     if cwd_rel:
         sub = _safe(cwd_rel)
@@ -412,12 +411,7 @@ def run_command(cmd: str, cwd_rel: str = "") -> str:
             workdir = sub
 
     try:
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=str(workdir),
-            encoding="utf-8", errors="replace",
-            env=_utf8_env(),
-        )
+        result = exec_sandbox.run_shell(cmd, workdir=workdir, timeout=30)
         out = (result.stdout or "")[-4000:]
         err = (result.stderr or "")[-2000:]
         parts = []
@@ -431,6 +425,8 @@ def run_command(cmd: str, cwd_rel: str = "") -> str:
         return body
     except subprocess.TimeoutExpired:
         return "❌ Таймаут: команда работала более 30 секунд и была остановлена."
+    except exec_sandbox.SandboxUnavailable as e:
+        return f"❌ {e}"
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
