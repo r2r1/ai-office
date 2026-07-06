@@ -9,6 +9,15 @@ Objective ≠ Milestone. Milestone (milestones.py) — производный и
 измеримость»).
 
 Хранилище: data/tenants/<tid>/objectives.json — {"items": [...]}.
+
+`project_id` — ОПЦИОНАЛЬНАЯ привязка к конкретному Work (параллельные проекты,
+см. src/office/projects.py). По умолчанию "" — цель остаётся company-wide
+(так и задумано архитектурой: «10 заявок/неделю» — бизнес-цель компании, а
+не одного лендинга). Поле — задел на будущее для целей, которые ОСОЗНАННО
+относятся к одному проекту (например «этот бот должен обрабатывать 50
+диалогов/день»), а не смена модели по умолчанию: gap.compute()/context_block()
+остаются company-wide и product_id НЕ фильтруют — только for_project() ниже,
+если он вообще понадобится потребителю.
 """
 
 import time
@@ -38,12 +47,13 @@ def get(oid: str) -> dict | None:
 
 
 def add(title: str, desired: str = "", measured_by: str = "",
-        priority: int = 50, source: str = "owner") -> dict:
+        priority: int = 50, source: str = "owner", project_id: str = "") -> dict:
     """
     Создаёт Objective. `desired` — целевое значение метрики («10 заявок/неделю»),
     `measured_by` — КАК измеряется («count leads.json за 7 дней»); пустой
     measured_by означает «пока неизмеримо» — objective не участвует в gap-анализе.
     `source`: owner (от владельца) | company (сгенерирована офисом).
+    `project_id` — см. докстринг модуля: опционально, по умолчанию company-wide.
     """
     d = _data()
     items = d.get("items", [])
@@ -53,7 +63,7 @@ def add(title: str, desired: str = "", measured_by: str = "",
         "desired": (desired or "").strip()[:200],
         "measured_by": (measured_by or "").strip()[:200],
         "current_value": "", "priority": max(0, min(100, priority)),
-        "status": "active", "source": source,
+        "status": "active", "source": source, "project_id": (project_id or "").strip(),
         "created_ts": time.time(), "updated_ts": time.time(),
     }
     items.append(obj)
@@ -62,12 +72,19 @@ def add(title: str, desired: str = "", measured_by: str = "",
     return obj
 
 
+def for_project(project_id: str) -> list[dict]:
+    """Активные цели, ОСОЗНАННО привязанные к конкретному проекту (project_id
+    задан явно при add()) — не company-wide цели без привязки."""
+    return [o for o in all_objectives()
+            if o.get("status") == "active" and o.get("project_id") == project_id]
+
+
 def update(oid: str, **patch) -> dict | None:
     d = _data()
     for o in d.get("items", []):
         if o["id"] == oid:
             for k in ("title", "desired", "measured_by", "current_value",
-                      "priority", "status"):
+                      "priority", "status", "project_id"):
                 if k in patch:
                     o[k] = patch[k]
             o["updated_ts"] = time.time()

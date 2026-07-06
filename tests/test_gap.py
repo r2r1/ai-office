@@ -96,6 +96,37 @@ def test_world_snapshot_marks_objective_resolvable_field():
     assert by_title["Рост MRR"]["resolvable"] is False
 
 
+# ── Objectives.project_id (опциональная привязка к Work, задел на будущее) ──
+
+def test_objective_project_id_defaults_to_company_wide():
+    _fresh("gap_test_objective_no_project")
+    o = objectives.add("Заявки в неделю", desired="10", measured_by="лиды")
+    assert o["project_id"] == ""
+
+
+def test_objective_can_be_scoped_to_project():
+    _fresh("gap_test_objective_scoped")
+    o = objectives.add("Обработать 50 диалогов/день", project_id="p1_123")
+    assert o["project_id"] == "p1_123"
+
+
+def test_for_project_returns_only_scoped_objectives():
+    _fresh("gap_test_objective_for_project")
+    objectives.add("Company-wide цель")  # project_id="" — не должна попасть
+    objectives.add("Цель проекта A", project_id="pA")
+    objectives.add("Цель проекта B", project_id="pB")
+    result = objectives.for_project("pA")
+    assert len(result) == 1
+    assert result[0]["title"] == "Цель проекта A"
+
+
+def test_for_project_ignores_archived():
+    _fresh("gap_test_objective_for_project_archived")
+    o = objectives.add("Цель проекта A", project_id="pA")
+    objectives.update(o["id"], status="archived")
+    assert objectives.for_project("pA") == []
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("gap_test_*"):
         if d.is_dir():

@@ -1772,7 +1772,8 @@ async def post_objective(request: Request):
     obj = objectives_module.add(
         data["title"], desired=data.get("desired", ""),
         measured_by=data.get("measured_by", ""),
-        priority=int(data.get("priority", 50)), source="owner")
+        priority=int(data.get("priority", 50)), source="owner",
+        project_id=data.get("project_id", ""))
     return {"ok": True, "objective": obj}
 
 
