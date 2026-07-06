@@ -39,8 +39,15 @@ def test_provider_error_classifiers():
 def test_fallback_plan_is_deterministic():
     # Явная просьба бота → marketer → integrator
     assert [t["role"] for t in pe.fallback_plan("сделай бот записи")] == ["marketer", "integrator"]
-    # Явная просьба сайта → marketer → designer → developer
-    assert [t["role"] for t in pe.fallback_plan("нужен лендинг")] == ["marketer", "designer", "developer"]
+    # Явная просьба сайта → marketer → developer (ОДНА production-задача, не
+    # designer→developer: раньше это было два последовательных шага на один и
+    # тот же сайт, и developer систематически пересобирал уже готовый сайт
+    # заново вместо точечной проверки — см. planning_engine.fallback_plan
+    # docstring/комментарий. Тест ожидал СТАРУЮ трёхролевую форму и не был
+    # обновлён вместе с кодом — падал молча, потому что весь набор tests/*.py
+    # не запускался на Windows из-за отдельного UnicodeEncodeError, см. фикс
+    # выше в этом же файле).
+    assert [t["role"] for t in pe.fallback_plan("нужен лендинг")] == ["marketer", "developer"]
     # Общая цель без продукта → одна задача «спросить клиента, что строить»
     generic = pe.fallback_plan("развивать бизнес")
     assert len(generic) == 1 and generic[0]["role"] == "marketer"
@@ -148,4 +155,10 @@ def _run():
 
 
 if __name__ == "__main__":
+    # Windows-консоль часто в cp1251 — "✓" ронял ЛЮБОЙ тест этого файла
+    # UnicodeEncodeError ДО единой строки реального результата (found: весь
+    # набор tests/*.py был непроверяем из этой сессии на Windows).
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     _run()

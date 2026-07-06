@@ -59,4 +59,10 @@ def _run():
 
 
 if __name__ == "__main__":
+    # Windows-консоль часто в cp1251 — "✓" ронял ЛЮБОЙ тест этого файла
+    # UnicodeEncodeError ДО единой строки реального результата (found: весь
+    # набор tests/*.py был непроверяем из этой сессии на Windows).
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     _run()

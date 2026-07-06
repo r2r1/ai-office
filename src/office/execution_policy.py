@@ -71,16 +71,44 @@ def decide(task: dict, agent_id: str, role: str) -> dict:
         model, tier = cfg_model, "standard"
         reason = "оверрайд владельца" if overridden else "по capability роли"
     return {"model": model, "tier": tier, "reason": reason,
-            "estimated_usd": estimate_cost(role, model)}
+            "estimated_usd": estimate_cost(role, model, task)}
 
 
-def estimate_cost(role: str, model: str) -> float:
-    """Грубая оценка стоимости одного прогона задачи ($)."""
+# Базовая длина заголовка+критерия готовности, для которой калиброваны
+# _TYPICAL_TOKENS (среднее по прод-трейсам). Задача многословнее — вероятно,
+# сложнее среднего; множитель ограничен сверху/снизу, чтобы не улетать в
+# крайности на короткой/длинной формулировке без реальной связи со сложностью.
+_BASELINE_CHARS = 150
+_MIN_MULT, _MAX_MULT = 0.7, 2.5
+
+
+def _size_multiplier(task: dict | None) -> float:
+    """Множитель к типовой оценке токенов по фактическому размеру задачи —
+    раньше estimate_cost брал ФИКСИРОВАННОЕ среднее по роли независимо от
+    задачи, и бюджет-гейт мог ошибаться в 2-3 раза на необычно крупной задаче
+    (docs/audit-dd-2026-07-06.md §8/§19 п.13). Не претендует на точность —
+    просто не игнорирует очевидный сигнал (длина текста задачи есть уже сейчас,
+    бесплатно, без доп. вызовов)."""
+    if not task:
+        return 1.0
+    text_len = len(task.get("title") or "") + len(task.get("done_criterion") or "")
+    if text_len <= 0:
+        return 1.0
+    mult = text_len / _BASELINE_CHARS
+    return max(_MIN_MULT, min(_MAX_MULT, mult))
+
+
+def estimate_cost(role: str, model: str, task: dict | None = None) -> float:
+    """Грубая оценка стоимости одного прогона задачи ($). `task`, если передан,
+    масштабирует типовой расход по фактическому размеру формулировки задачи —
+    без него (обратная совместимость) поведение прежнее: фиксированное среднее
+    по роли."""
     from src.office import roles, costs
     cap = roles.capability_of(role)
     tin, tout = _TYPICAL_TOKENS.get(cap, _TYPICAL_TOKENS["text"])
+    mult = _size_multiplier(task)
     pin, pout = costs.price_for(model)
-    return round((tin * pin + tout * pout) / 1_000_000, 4)
+    return round((tin * mult * pin + tout * mult * pout) / 1_000_000, 4)
 
 
 # ─────────────────── capability-гейт планирования ───────────────────

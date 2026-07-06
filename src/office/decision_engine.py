@@ -39,7 +39,7 @@ def _budget_check(snapshot: dict, diff: dict) -> dict:
     est = 0.0
     for t in diff.get("add_tasks", []):
         role = (t.get("role") or "").strip()
-        est += execution_policy.estimate_cost(role, models.get_default())
+        est += execution_policy.estimate_cost(role, models.get_default(), t)
     if est > 0 and costs.would_exceed(est):
         return {"verdict": "veto",
                 "reason": f"оценка стоимости решения ${est:.4f} выводит за бюджетный лимит"}

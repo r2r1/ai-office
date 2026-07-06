@@ -15,3 +15,5 @@ telethon>=1.44.0           # личный Telegram-аккаунт (MTProto) — 
 # Без него критик работает, но пропускает визуальные проверки (overflow/консоль).
 # Включить: pip install playwright && playwright install chromium
 # playwright>=1.44.0
+
+pytest>=8.0.0   # tests/ — раньше единственной проверкой был py_compile/tsc (см. CLAUDE.md)
