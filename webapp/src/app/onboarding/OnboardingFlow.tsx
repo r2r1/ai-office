@@ -145,13 +145,29 @@ function AnalyzingScreen({ onReady }: { onReady: (r: any) => void }) {
   useEffect(() => {
     let cancelled = false
     async function poll() {
+      if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null }
       const d = await api.onboardingResult().catch(() => ({ ready: false }))
       if (cancelled) return
       if (d.ready) { onReady(d); return }
       pollRef.current = window.setTimeout(poll, 2500)
     }
     poll()
-    return () => { cancelled = true; if (pollRef.current) clearTimeout(pollRef.current) }
+    // Фоновая вкладка: Chromium троттлит/замораживает setTimeout в неактивных
+    // табах (Intensive Timer Throttling) — реальный кейс: онбординг завис на
+    // "Офис изучает…", хотя бэкенд уже отдавал ready:true несколько минут,
+    // потому что вкладка была неактивна и таймер не тикал. Возврат фокуса
+    // должен немедленно перепроверить готовность, а не ждать след. тик.
+    function onVisible() {
+      if (document.visibilityState === "visible") poll()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
+    return () => {
+      cancelled = true
+      if (pollRef.current) clearTimeout(pollRef.current)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
+    }
   }, []) // eslint-disable-line
 
   return (

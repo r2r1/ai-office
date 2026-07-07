@@ -281,6 +281,39 @@ def check_site() -> list[dict]:
             "\"https://cdn.tailwindcss.com\"> и нет tailwind.css) — без сборки эти классы "
             "ничего не значат, вёрстка отображается неоформленной."))
 
+    # 8d. ALPINE-ПЛАГИНЫ: x-intersect/x-collapse — НЕ часть ядра Alpine, а отдельные
+    # CDN-плагины (@alpinejs/intersect, @alpinejs/collapse), которые обязаны грузиться
+    # ДО core alpinejs.js (с defer скрипты выполняются по порядку документа, а core
+    # стартует Alpine.start() сразу после своего исполнения — опоздавший плагин Alpine
+    # не увидит). Реальный кейс: скилл alpine_tailwind_landing сгенерировал сайт, где
+    # core Alpine шёл раньше intersect-плагина, а collapse-плагин не был подключён
+    # вовсе — FAQ-аккордеоны и анимации при скролле молча не работали, в консоли
+    # только warning, никакая другая проверка (verify_code — синтаксис, а не рантайм
+    # Alpine) этого не ловила.
+    alpine_src_re = re.compile(r'<script[^>]*\bsrc=["\']([^"\']*alpinejs[^"\']*)["\']', re.IGNORECASE)
+    plugin_src_re = re.compile(r'<script[^>]*\bsrc=["\']([^"\']*@alpinejs/(intersect|collapse)[^"\']*)["\']', re.IGNORECASE)
+    alpine_scripts = alpine_src_re.findall(html)
+    core_matches = [s for s in alpine_scripts if "@alpinejs/" not in s]
+    if core_matches:
+        core_pos = html.find(core_matches[0])
+        used_directives = {"intersect": "x-intersect" in low, "collapse": "x-collapse" in low}
+        plugin_pos = {name: None for name in used_directives}
+        for m in plugin_src_re.finditer(html):
+            plugin_pos[m.group(2).lower()] = m.start()
+        for name, used in used_directives.items():
+            if not used:
+                continue
+            pos = plugin_pos.get(name)
+            if pos is None:
+                problems.append(_p("alpine_plugin_missing", "critical",
+                    f"Используется x-{name}, но плагин @alpinejs/{name} нигде не подключён по CDN — "
+                    f"директива молча не будет работать (только warning в консоли браузера)."))
+            elif pos > core_pos:
+                problems.append(_p("alpine_plugin_order", "critical",
+                    f"Плагин @alpinejs/{name} подключён ПОСЛЕ core alpinejs.js — с defer core стартует "
+                    f"первым и не видит опоздавший плагин, x-{name} не будет работать. Переставь тег "
+                    f"плагина выше тега core alpinejs.js в <head>."))
+
     # 9. ДОСТУПНОСТЬ (базово): картинки без alt.
     imgs_no_alt = 0
     for p in html_pages:

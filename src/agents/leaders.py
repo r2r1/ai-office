@@ -79,6 +79,10 @@ async def decide(
         f"\n=== УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ) ===\n{user_directives}\n"
         if user_directives.strip() else ""
     )
+    # Портфель проектов (BOS §6.2): лидер отдела распределяет задачи ВНУТРИ отдела,
+    # но остаётся портфельной ролью (org.is_portfolio_role) — видит другие проекты
+    # компании, не только тот, что закреплён за его текущей задачей.
+    directives_section += prompt_builder.portfolio_block(org_module.lead_role(dept_id) or "")
 
     if publish and lead_id:
         await publish({"type": "thinking", "agent_id": lead_id,

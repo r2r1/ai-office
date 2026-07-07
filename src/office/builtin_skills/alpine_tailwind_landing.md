@@ -16,9 +16,19 @@ roles: designer, developer
 контент, НЕ переписывай сайт ради смены стека. Alpine+Tailwind — для НОВОГО сайта.
 
 СТРУКТУРА (всё в site/):
-• site/index.html — страница целиком. В <head>:
+• site/index.html — страница целиком. В <head>, СТРОГО В ЭТОМ ПОРЯДКЕ:
   <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/intersect@3.14.1/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.14.1/dist/cdn.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  ⚠️ ВСЕ ПЛАГИНЫ — ДО core alpinejs, не после. С `defer` скрипты выполняются по
+  порядку в документе, а core Alpine стартует (`Alpine.start()`) СРАЗУ после
+  своего исполнения — если core загружен раньше плагина, плагин регистрируется
+  слишком поздно и Alpine его не видит (x-intersect/x-collapse молча не работают,
+  в консоли только warning, ни verify_code, ни визуальная проверка HTML этого не
+  ловят). Подключай ТОЛЬКО те плагины, чьи директивы реально используешь — но
+  если используешь x-collapse, плагин collapse ОБЯЗАТЕЛЕН (это НЕ часть ядра
+  Alpine, в отличие от x-show/x-transition).
 • site/styles.css — ТОЛЬКО дизайн-токены и то, что Tailwind-утилитами не выразить
   (keyframes, сложные градиенты); остальное — утилиты в разметке.
 • Кастомная палитра — через tailwind.config inline:
@@ -31,19 +41,30 @@ roles: designer, developer
 щедрые отступы py-20+, max-w-5xl mx-auto, hover:/focus: состояния, md:/lg: адаптив.
 🚫 Никаких Tilda/Webflow/Wix. SVG-иконки, не эмодзи.
 
-ИНТЕРАКТИВНОСТЬ (Alpine): x-data на секции, x-show/x-collapse для аккордеонов,
-x-transition для появлений, @click для табов/меню. Появление секций при скролле —
-x-intersect (плагин подключи по CDN) или IntersectionObserver в паре строк.
+ИНТЕРАКТИВНОСТЬ (Alpine): x-data на секции, x-show/x-collapse для аккордеонов
+(x-collapse требует плагин collapse — см. порядок скриптов выше), x-transition
+для появлений, @click для табов/меню. Появление секций при скролле — x-intersect
+(требует плагин intersect) или IntersectionObserver в паре строк.
 
 ФОРМА ЗАЯВКИ (КРИТИЧНО): Alpine-компонент формы РЕАЛЬНО шлёт
 fetch('/api/site-lead', {method:'POST', headers:{'Content-Type':'application/json'},
 body: JSON.stringify({name, contact, message})}) — с валидацией на blur, статусом
 кнопки и экраном «спасибо». 🚫 Заглушки запрещены. Бэкенд не строй.
+⚠️ Ошибки полей показывай ТОЛЬКО после того, как поле потрогали (blur) или была
+попытка отправки (submitted) — булев флаг вроде `touched.name`/`submitted` в
+x-data, `x-show="touched.name && !name"`. Показывать «Пожалуйста, введите...» под
+ВСЕМИ полями сразу при открытии формы (до единого взаимодействия) — реальный
+баг: пугает посетителя ошибками до того, как он вообще начал заполнять.
+⚠️ Текст кнопки отправки переключай ПОЛНОСТЬЮ между состояниями (`x-text`
+одно выражение: `sending ? 'Отправка…' : 'Отправить'`), а не выводи статичный
+label рядом с состоянием — на выходе не должно быть «Отправить Отправка...».
 
 ПРОВЕРКИ ПЕРЕД СДАЧЕЙ:
 1. Tailwind CDN + Alpine CDN подключены; палитра расширена под «Стиль: …», не дефолт.
-2. Хотя бы 2 живых Alpine-взаимодействия (аккордеон/табы/меню/модалка).
-3. Форма реально шлёт POST /api/site-lead и показывает подтверждение.
+2. Хотя бы 2 живых Alpine-взаимодействия (аккордеон/табы/меню/модалка) — и для
+   КАЖДОЙ директивы x-intersect/x-collapse её плагин подключён ДО core alpinejs.
+3. Форма реально шлёт POST /api/site-lead и показывает подтверждение; ошибки полей
+   не видны до первого взаимодействия с формой; текст кнопки не задваивается.
 4. Адаптив (md:/lg:), контраст, никакого лорем-ипсума.
 
 ВЫПОЛНЕНИЕ: пиши файлы через write_file. Публиковать не нужно — офис опубликует site/ сам.

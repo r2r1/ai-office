@@ -18,6 +18,7 @@ goal≠niche), что у воркеров, и с полным логом в prom
 """
 
 import json
+import time
 from typing import Optional, Callable, Awaitable
 
 from src.core import llm
@@ -210,6 +211,11 @@ async def decide_company(
     # World Model: CEO смотрит на единый срез «где компания сейчас» (Business State +
     # Objectives), а не восстанавливает картину из кусков — BOS §4, SSOT.
     directives_section += world_module.context_block()
+    # Портфель проектов (BOS §6.2): decide_company — ОТДЕЛЬНЫЙ путь сборки промпта
+    # (company_system), не task_context воркера — portfolio_block, добавленный туда
+    # для делегированных задач лидеру, сюда не долетал вообще (реальный кейс живого
+    # прогона: CEO принимал решения об отделах, ни разу не увидев список проектов).
+    directives_section += prompt_builder.portfolio_block("orchestrator")
     # Event Layer (BOS §10): сигналы отделов CEO видит ЗДЕСЬ — прежний потребитель
     # (decide) мёртв с перехода на plan-driven цикл, и problem/signal/info не читал
     # никто. После показа помечаем их обработанными детерминированно; opportunity
@@ -375,6 +381,58 @@ async def generate_onboarding_result(
     result.setdefault("growth_points", [])
     result.setdefault("initiatives", [])
     return result
+
+
+async def interpret_dashboard_request(text: str) -> dict:
+    """Ручная кастомизация бизнес-дашборда: клиент просит график/метрику словами
+    ("построй график выручки по месяцам за 12 месяцев"). CEO выбирает ОДНУ из
+    реально измеримых метрик (dashboard.available_metrics() — единственный
+    источник правды) или честно отказывает с объяснением — никогда не
+    выполняет ответ LLM как есть: metric_id/chart_type/group_by всегда
+    перепроверяются против whitelist здесь, а не доверяются модели."""
+    from src.office import dashboard as dashboard_module
+    metrics = dashboard_module.available_metrics()
+    now = time.time()
+    metrics_block = "\n".join(
+        f"- {m['metric_id']}: {m['label']} ({m['unit']}, {m['kind']}), "
+        f"данные есть за {max(1, int((now - m['earliest_ts']) / 86400))} дн., точек: {m['count']}"
+        for m in metrics
+    ) or "(пока вообще нет ни одной измеримой метрики)"
+    system, _pid = prompt_builder.company_system(
+        "dashboard_widget", "orchestrator_1", "orchestrator", text,
+        fmt={"metrics_block": metrics_block})
+    raw = await llm.run_agent(
+        system=system, user=text,
+        model=models_module.for_agent("orchestrator_1"),
+        max_tokens=700, use_search=False, agent_id="orchestrator_1",
+    )
+    result = _parse_json(raw)
+    if not result:
+        return {"ok": False, "reason": "Не удалось разобрать запрос — переформулируй короче.",
+                "suggest_integration": "", "tasks": []}
+    if not result.get("ok"):
+        # tasks (BOS §4 гибкость сервиса): не просто "нет метрики", а конкретная
+        # инициатива, которая сама заведёт метрику — скрипт + повторяющийся
+        # процесс + record_metric с НОВЫМ metric_id (не хардкод под сценарий).
+        tasks = [t for t in (result.get("tasks") or [])
+                 if isinstance(t, dict) and (t.get("title") or "").strip() and (t.get("role") or "").strip()][:4]
+        return {"ok": False, "reason": (result.get("reason") or "Не хватает данных для этого графика.")[:300],
+                "suggest_integration": (result.get("suggest_integration") or "")[:200], "tasks": tasks}
+
+    valid_ids = {m["metric_id"] for m in metrics}
+    metric_id = result.get("metric_id", "")
+    if metric_id not in valid_ids:
+        return {"ok": False, "reason": f"Метрика «{metric_id}» не найдена среди измеримых.",
+                "suggest_integration": ""}
+    chart_type = result.get("chart_type") if result.get("chart_type") in dashboard_module.ALLOWED_CHART_TYPES else "line"
+    group_by = result.get("group_by") if result.get("group_by") in dashboard_module.ALLOWED_GROUP_BY else "day"
+    range_days = result.get("range_days")
+    if not isinstance(range_days, (int, float)) or range_days <= 0:
+        range_days = 90
+    range_days = min(int(range_days), dashboard_module.MAX_RANGE_DAYS)
+    title = (result.get("title") or "").strip()[:80] or metric_id
+    return {"ok": True, "metric_id": metric_id, "chart_type": chart_type,
+            "group_by": group_by, "range_days": range_days, "title": title}
 
 
 async def classify_recurring(project_title: str, goal: str, tasks_summary: str) -> dict:

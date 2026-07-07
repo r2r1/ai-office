@@ -401,8 +401,12 @@ async def run_agent(
                     searches_done += 1
                     seen_queries.add(qnorm)
                     if publish:
+                        # Срез по границе слова + многоточие — раньше жёсткий query[:60] резал
+                        # ровно посреди слова без всякого маркера («…спрос сезон 2024 2025 пои»),
+                        # что в UI выглядело как зависший/битый рендер, а не просто длинный запрос.
+                        q_short = query if len(query) <= 60 else query[:60].rsplit(" ", 1)[0] + "…"
                         await publish({"type": "speech", "agent_id": agent_id,
-                                       "text": f"🔍 Ищу: {query[:60]}"})
+                                       "text": f"🔍 Ищу: {q_short}"})
                     result = await _search_async(query)
             elif tool_handlers and name in tool_handlers:
                 result = await tool_handlers[name](args)
