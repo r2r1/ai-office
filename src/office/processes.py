@@ -38,7 +38,18 @@ def _save(items: list[dict]) -> None:
     ctx.write_json(_FILE, {"items": items})
 
 
-def create(title: str, role: str, instruction: str, cadence: str = "every_cycle") -> dict:
+def create(title: str, role: str, instruction: str, cadence: str = "every_cycle",
+           project_id: str = "") -> dict:
+    """`project_id` — если процесс родился ВНУТРИ конкретного проекта (например
+    агент сам завёл его через create_recurring_process, чтобы периодически
+    запускать скрипт, который он же написал), задачи этого процесса ВСЕГДА
+    попадают в ТОТ ЖЕ проект/workspace — иначе tick() отдавал их в "первый
+    активный" проект (projects.ensure_active()), и при нескольких параллельных
+    проектах задача могла уйти в ЧУЖОЙ workspace, где написанного скрипта
+    просто нет (реальный кейс: t1.py лежал в проекте p4, а задача процесса
+    "запусти t1.py" досталась воркеру проекта p3 — тот не находил файл).
+    Пусто — прежнее поведение (компания-wide процесс, заведённый вручную из UI
+    вне контекста конкретного проекта)."""
     items = _all()
     proc = {
         "id": f"proc{len(items) + 1}_{int(time.time()) % 100000}",
@@ -47,6 +58,7 @@ def create(title: str, role: str, instruction: str, cadence: str = "every_cycle"
         "instruction": (instruction or "").strip()[:500],
         "cadence": cadence if cadence in CADENCES else "every_cycle",
         "status": "active",  # active | paused
+        "project_id": project_id or "",
         "created_ts": time.time(),
         "last_run_ts": None,
         "run_count": 0,
@@ -118,7 +130,7 @@ def tick() -> list[dict]:
         task = plan.add_task(
             title, p.get("role", ""),
             f"Повторяющаяся задача процесса «{p['title']}» выполнена",
-            requested_by=tag,
+            requested_by=tag, project_id=p.get("project_id", ""),
         )
         _mark_run(p["id"])
         created.append(task)

@@ -82,15 +82,25 @@ def record(agent_id: str, model: str, in_tokens: int, out_tokens: int) -> None:
     # totals()/by_agent(), чтобы не считался «агентом».
     daily = data.setdefault("_daily", {})
     daily[_today()] = round(daily.get(_today(), 0.0) + cost, 6)
-    # Держим только последние ~7 дат, иначе словарь растёт бесконечно.
-    if len(daily) > 7:
-        for k in sorted(daily)[:-7]:
+    # Держим ~400 дат (год+) — источник графика расхода на бизнес-дашборде
+    # (dashboard.py); раньше хранилось только 7 дней (хватало для дневного
+    # лимита, но не для графика по месяцам). Это по-прежнему один float на
+    # день — ничтожный размер даже за годы работы тенанта.
+    if len(daily) > 400:
+        for k in sorted(daily)[:-400]:
             daily.pop(k, None)
     ctx.write_json(_FILE, data)
 
 
 def spent_today() -> float:
     return float(_all().get("_daily", {}).get(_today(), 0.0))
+
+
+def daily_series() -> list[dict]:
+    """Реальный посуточный расход — по датам, по возрастанию (единственный
+    факт-источник тренда расхода; никаких выдуманных точек)."""
+    daily = _all().get("_daily", {})
+    return [{"date": k, "value": round(v, 6)} for k, v in sorted(daily.items())]
 
 
 def for_agent(agent_id: str) -> dict:

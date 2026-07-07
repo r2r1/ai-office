@@ -49,6 +49,17 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   const [projectTitles, setProjectTitles] = useState<Record<string, string>>({})
   const feedRef = useRef<HTMLDivElement>(null)
 
+  // Узкий экран: список и переписка — фиксированный сайдбар 260px рядом с
+  // панелью чата на 375px сжимал переписку до ~80px (текст шёл по букве на
+  // строку — найдено при UX-аудите). Ниже брейкпоинта показываем ОДНУ панель
+  // за раз — тот же master-detail, что уже в "Работа" (список → назад).
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 720)
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 720)
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [])
+
   useEffect(() => {
     api.projects().then(d => {
       const map: Record<string, string> = {}
@@ -148,12 +159,22 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   // Печатает — только пока обрабатывается ВАШЕ сообщение в этом чате. Без текста активности.
   const showTyping = active !== "office" && sending
 
+  // На узком экране выбор собеседника сразу переключает на панель переписки
+  // (список и переписка — ОДНА панель за раз, не сжатые рядом).
+  function selectActive(id: string) {
+    setActive(id)
+    if (isNarrow) setSidebarOpen(false)
+  }
+
+  const showSidebar = sidebarOpen
+  const showPanel = isNarrow ? !sidebarOpen : true
+
   return (
     <ViewShell>
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* sidebar */}
-        {sidebarOpen && (
-          <div style={{ width: 260, flexShrink: 0, borderRight: "1px solid var(--hairline)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {showSidebar && (
+          <div style={{ width: isNarrow ? "100%" : 260, flexShrink: 0, borderRight: isNarrow ? "none" : "1px solid var(--hairline)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {/* заголовок sidebar */}
             <div style={{ padding: "18px 16px 12px", borderBottom: "1px solid var(--hairline-soft)", flexShrink: 0 }}>
               <div className="display" style={{ fontSize: 22, color: "var(--text)" }}>Чаты</div>
@@ -164,7 +185,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
 
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
               {/* офис-канал */}
-              <Row active={active === "office"} onClick={() => setActive("office")}
+              <Row active={active === "office"} onClick={() => selectActive("office")}
                 emoji="🏢" name="Общий чат" sub="Написать всей команде" />
 
               {/* группы: штаб/лидеры без папки, дальше — по одной папке на проект
@@ -178,7 +199,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                   {list.map(a => {
                     const sub = rowSub(a)
                     return (
-                      <Row key={a.id} active={active === a.id} onClick={() => setActive(a.id)}
+                      <Row key={a.id} active={active === a.id} onClick={() => selectActive(a.id)}
                         emoji={a.emoji} name={a.name} sub={sub.text} subAccent={sub.accent}
                         dot={STATUS_COLOR[a.status]} unread={unread.byAgent[a.id] ?? 0} />
                     )
@@ -190,15 +211,22 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
         )}
 
         {/* панель чата */}
+        {showPanel && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* шапка чата */}
           <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid var(--hairline)", flexShrink: 0,
             display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={() => setSidebarOpen(s => !s)}
-              aria-label={sidebarOpen ? "Скрыть список чатов" : "Показать список чатов"}
-              style={{ width: 28, height: 28, border: "1px solid var(--hairline)", borderRadius: "var(--radius-xs)",
-                background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {sidebarOpen ? "◁" : "▷"}
+            <button onClick={() => setSidebarOpen(s => isNarrow ? true : !s)}
+              aria-label={isNarrow ? "К списку чатов" : sidebarOpen ? "Скрыть список чатов" : "Показать список чатов"}
+              style={isNarrow ? {
+                minWidth: 44, height: 36, padding: "0 12px", border: "1px solid var(--hairline)", borderRadius: "var(--radius-pill)",
+                background: "var(--surface-soft)", cursor: "pointer", color: "var(--text-dim)", fontSize: 12.5,
+                display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+              } : {
+                width: 28, height: 28, border: "1px solid var(--hairline)", borderRadius: "var(--radius-xs)",
+                background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+              {isNarrow ? "← Чаты" : sidebarOpen ? "◁" : "▷"}
             </button>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{headerName}</div>
@@ -294,6 +322,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
             </button>
           </div>
         </div>
+        )}
       </div>
     </ViewShell>
   )

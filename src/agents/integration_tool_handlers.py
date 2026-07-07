@@ -164,10 +164,35 @@ def build(agent_id: str, role: str,
         return (f"{head}\n{lines}\n\nЧтобы взять нужный — вызови use_skill с "
                 f"потребностью словами, получишь его экспертный плейбук.")
 
+    async def _handle_record_metric(args: dict) -> str:
+        """Записывает числовое значение метрики бизнеса (BOS §4 Measurement) —
+        единственный способ для ЛЮБОГО процесса/скрипта (курс валюты, остатки
+        склада, что угодно) появиться на бизнес-дашборде: без этого дашборд
+        не может знать про метрику, которую сам не придумывал. Не хардкод —
+        расширяемость: metric_id придумывает сам агент (латиницей, снэйк-кейс),
+        дашборд подхватит её автоматически при следующем открытии."""
+        import re
+        metric_id = re.sub(r"[^a-z0-9_]+", "_", (args.get("metric_id") or "").strip().lower()).strip("_")
+        if not metric_id:
+            return "Укажи metric_id латиницей (например usd_rub_rate)."
+        try:
+            value = float(args.get("value"))
+        except (TypeError, ValueError):
+            return "value должно быть числом."
+        label = (args.get("label") or metric_id).strip()[:80]
+        unit = (args.get("unit") or "").strip()[:20]
+        source = args.get("source") if args.get("source") in ("факт", "оценка") else "факт"
+        from src.office import metrics as metrics_module
+        point = metrics_module.record(metric_id, value, source, label=label, unit=unit)
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"📈 Записал метрику «{label}»: {value} {unit} — появится на дашборде"})
+        return f"Записано: {point['metric_id']}={point['value']} {unit} ({source})."
+
     return {
         "list_integrations": _handle_list_integrations,
         "use_integration": _handle_use_integration,
         "use_capability": _handle_use_capability,
         "use_skill": _handle_use_skill,
         "find_skills": _handle_find_skills,
+        "record_metric": _handle_record_metric,
     }

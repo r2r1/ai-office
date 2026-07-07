@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, Card, SectionLabel, Pill, MercuryBar } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, Card, SectionLabel, Pill, MercuryBar } from "./ui"
+import { BusinessDashboard } from "./BusinessDashboard"
 import type { Section } from "../types"
 
 const DEPT_NAMES: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
@@ -12,8 +13,14 @@ interface DashboardViewProps {
   onOpenProject?: (projectId: string) => void
 }
 
+const TABS = [
+  { id: "office",   label: "Офис" },
+  { id: "business", label: "Бизнес" },
+]
+
 export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps) {
   const { state } = useOffice()
+  const [tab, setTab] = useState("office")
   const [health, setHealth] = useState<any>(null)
   const [autonomy, setAutonomy] = useState<any>(null)
   const [initiatives, setInitiatives] = useState<any[]>([])
@@ -53,6 +60,8 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
   return (
     <ViewShell>
       <ViewHead title="Сводка" sub={state.ready ? "Состояние компании на текущий момент" : "Офис ожидает бриф"} />
+      <SubTabs tabs={TABS} active={tab} onChange={setTab} />
+      {tab === "business" ? <BusinessDashboard /> : (
       <ViewBody>
         {/* Gap до цели — заголовок Command Center: разрыв между тем, где
             компания хочет быть, и где она сейчас (BOS §3 Gap Analysis). Раньше
@@ -225,6 +234,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
           <button onClick={() => onNavigate?.("team")} style={linkCard}>👥 Команда →</button>
         </div>
       </ViewBody>
+      )}
     </ViewShell>
   )
 }

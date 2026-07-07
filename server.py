@@ -1798,6 +1798,74 @@ async def get_gap():
     return {"gaps": gap_module.compute()}
 
 
+@app.get("/api/dashboard")
+async def get_dashboard():
+    """Бизнес-дашборд (вкладка "Бизнес"): системные карточки (пересчитываются
+    каждый раз из живых источников) + кастомные графики, добавленные по запросу
+    клиента, в сохранённом порядке (перестановка — POST /api/dashboard/reorder)."""
+    from src.office import dashboard as dashboard_module
+    widgets = dashboard_module.all_widgets()
+    for w in widgets:
+        if w.get("kind") == "chart":
+            w["series"] = dashboard_module.resolve_series(w)
+    return {"widgets": widgets}
+
+
+@app.post("/api/dashboard/request")
+async def post_dashboard_request(request: Request):
+    """Ручная кастомизация дашборда словами ("построй график выручки по месяцам
+    за 12 месяцев"). CEO выбирает метрику из реально измеримых или честно
+    отказывает — отказ с suggest_integration заводит инициативу (та же логика,
+    что "не выдумываем KPI без данных", см. dashboard.py)."""
+    from src.agents import orchestrator
+    from src.office import initiatives as initiatives_module, dashboard as dashboard_module
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Опиши, что добавить на дашборд")
+    result = await orchestrator.interpret_dashboard_request(text)
+    if not result.get("ok"):
+        iid = ""
+        if result.get("suggest_integration"):
+            # tasks (BOS §4 гибкость сервиса): не просто текст-заглушка, а
+            # готовый план — скрипт + повторяющийся процесс + запись метрики
+            # (см. dashboard_widget.md) — принятие инициативы сразу заводит
+            # проект с этими задачами (существующий accept_initiative).
+            iid = initiatives_module.add(
+                result["suggest_integration"], result.get("reason", ""),
+                "На дашборде появится реальная метрика вместо отказа",
+                tasks=result.get("tasks") or [], source="user", needs_research=False)
+        return {"ok": False, "reason": result.get("reason", ""), "initiative_id": iid}
+    widget = dashboard_module.add_custom({
+        "metric_id": result["metric_id"], "chart_type": result["chart_type"],
+        "group_by": result["group_by"], "range_days": result["range_days"],
+        "title": result["title"],
+    })
+    widget["series"] = dashboard_module.resolve_series(widget)
+    return {"ok": True, "widget": widget}
+
+
+@app.post("/api/dashboard/layout")
+async def post_dashboard_layout(request: Request):
+    """Свободное перетаскивание/ресайз виджета "как иконки на рабочем столе" —
+    позиция и размер, любые оба (не только вертикальный порядок списком)."""
+    from src.office import dashboard as dashboard_module
+    body = await request.json()
+    wid = (body.get("id") or "").strip()
+    if not wid:
+        raise HTTPException(status_code=400, detail="Нужен id виджета")
+    dashboard_module.set_layout(wid, body.get("x", 0), body.get("y", 0),
+                                body.get("w", 240), body.get("h", 140))
+    return {"ok": True}
+
+
+@app.post("/api/dashboard/remove")
+async def post_dashboard_remove(request: Request):
+    from src.office import dashboard as dashboard_module
+    body = await request.json()
+    return {"ok": dashboard_module.remove_custom(body.get("id", ""))}
+
+
 @app.get("/api/objectives")
 async def get_objectives():
     """Objectives — измеримые цели компании (desired state)."""
@@ -1851,6 +1919,36 @@ async def set_project_limit(request: Request):
     n = int(body.get("max_active", projects_module.DEFAULT_MAX_ACTIVE))
     projects_module.set_limit(n)
     return {"ok": True, "max_active": projects_module.get_limit()}
+
+
+@app.post("/api/project/{project_id}/pause")
+async def post_project_pause(project_id: str):
+    """Ставит проект на паузу — освобождает слот параллельности для очереди,
+    не закрывая Work (см. src/office/projects.py:pause)."""
+    from src.office import projects as projects_module
+    proj = projects_module.pause(project_id)
+    if not proj:
+        raise HTTPException(status_code=400, detail="Проект не найден или не активен")
+    return {"ok": True, "project": proj}
+
+
+@app.post("/api/project/{project_id}/resume")
+async def post_project_resume(project_id: str):
+    from src.office import projects as projects_module
+    proj = projects_module.resume(project_id)
+    if not proj:
+        raise HTTPException(status_code=400, detail="Проект не найден или не на паузе")
+    return {"ok": True, "project": proj}
+
+
+@app.post("/api/projects/reorder")
+async def post_projects_reorder(request: Request):
+    """Приоритет очереди проектов — владелец решает, кто из ожидающих
+    активируется раньше при освобождении слота (см. projects.reorder_queue)."""
+    from src.office import projects as projects_module
+    body = await request.json()
+    projects_module.reorder_queue(body.get("order") or [])
+    return {"ok": True}
 
 
 @app.get("/api/processes")

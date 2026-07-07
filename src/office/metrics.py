@@ -94,5 +94,28 @@ def latest(metric_id: str):
     return None
 
 
+def catalog() -> list[dict]:
+    """Каталог ВСЕХ метрик, которые агенты сами записали через record() (например
+    инструмент record_metric — см. comms_tool_handlers.py) — не только встроенные
+    (лиды/выручка/расход). Это и есть точка расширяемости Measurement Layer:
+    любой процесс/скрипт, который научился считать что-то новое (курс валюты,
+    остатки на складе, что угодно), сам заводит метрику записью значения —
+    без единой правки кода дашборда (BOS §4: гибкость сервиса, не хардкод под
+    конкретный сценарий)."""
+    pts = _load().get("points", [])
+    by_id: dict[str, dict] = {}
+    for p in pts:
+        mid = p.get("metric_id", "")
+        if not mid:
+            continue
+        agg = by_id.setdefault(mid, {"metric_id": mid, "count": 0, "earliest_ts": p["ts"]})
+        agg["count"] += 1
+        agg["earliest_ts"] = min(agg["earliest_ts"], p["ts"])
+        agg["label"] = p.get("label") or agg.get("label") or mid
+        agg["unit"] = p.get("unit") or agg.get("unit") or ""
+        agg["kind"] = p.get("source") or agg.get("kind") or ESTIMATE
+    return list(by_id.values())
+
+
 def reset() -> None:
     ctx.delete_file(_FILE)

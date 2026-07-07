@@ -272,7 +272,13 @@ def departments_needed() -> list[str]:
 
 
 def ready_for_department(dept_id: str) -> list[dict]:
-    """Все готовые к работе задачи отдела (зависимости выполнены, ещё не сделаны)."""
+    """Все готовые к работе задачи отдела (зависимости выполнены, ещё не сделаны).
+
+    Задачи проекта НЕ на паузе/в очереди (см. projects.pause) — иначе пауза
+    проекта ничего не значила бы: план всё равно продолжал бы раздавать его
+    задачи воркерам, как будто проект активен."""
+    from src.office import projects as projects_module
+    active_project_ids = {p["id"] for p in projects_module.active_list()}
     done = _done_ids()
     roles = set(org.member_roles(dept_id))
     out = []
@@ -280,6 +286,9 @@ def ready_for_department(dept_id: str) -> list[dict]:
         if t.get("status") != "pending":
             continue
         if t.get("department") != dept_id and t.get("role") not in roles:
+            continue
+        proj = t.get("project", "")
+        if proj and proj not in active_project_ids:
             continue
         if all(dep in done for dep in t.get("deps", [])):
             out.append(dict(t))

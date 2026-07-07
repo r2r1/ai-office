@@ -118,11 +118,22 @@ export const api = {
   projects: () => getJSON<{ projects: any[]; active: any; active_count: number; max_active: number }>(
     "/api/projects", { projects: [], active: null, active_count: 0, max_active: 3 }),
   setProjectLimit: (max_active: number) => postJSON<any>("/api/projects/limit", { max_active }, null),
+  pauseProject: (id: string) => postJSON<any>(`/api/project/${id}/pause`, {}, null),
+  resumeProject: (id: string) => postJSON<any>(`/api/project/${id}/resume`, {}, null),
+  reorderProjectsQueue: (order: string[]) => postJSON<any>("/api/projects/reorder", { order }, null),
   initiatives: () => getJSON<{ pending: any[]; researching: any[]; pending_count: number; total: number }>("/api/initiatives", { pending: [], researching: [], pending_count: 0, total: 0 }),
   proposeInitiative: (title: string, idea: string) => postJSON<any>("/api/initiatives", { title, idea }, null),
   acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null),
   rejectInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/reject`, {}, null),
   gap: () => getJSON<{ gaps: any[] }>("/api/gap", { gaps: [] }),
+  // ── Бизнес-дашборд: системные карточки + кастомные графики по запросу ──
+  dashboard: () => getJSON<{ widgets: any[] }>("/api/dashboard", { widgets: [] }),
+  dashboardRequest: (text: string) =>
+    postJSON<{ ok: boolean; widget?: any; reason?: string; initiative_id?: string }>(
+      "/api/dashboard/request", { text }, { ok: false, reason: "Ошибка запроса" }),
+  dashboardSetLayout: (id: string, x: number, y: number, w: number, h: number) =>
+    postJSON<any>("/api/dashboard/layout", { id, x, y, w, h }, null),
+  dashboardRemove: (id: string) => postJSON<any>("/api/dashboard/remove", { id }, null),
   processes: () => getJSON<{ processes: any[] }>("/api/processes", { processes: [] }),
   createProcess: (title: string, role: string, instruction: string) =>
     postJSON<any>("/api/processes", { title, role, instruction }, null),

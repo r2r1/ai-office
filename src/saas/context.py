@@ -12,12 +12,14 @@ HTTP-запрос и офис-задачей на каждый цикл). Все
 import asyncio
 import contextvars
 import copy
+import itertools
 import json
 import os
 import time
 from pathlib import Path
 
 _tenant: contextvars.ContextVar[str] = contextvars.ContextVar("tenant", default="default")
+_tmp_seq = itertools.count()  # уникальный суффикс временного файла в write_json()
 
 # Локи per (tenant, filename): страховка на будущее. Сегодня все read-modify-write
 # функции офиса (plan.py, state.py и т.п.) синхронны от _data() до _save() — без
@@ -98,10 +100,31 @@ def read_json(name: str, default):
 def write_json(name: str, obj) -> None:
     # Атомарная запись: tmp + os.replace. Прямой write_text оставлял битый файл,
     # если процесс убивали посреди записи, — и офис тенанта молча терял состояние.
+    #
+    # `tmp` — с уникальным суффиксом (pid + монотонный счётчик), а не общим
+    # "<name>.tmp": два почти одновременных вызова write_json для ОДНОГО и того
+    # же файла (например шквал POST /api/dashboard/reorder при перетаскивании
+    # виджета — реальный кейс) иначе пишут в один и тот же временный файл и
+    # гонятся за одним os.replace — на Windows это валится PermissionError
+    # ([WinError 5], в отличие от POSIX rename там нет atomic-семантики поверх
+    # уже открытого/переименовываемого файла). С уникальным tmp гонки в записи
+    # не будет, останется только гонка «кто последний перезапишет f» — она
+    # безобидна (последняя запись побеждает, как и раньше).
     f = tenant_dir() / name
-    tmp = f.with_name(f"{name}.tmp")
+    tmp = f.with_name(f"{name}.{os.getpid()}.{next(_tmp_seq)}.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, f)
+    # os.replace на Windows иногда транзиторно падает PermissionError, если
+    # другой процесс/хендл на долю секунды держит f открытым (антивирус,
+    # почти одновременное чтение) — короткий ретрай вместо падения запроса.
+    for attempt in range(5):
+        try:
+            os.replace(tmp, f)
+            break
+        except PermissionError:
+            if attempt == 4:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (attempt + 1))
     _cache[_cache_key(name)] = copy.deepcopy(obj)
 
 

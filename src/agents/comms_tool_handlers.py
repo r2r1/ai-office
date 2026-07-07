@@ -326,6 +326,28 @@ def build(agent_id: str, role: str,
         return (f"Задача поставлена {col_role} (id={t['id']}) и добавлена на доску — "
                 f"его лидер назначит исполнителя. Можешь продолжать своё.")
 
+    async def _handle_create_recurring_process(args: dict) -> str:
+        from src.office import processes as processes_module, roles as roles_module
+        title = (args.get("title") or "").strip()
+        proc_role = (args.get("role") or role).strip()
+        instruction = (args.get("instruction") or "").strip()
+        if not title or not instruction:
+            return "Укажи название процесса и что делать каждый раз (instruction)."
+        if proc_role not in roles_module.known_roles():
+            valid = ", ".join(sorted(roles_module.known_roles()))
+            return f"Роли «{proc_role}» не существует — процесс НЕ создан. Реальные роли: {valid}."
+        # Процесс наследует ТВОЙ проект (если ты в нём) — иначе его задачи могли
+        # бы доставаться воркеру ДРУГОГО параллельного проекта, у которого нет
+        # файлов, написанных тобой (см. processes.create докстринг).
+        my_rec = registry_module.get(agent_id)
+        proc = processes_module.create(title, proc_role, instruction,
+                                       project_id=(my_rec.project_id if my_rec else ""))
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"🔄 Завёл повторяющийся процесс: {title[:60]}"})
+        return (f"Процесс «{title}» создан (id={proc['id']}) — с этого момента задача "
+                f"«{instruction[:60]}» будет ставиться заново каждый цикл офиса, как только "
+                f"предыдущая закрыта. Дальше можешь заняться остальным.")
+
     async def _handle_read_office_chat(args: dict) -> str:
         n = args.get("n", 20)
         msgs = office_channel.recent(n)
@@ -355,6 +377,7 @@ def build(agent_id: str, role: str,
         "ask_colleague": _handle_ask_colleague,
         "raise_event": _handle_raise_event,
         "delegate_task": _handle_delegate_task,
+        "create_recurring_process": _handle_create_recurring_process,
         "read_office_chat": _handle_read_office_chat,
         "get_connection": _handle_get_connection,
     }

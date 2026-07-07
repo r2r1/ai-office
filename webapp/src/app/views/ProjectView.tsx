@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
@@ -6,19 +7,26 @@ import type { ReactNode } from "react"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel } from "./ui"
 import { useThrottled } from "../hooks"
 
-// Карта сайта (рефакторинг 2026-07-05): «Этапы» и «Задачи» раньше были
-// отдельными top-level вкладками наравне с «Проектами» — но Stage и Task
-// СУЩЕСТВУЮТ ТОЛЬКО внутри конкретного Work (BOS §5), не сами по себе — теперь
-// они раскрываются ВНУТРИ карточки проекта. Три вида Work получили свои
-// вкладки (жизненный цикл различается: Initiative → decision → Project →
-// AI сам решает Process это или нет → архив/Process) + Спецификация —
-// компания-широкий контракт, не привязан к одному Work.
+// Карта сайта (рефакторинг 2026-07-08 — смена паттерна с inline-аккордеона на
+// master-detail): список инициатив/проектов/процессов — компактные строки,
+// клик по любой ОТКРЫВАЕТ ОТДЕЛЬНЫЙ экран деталей (не разворачивается на
+// месте) с кнопкой "Назад" — тот же принцип навигации, что везде в вебе
+// (список → карточка → назад), вместо неглубокого аккордеона, который плохо
+// масштабируется на пункты действий (принять/отклонить/пауза/удалить).
 const TABS = [
   { id: "initiatives", label: "Инициативы" },
   { id: "projects",    label: "Проекты" },
   { id: "processes",   label: "Процессы" },
   { id: "spec",        label: "Спецификация" },
 ]
+
+// Что именно открыто в детальном экране — единственный "роутер" внутри вкладки
+// (без react-router: state, а не URL, но тот же принцип master → detail).
+type Selected =
+  | { kind: "initiative"; id: string }
+  | { kind: "project"; id: string }
+  | { kind: "process"; id: string }
+  | { kind: "sales" }
 
 interface ProjectViewProps {
   /** Глубокая ссылка — открыть конкретный проект сразу (например, после принятия
@@ -35,7 +43,7 @@ export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps
   const [researchingInitiatives, setResearchingInitiatives] = useState<any[]>([])
   const [leadsSummary, setLeadsSummary] = useState<{ statuses: string[]; labels: Record<string, string>; leads: any[] }>({ statuses: [], labels: {}, leads: [] })
   const [processes, setProcesses] = useState<any[]>([])
-  const [expanded, setExpanded] = useState<string>("")
+  const [selected, setSelected] = useState<Selected | null>(null)
   const [details, setDetails] = useState<Record<string, any>>({})
   const tick = useThrottled(state.feed.length, 2500)
 
@@ -46,46 +54,26 @@ export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps
   })
 
   useEffect(() => {
-    api.projects().then(d => {
-      const items: any[] = d.projects || []
-      setProjects(items)
-      // Один проект — незачем заставлять кликать, чтобы его раскрыть.
-      setExpanded(cur => cur || (items.length === 1 ? items[0].id : ""))
-    })
+    api.projects().then(d => setProjects(d.projects || []))
     refreshInitiatives()
     api.leads().then(d => setLeadsSummary(d))
     refreshProcesses()
   }, [tick])
 
-  // Инициативы ("ini:<id>"), процесс продаж ("process:sales") и произвольные
-  // повторяющиеся процессы (id вида "proc<n>_...", см. src/office/processes.py)
-  // — не реальные Project, у них нет /api/project/{id}: раскрытие только
-  // переключает видимость.
-  const isRealProject = (id: string) => id && !id.startsWith("ini:") && !id.startsWith("proc") && id !== "process:sales"
-
-  async function toggle(id: string) {
-    if (expanded === id) { setExpanded(""); return }
-    setExpanded(id)
-    if (isRealProject(id) && !details[id]) {
-      const d = await api.projectDetail(id)
-      setDetails(prev => ({ ...prev, [id]: d }))
-    }
-  }
-
-  // Обновляем детали уже раскрытого проекта на каждый тик (живой прогресс),
-  // не только при первом раскрытии.
+  // Детали открытого проекта — подгружаются при открытии и обновляются каждый
+  // тик, пока экран открыт (живой прогресс), как и раньше при inline-раскрытии.
   useEffect(() => {
-    if (!expanded || !isRealProject(expanded)) return
-    api.projectDetail(expanded).then(d => setDetails(prev => ({ ...prev, [expanded]: d })))
-  }, [tick, expanded]) // eslint-disable-line
+    if (selected?.kind !== "project") return
+    api.projectDetail(selected.id).then(d => setDetails(prev => ({ ...prev, [selected.id]: d })))
+  }, [tick, selected]) // eslint-disable-line
 
-  // Глубокая ссылка: как только список проектов подгружен — раскрываем искомый.
+  // Глубокая ссылка: как только список проектов подгружен — открываем экран проекта.
   useEffect(() => {
     if (!focusProjectId) return
     const p = projects.find((x: any) => x.id === focusProjectId)
     if (p) {
       setTab("projects")
-      toggle(p.id)
+      setSelected({ kind: "project", id: p.id })
       onFocusHandled?.()
     }
   }, [focusProjectId, projects]) // eslint-disable-line
@@ -96,14 +84,16 @@ export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps
     const d = await api.projects()
     setProjects(d.projects || [])
     // Принятая инициатива стала конкретным проектом — переключаемся на вкладку
-    // «Проекты» и сразу его раскрываем, не заставляя искать глазами в списке
-    // (BOS §5: decision spawn_project).
-    if (r?.project_id) { setExpanded(r.project_id); setTab("projects") }
+    // «Проекты» и сразу открываем его экран, не заставляя искать глазами в
+    // списке (BOS §5: decision spawn_project).
+    if (r?.project_id) { setTab("projects"); setSelected({ kind: "project", id: r.project_id }) }
+    else setSelected(null)
   }
 
   async function rejectInitiative(iid: string) {
     await api.rejectInitiative(iid)
     setInitiatives(prev => prev.filter(i => i.id !== iid))
+    setSelected(null)
   }
 
   async function proposeInitiative(title: string, idea: string) {
@@ -119,8 +109,22 @@ export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps
   async function resumeProcess(id: string) { await api.resumeProcess(id); await refreshProcesses() }
   async function deleteProcess(id: string) {
     await api.deleteProcess(id)
-    if (expanded === id) setExpanded("")
+    setSelected(null)
     await refreshProcesses()
+  }
+
+  const refreshProjects = () => api.projects().then(d => setProjects(d.projects || []))
+  async function pauseProject(id: string) { await api.pauseProject(id); await refreshProjects() }
+  async function resumeProject(id: string) { await api.resumeProject(id); await refreshProjects() }
+  // Приоритет очереди: фронт всегда шлёт ПОЛНЫЙ порядок текущей очереди —
+  // индекс в списке становится priority на бэкенде (см. projects.reorder_queue).
+  async function reorderQueue(order: string[]) {
+    setProjects(prev => {
+      const byId = new Map(prev.map(p => [p.id, p]))
+      order.forEach((id, i) => { const p = byId.get(id); if (p) p.priority = i })
+      return [...prev]
+    })
+    await api.reorderProjectsQueue(order)
   }
 
   const hasSalesProcess = leadsSummary.leads.length > 0
@@ -135,22 +139,43 @@ export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps
   return (
     <ViewShell>
       <ViewHead title="Работа" sub={state.ready ? state.progress.note || "План работы офиса" : "Ожидание брифа"} />
-      <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
-
-      {tab === "initiatives" && (
-        <InitiativesTab initiatives={initiatives} researching={researchingInitiatives}
-          expanded={expanded} onToggle={toggle}
-          onAccept={acceptInitiative} onReject={rejectInitiative} onPropose={proposeInitiative} />
-      )}
-      {tab === "projects" && (
-        <ProjectsOnlyTab projects={projects} expanded={expanded} details={details} onToggle={toggle} />
-      )}
-      {tab === "processes" && (
-        <ProcessesTab leadsSummary={leadsSummary} processes={processes} expanded={expanded} onToggle={toggle}
-          onCreateProcess={createProcess} onPauseProcess={pauseProcess}
-          onResumeProcess={resumeProcess} onDeleteProcess={deleteProcess} />
-      )}
-      {tab === "spec" && <SpecTab tick={tick} />}
+      <AnimatePresence mode="wait" initial={false}>
+        {selected ? (
+          <motion.div key="detail" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+            initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 16 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}>
+            <DetailScreen
+              selected={selected} onBack={() => setSelected(null)}
+              initiatives={initiatives} processes={processes} projects={projects}
+              details={details} leadsSummary={leadsSummary}
+              onAccept={acceptInitiative} onReject={rejectInitiative}
+              onPause={pauseProcess} onResume={resumeProcess} onDelete={deleteProcess}
+              onPauseProject={pauseProject} onResumeProject={resumeProject}
+            />
+          </motion.div>
+        ) : (
+          <motion.div key="list" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+            initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}>
+            <SubTabs tabs={tabsWithBadges} active={tab} onChange={setTab} />
+            {tab === "initiatives" && (
+              <InitiativesTab initiatives={initiatives} researching={researchingInitiatives}
+                onOpen={id => setSelected({ kind: "initiative", id })} onPropose={proposeInitiative} />
+            )}
+            {tab === "projects" && (
+              <ProjectsOnlyTab projects={projects} onOpen={id => setSelected({ kind: "project", id })}
+                onReorderQueue={reorderQueue} />
+            )}
+            {tab === "processes" && (
+              <ProcessesTab leadsSummary={leadsSummary} processes={processes}
+                onOpenProcess={id => setSelected({ kind: "process", id })}
+                onOpenSales={() => setSelected({ kind: "sales" })}
+                onCreateProcess={createProcess} />
+            )}
+            {tab === "spec" && <SpecTab tick={tick} />}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </ViewShell>
   )
 }
@@ -163,14 +188,87 @@ const WORK_TYPE_BADGE: Record<string, { icon: string; label: string }> = {
   initiative: { icon: "💡", label: "Инициатива" },
 }
 
+// ── Шапка любого детального экрана: кнопка "Назад" + тип + заголовок + статус.
+// Единая для инициативы/проекта/процесса — так пользователь учит паттерн один
+// раз и узнаёт его везде (navigation-consistency). ──────────────────────────
+function DetailHeader({ badge, statusPill, title, sub, onBack, actions }: {
+  badge: { icon: string; label: string }; statusPill?: ReactNode; title: string; sub?: string
+  onBack: () => void; actions?: ReactNode
+}) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 28px",
+      borderBottom: "1px solid var(--hairline)", flexShrink: 0, flexWrap: "wrap",
+    }}>
+      <button onClick={onBack}
+        style={{
+          display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginTop: 2,
+          padding: "8px 14px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+          border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text)",
+        }}>
+        ← Назад к работе
+      </button>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
+          <Pill>{badge.icon} {badge.label}</Pill>
+          {statusPill}
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", lineHeight: 1.3 }}>{title}</div>
+        {sub && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{sub}</div>}
+      </div>
+      {actions && <div style={{ display: "flex", gap: 8, flexShrink: 0, marginTop: 2 }}>{actions}</div>}
+    </div>
+  )
+}
+
+// ── Роутер детального экрана: по selected.kind достаёт нужную сущность из уже
+// загруженных списков и рендерит её экран. Сущность могла исчезнуть (принята/
+// отклонена/удалена только что) — тогда мягкий фолбэк вместо пустого экрана. ──
+function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject }: {
+  selected: Selected; onBack: () => void
+  initiatives: any[]; processes: any[]; projects: any[]; details: Record<string, any>
+  leadsSummary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
+  onAccept: (id: string) => void; onReject: (id: string) => void
+  onPause: (id: string) => void; onResume: (id: string) => void; onDelete: (id: string) => void
+  onPauseProject: (id: string) => void; onResumeProject: (id: string) => void
+}) {
+  if (selected.kind === "initiative") {
+    const ini = initiatives.find(i => i.id === selected.id)
+    if (!ini) return <GoneScreen onBack={onBack} text="Эта инициатива уже обработана." />
+    return <InitiativeDetailScreen initiative={ini} onBack={onBack}
+      onAccept={() => onAccept(ini.id)} onReject={() => onReject(ini.id)} />
+  }
+  if (selected.kind === "process") {
+    const proc = processes.find(p => p.id === selected.id)
+    if (!proc) return <GoneScreen onBack={onBack} text="Этот процесс удалён." />
+    return <ProcessDetailScreen proc={proc} onBack={onBack}
+      onPause={() => onPause(proc.id)} onResume={() => onResume(proc.id)} onDelete={() => onDelete(proc.id)} />
+  }
+  if (selected.kind === "sales") {
+    return <SalesProcessDetailScreen summary={leadsSummary} onBack={onBack} />
+  }
+  const proj = projects.find(p => p.id === selected.id)
+  if (!proj) return <GoneScreen onBack={onBack} text="Проект не найден." />
+  return <ProjectDetailScreen project={proj} detail={details[proj.id]} onBack={onBack}
+    onPause={() => onPauseProject(proj.id)} onResume={() => onResumeProject(proj.id)} />
+}
+
+function GoneScreen({ onBack, text }: { onBack: () => void; text: string }) {
+  return (
+    <>
+      <DetailHeader badge={{ icon: "—", label: "Недоступно" }} title="" onBack={onBack} />
+      <ViewBody><Empty icon="🕊️" text={text} /></ViewBody>
+    </>
+  )
+}
+
 // ── Инициативы: предлагает AI (opportunity-события) ИЛИ сам предприниматель.
 // Жизненный цикл: researching (глубокий анализ идёт) → pending (ждёт решения,
-// с готовым анализом) → accept (становится проектом) / reject. Минимум
-// действий пользователя — одна кнопка, весь анализ офис делает сам заранее. ──
-function InitiativesTab({ initiatives, researching, expanded, onToggle, onAccept, onReject, onPropose }: {
+// с готовым анализом) → accept (становится проектом) / reject. Список — только
+// заголовок+суть, решение принимается на отдельном экране (клик по строке). ──
+function InitiativesTab({ initiatives, researching, onOpen, onPropose }: {
   initiatives: any[]; researching: any[]
-  expanded: string; onToggle: (id: string) => void
-  onAccept: (id: string) => void; onReject: (id: string) => void
+  onOpen: (id: string) => void
   onPropose: (title: string, idea: string) => void
 }) {
   const isEmpty = initiatives.length === 0 && researching.length === 0
@@ -180,14 +278,12 @@ function InitiativesTab({ initiatives, researching, expanded, onToggle, onAccept
         <Empty icon="💡" text="Инициатив пока нет"
           hint="AI предложит их сам по мере наблюдений, или предложи свою идею ниже" />
       )}
-      <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
         {researching.map((ini: any) => (
-          <ResearchingInitiativeItem key={ini.id} initiative={ini} />
+          <ResearchingInitiativeRow key={ini.id} initiative={ini} />
         ))}
         {initiatives.map((ini: any) => (
-          <InitiativeAccordionItem key={ini.id} initiative={ini}
-            isOpen={expanded === `ini:${ini.id}`} onToggle={() => onToggle(`ini:${ini.id}`)}
-            onAccept={() => onAccept(ini.id)} onReject={() => onReject(ini.id)} />
+          <InitiativeRow key={ini.id} initiative={ini} onClick={() => onOpen(ini.id)} />
         ))}
       </div>
       <NewInitiativeForm onPropose={onPropose} />
@@ -246,7 +342,7 @@ function NewInitiativeForm({ onPropose }: { onPropose: (title: string, idea: str
   )
 }
 
-function ResearchingInitiativeItem({ initiative: ini }: { initiative: any }) {
+function ResearchingInitiativeRow({ initiative: ini }: { initiative: any }) {
   return (
     <Card style={{ cursor: "default", opacity: 0.85 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
@@ -261,16 +357,67 @@ function ResearchingInitiativeItem({ initiative: ini }: { initiative: any }) {
   )
 }
 
+// Общий "заголовок строки списка" — карточка кликабельна целиком и ведёт на
+// отдельный экран (стрелка → вместо шеврона раскрытия ▸, чтобы визуально не
+// путать навигацию со старым инлайн-аккордеоном).
+function ListRow({ badge, statusPill, title, sub, onClick, extra }: {
+  badge: { icon: string; label: string }; statusPill?: ReactNode; title: string; sub?: ReactNode; onClick: () => void
+  /** Доп. интерактивный контроль в строке (например стрелки приоритета очереди)
+   * — стоит МЕЖДУ текстом и стрелкой перехода, сам гасит клик, чтобы не
+   * триггерить навигацию на экран деталей. */
+  extra?: ReactNode
+}) {
+  return (
+    <Card onClick={onClick} style={{ cursor: "pointer" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <Pill>{badge.icon} {badge.label}</Pill>
+            {statusPill}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{title}</div>
+          {sub}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          {extra}
+          <div className="mono" style={{ fontSize: 15, color: "var(--faint)", marginTop: 2 }}>→</div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function InitiativeRow({ initiative: ini, onClick }: { initiative: any; onClick: () => void }) {
+  return (
+    <ListRow badge={WORK_TYPE_BADGE.initiative} onClick={onClick}
+      statusPill={<Pill accent>Ждёт решения</Pill>}
+      title={ini.title}
+      sub={ini.expected_outcome && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>📈 {ini.expected_outcome}</div>} />
+  )
+}
+
 // ── Проекты: только Project (разовая работа с началом и концом) ─────────────
-function ProjectsOnlyTab({ projects, expanded, details, onToggle }: {
-  projects: any[]; expanded: string; details: Record<string, any>; onToggle: (id: string) => void
+function ProjectsOnlyTab({ projects, onOpen, onReorderQueue }: {
+  projects: any[]; onOpen: (id: string) => void; onReorderQueue: (order: string[]) => void
 }) {
   const active = projects.filter((p: any) => p.status === "active")
+  const paused = projects.filter((p: any) => p.status === "paused")
   // "queued" — параллельный Work, ждущий свободного слота (см. project_limits) —
   // раньше падал в ту же корзину, что и "закрытые", и выглядел завершённым,
-  // хотя ещё не начинался.
-  const queued = [...projects.filter((p: any) => p.status === "queued")].reverse()
-  const closed = [...projects.filter((p: any) => p.status !== "active" && p.status !== "queued")].reverse()
+  // хотя ещё не начинался. Порядок — приоритет (меньше = раньше активируется,
+  // см. projects.reorder_queue), не просто дата создания.
+  const queued = [...projects.filter((p: any) => p.status === "queued")]
+    .sort((a, b) => (a.priority ?? a.created_ts ?? 0) - (b.priority ?? b.created_ts ?? 0))
+  const closed = [...projects.filter((p: any) => p.status === "done")].reverse()
+
+  function moveQueue(id: string, dir: -1 | 1) {
+    const ids = queued.map((p: any) => p.id)
+    const i = ids.indexOf(id)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= ids.length) return
+    ;[ids[i], ids[j]] = [ids[j], ids[i]]
+    onReorderQueue(ids)
+  }
 
   if (projects.length === 0) return (
     <ViewBody>
@@ -281,33 +428,83 @@ function ProjectsOnlyTab({ projects, expanded, details, onToggle }: {
 
   return (
     <ViewBody>
-      <div style={{ display: "grid", gap: 12 }}>
-        {active.map((p: any) => (
-          <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
-            detail={details[p.id]} onToggle={() => onToggle(p.id)} />
+      <div style={{ display: "grid", gap: 10 }}>
+        {[...active, ...paused].map((p: any) => (
+          <ProjectRow key={p.id} project={p} onClick={() => onOpen(p.id)} />
         ))}
-        {queued.map((p: any) => (
-          <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
-            detail={details[p.id]} onToggle={() => onToggle(p.id)} />
+        {queued.map((p: any, i: number) => (
+          <ProjectRow key={p.id} project={p} onClick={() => onOpen(p.id)}
+            onMoveUp={i > 0 ? () => moveQueue(p.id, -1) : undefined}
+            onMoveDown={i < queued.length - 1 ? () => moveQueue(p.id, 1) : undefined} />
         ))}
         {closed.map((p: any) => (
-          <ProjectAccordionItem key={p.id} project={p} isOpen={expanded === p.id}
-            detail={details[p.id]} onToggle={() => onToggle(p.id)} />
+          <ProjectRow key={p.id} project={p} onClick={() => onOpen(p.id)} />
         ))}
       </div>
     </ViewBody>
   )
 }
 
+function ProjectRow({ project: p, onClick, onMoveUp, onMoveDown }: {
+  project: any; onClick: () => void; onMoveUp?: () => void; onMoveDown?: () => void
+}) {
+  const lb = p.left_behind || {}
+  const isActive = p.status === "active"
+  const isQueued = p.status === "queued"
+  const isPaused = p.status === "paused"
+  const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
+  // Стрелки приоритета очереди — не навигация, поэтому гасим клик по строке
+  // (stopPropagation), иначе стрелка одновременно открывала бы экран проекта.
+  // Хит-зона каждой кнопки — 44×44 (touch-target-size), визуальный чип внутри
+  // компактнее — раздувать саму иконку до 44px незачем, только область клика.
+  const queueControls = (onMoveUp || onMoveDown) && (
+    <div style={{ display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+      <button onClick={onMoveUp} disabled={!onMoveUp} title="Поднять в очереди" aria-label="Поднять в очереди"
+        style={{ width: 44, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+          border: "none", background: "transparent", padding: 0,
+          color: onMoveUp ? "var(--text-dim)" : "var(--faint)", cursor: onMoveUp ? "pointer" : "default" }}>
+        <span style={{ width: 22, height: 18, display: "flex", alignItems: "center", justifyContent: "center",
+          border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface-soft)", fontSize: 10 }}>▲</span>
+      </button>
+      <button onClick={onMoveDown} disabled={!onMoveDown} title="Опустить в очереди" aria-label="Опустить в очереди"
+        style={{ width: 44, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+          border: "none", background: "transparent", padding: 0,
+          color: onMoveDown ? "var(--text-dim)" : "var(--faint)", cursor: onMoveDown ? "pointer" : "default" }}>
+        <span style={{ width: 22, height: 18, display: "flex", alignItems: "center", justifyContent: "center",
+          border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface-soft)", fontSize: 10 }}>▼</span>
+      </button>
+    </div>
+  )
+  return (
+    <ListRow badge={typeBadge} onClick={onClick} extra={queueControls}
+      statusPill={isActive ? <Pill accent>Активный</Pill>
+        : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
+        : isPaused ? <Pill>⏸ На паузе</Pill>
+        : <Pill color="var(--success)">Закрыт</Pill>}
+      title={p.title}
+      sub={
+        <>
+          {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
+          {p.status === "done" && (
+            <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
+              <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
+              <span>🌐 сайтов: {(lb.sites || []).length}</span>
+              <span>👤 лидов: {lb.leads_count ?? 0}</span>
+            </div>
+          )}
+        </>
+      } />
+  )
+}
+
 // ── Процессы: непрерывная работа — конвейер Instance (продажи) ИЛИ
 // повторяющееся действие (контент-завод и т.п.). AI сам решает при закрытии
 // проекта, не стоит ли превратить его в процесс (см. src/office/loop.py). ──
-function ProcessesTab({ leadsSummary, processes, expanded, onToggle, onCreateProcess, onPauseProcess, onResumeProcess, onDeleteProcess }: {
+function ProcessesTab({ leadsSummary, processes, onOpenProcess, onOpenSales, onCreateProcess }: {
   leadsSummary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
   processes: any[]
-  expanded: string; onToggle: (id: string) => void
+  onOpenProcess: (id: string) => void; onOpenSales: () => void
   onCreateProcess: (title: string, role: string, instruction: string) => void
-  onPauseProcess: (id: string) => void; onResumeProcess: (id: string) => void; onDeleteProcess: (id: string) => void
 }) {
   const hasSalesProcess = leadsSummary.leads.length > 0
   const isEmpty = !hasSalesProcess && processes.length === 0
@@ -318,15 +515,20 @@ function ProcessesTab({ leadsSummary, processes, expanded, onToggle, onCreatePro
         <Empty icon="🔄" text="Процессов пока нет"
           hint="Появится сам, когда офис решит, что завершённый проект стоит вести постоянно — или заведи свой ниже" />
       )}
-      <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
         {hasSalesProcess && (
-          <ProcessAccordionItem summary={leadsSummary} isOpen={expanded === "process:sales"}
-            onToggle={() => onToggle("process:sales")} />
+          <ListRow badge={WORK_TYPE_BADGE.process} onClick={onOpenSales}
+            statusPill={<Pill color="var(--success)">Идёт постоянно</Pill>}
+            title="Продажи"
+            sub={<div style={{ fontSize: 12, color: "var(--muted)" }}>{leadsSummary.leads.length} лид(ов) в потоке</div>} />
         )}
         {processes.map((p: any) => (
-          <RecurringProcessAccordionItem key={p.id} proc={p} isOpen={expanded === p.id}
-            onToggle={() => onToggle(p.id)} onPause={() => onPauseProcess(p.id)}
-            onResume={() => onResumeProcess(p.id)} onDelete={() => onDeleteProcess(p.id)} />
+          <ListRow key={p.id} badge={WORK_TYPE_BADGE.process} onClick={() => onOpenProcess(p.id)}
+            statusPill={p.status === "active" ? <Pill color="var(--success)">Идёт постоянно</Pill> : <Pill>На паузе</Pill>}
+            title={p.title}
+            sub={<div style={{ fontSize: 12, color: "var(--muted)" }}>
+              {roleName(p.role)} · каждый цикл{p.run_count ? ` · запусков: ${p.run_count}` : ""}
+            </div>} />
         ))}
       </div>
       <NewProcessForm onCreate={onCreateProcess} />
@@ -398,91 +600,44 @@ function NewProcessForm({ onCreate }: { onCreate: (title: string, role: string, 
   )
 }
 
-function RecurringProcessAccordionItem({ proc, isOpen, onToggle, onPause, onResume, onDelete }: {
-  proc: any; isOpen: boolean; onToggle: () => void; onPause: () => void; onResume: () => void; onDelete: () => void
+// ── Экран инициативы: обоснование + анализ + предпросмотр задач + решение. ──
+function InitiativeDetailScreen({ initiative: ini, onBack, onAccept, onReject }: {
+  initiative: any; onBack: () => void; onAccept: () => void; onReject: () => void
 }) {
-  const typeBadge = WORK_TYPE_BADGE.process
-  const isActive = proc.status === "active"
   return (
-    <Card style={{ cursor: "default" }}>
-      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            {isActive ? <Pill color="var(--success)">Идёт постоянно</Pill> : <Pill>На паузе</Pill>}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{proc.title}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            {roleName(proc.role)} · каждый цикл{proc.run_count ? ` · запусков: ${proc.run_count}` : ""}
-          </div>
-        </div>
-        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▸</div>
-      </div>
-      {isOpen && (
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 12 }}>
-          <div>
-            <SectionLabel style={{ marginBottom: 8 }}>Что делает каждый цикл</SectionLabel>
-            <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>{proc.instruction}</div>
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--faint)" }}>
-            {proc.last_run_ts
-              ? `Последний запуск: ${new Date(proc.last_run_ts * 1000).toLocaleString("ru", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
-              : "Ещё не запускался — задача появится в ближайшем цикле офиса"}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {isActive ? (
-              <button onClick={onPause} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
-                border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
-            ) : (
-              <button onClick={onResume} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
-                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
-            )}
-            <button onClick={onDelete} style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 11.5, cursor: "pointer",
-              border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)" }}>Удалить</button>
-          </div>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-// Инициатива — BOS §5: до решения у неё нет ни Stage-пути, ни Task-дерева,
-// только идея+обоснование и бинарный выбор. Визуально того же уровня, что
-// Project/Process (одна и та же карточка-аккордеон), но раскрытие показывает
-// не прогресс, а обоснование + предпросмотр задач, которые появятся при accept.
-function InitiativeAccordionItem({ initiative: ini, isOpen, onToggle, onAccept, onReject }: {
-  initiative: any; isOpen: boolean; onToggle: () => void; onAccept: () => void; onReject: () => void
-}) {
-  const typeBadge = WORK_TYPE_BADGE.initiative
-  return (
-    <Card style={{ borderColor: "rgba(255,172,46,0.35)", cursor: "default" }}>
-      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            <Pill accent>Ждёт решения</Pill>
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{ini.title}</div>
-          {!isOpen && ini.expected_outcome && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>📈 {ini.expected_outcome}</div>}
-        </div>
-        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▸</div>
-      </div>
-      {isOpen && (
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 14 }}>
+    <>
+      <DetailHeader badge={WORK_TYPE_BADGE.initiative} title={ini.title} onBack={onBack}
+        statusPill={<Pill accent>Ждёт решения</Pill>}
+        actions={
+          <>
+            <button onClick={onAccept}
+              style={{ padding: "9px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)", fontWeight: 500 }}>
+              ✅ Принять → создать проект
+            </button>
+            <button onClick={onReject}
+              style={{ padding: "9px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+              ✖ Отклонить
+            </button>
+          </>
+        } />
+      <ViewBody>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
           <div>
             <SectionLabel style={{ marginBottom: 8 }}>Почему сейчас</SectionLabel>
-            <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>{ini.rationale}</div>
+            <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{ini.rationale}</div>
           </div>
           {ini.research && (
             <div>
               <SectionLabel style={{ marginBottom: 8 }}>📊 Глубокий анализ офиса</SectionLabel>
-              <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{ini.research}</div>
+              <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{ini.research}</div>
             </div>
           )}
           {ini.expected_outcome && (
             <div>
               <SectionLabel style={{ marginBottom: 8 }}>Ожидаемый результат</SectionLabel>
-              <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{ini.expected_outcome}
+              <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{ini.expected_outcome}
                 {ini.estimated_effort && <span style={{ color: "var(--faint)" }}> · усилий: {ini.estimated_effort}</span>}</div>
             </div>
           )}
@@ -491,130 +646,137 @@ function InitiativeAccordionItem({ initiative: ini, isOpen, onToggle, onAccept, 
               <SectionLabel style={{ marginBottom: 8 }}>Если принять — появится Проект с задачами · {ini.tasks.length}</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {ini.tasks.map((t: any, i: number) => (
-                  <div key={i} style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.4, paddingLeft: 12, borderLeft: "2px solid var(--hairline-strong)" }}>
+                  <div key={i} style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.4, paddingLeft: 12, borderLeft: "2px solid var(--hairline-strong)" }}>
                     {t.title} <span style={{ color: "var(--faint)" }}>· {roleName(t.role)}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onAccept}
-              style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-                border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)", fontWeight: 500 }}>
-              ✅ Принять → создать проект
-            </button>
-            <button onClick={onReject}
-              style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-                border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
-              ✖ Отклонить
-            </button>
-          </div>
         </div>
-      )}
-    </Card>
+      </ViewBody>
+    </>
   )
 }
 
-// Процесс — BOS §5: никогда не завершается, поэтому нет линейного прогресса —
-// вместо этого поток Instance, у каждого своя стадия. Сегодня единственный
-// реальный процесс — продажи (лиды); раскрытие ведёт в полноценный Kanban,
-// не дублирует его здесь.
-function ProcessAccordionItem({ summary, isOpen, onToggle }: {
-  summary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
-  isOpen: boolean; onToggle: () => void
+// ── Экран повторяющегося процесса: что делает + история запусков + управление. ──
+function ProcessDetailScreen({ proc, onBack, onPause, onResume, onDelete }: {
+  proc: any; onBack: () => void; onPause: () => void; onResume: () => void; onDelete: () => void
 }) {
-  const typeBadge = WORK_TYPE_BADGE.process
+  const isActive = proc.status === "active"
+  return (
+    <>
+      <DetailHeader badge={WORK_TYPE_BADGE.process} title={proc.title} onBack={onBack}
+        sub={`${roleName(proc.role)} · каждый цикл`}
+        statusPill={isActive ? <Pill color="var(--success)">Идёт постоянно</Pill> : <Pill>На паузе</Pill>}
+        actions={
+          <>
+            {isActive ? (
+              <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+            ) : (
+              <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
+            )}
+            <button onClick={onDelete} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+              border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)" }}>Удалить</button>
+          </>
+        } />
+      <ViewBody>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
+          <div>
+            <SectionLabel style={{ marginBottom: 8 }}>Что делает каждый цикл</SectionLabel>
+            <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{proc.instruction}</div>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--faint)" }}>
+            {proc.run_count ? `Запусков: ${proc.run_count} · ` : ""}
+            {proc.last_run_ts
+              ? `Последний запуск: ${new Date(proc.last_run_ts * 1000).toLocaleString("ru", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
+              : "Ещё не запускался — задача появится в ближайшем цикле офиса"}
+          </div>
+        </div>
+      </ViewBody>
+    </>
+  )
+}
+
+// ── Экран процесса продаж: Instance по стадиям (полный kanban — во вкладке «Лиды»). ──
+function SalesProcessDetailScreen({ summary, onBack }: {
+  summary: { statuses: string[]; labels: Record<string, string>; leads: any[] }; onBack: () => void
+}) {
   const counts = summary.statuses.map(s => ({
     id: s, label: summary.labels[s] || s,
     count: summary.leads.filter((l: any) => (l.status || "new") === s).length,
   }))
   return (
-    <Card style={{ cursor: "default" }}>
-      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            <Pill color="var(--success)">Идёт постоянно</Pill>
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>Продажи</div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>{summary.leads.length} лид(ов) в потоке — у процесса нет «% выполнено», только стадия каждого элемента</div>
-        </div>
-        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▸</div>
-      </div>
-      {isOpen && (
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
-          <SectionLabel style={{ marginBottom: 8 }}>Instance по стадиям</SectionLabel>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-            {counts.map(c => (
-              <div key={c.id} style={{ padding: "6px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)", background: "var(--surface-soft)" }}>
-                <div style={{ fontSize: 9.5, color: "var(--muted)", textTransform: "uppercase" }}>{c.label}</div>
-                <div className="mono" style={{ fontSize: 15, color: "var(--text)" }}>{c.count}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--faint)" }}>Полная доска с карточками, историей и follow-up — во вкладке «Лиды».</div>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-function ProjectAccordionItem({ project: p, isOpen, detail, onToggle }: {
-  project: any; isOpen: boolean; detail: any; onToggle: () => void
-}) {
-  const lb = p.left_behind || {}
-  const isActive = p.status === "active"
-  const isQueued = p.status === "queued"
-  const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
-
-  return (
-    <Card style={{ borderColor: isActive ? "rgba(255,172,46,0.3)" : undefined, cursor: "default" }}>
-      <div onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-            <Pill>{typeBadge.icon} {typeBadge.label}</Pill>
-            {isActive ? <Pill accent>Активный</Pill>
-              : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
-              : <Pill color="var(--success)">Закрыт</Pill>}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
-          {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
-          {p.status === "done" && !isOpen && (
-            <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
-              <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
-              <span>🌐 сайтов: {(lb.sites || []).length}</span>
-              <span>👤 лидов: {lb.leads_count ?? 0}</span>
+    <>
+      <DetailHeader badge={WORK_TYPE_BADGE.process} title="Продажи" onBack={onBack}
+        statusPill={<Pill color="var(--success)">Идёт постоянно</Pill>}
+        sub={`${summary.leads.length} лид(ов) в потоке — у процесса нет «% выполнено», только стадия каждого элемента`} />
+      <ViewBody>
+        <SectionLabel style={{ marginBottom: 8 }}>Instance по стадиям</SectionLabel>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {counts.map(c => (
+            <div key={c.id} style={{ padding: "6px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)", background: "var(--surface-soft)" }}>
+              <div style={{ fontSize: 9.5, color: "var(--muted)", textTransform: "uppercase" }}>{c.label}</div>
+              <div className="mono" style={{ fontSize: 15, color: "var(--text)" }}>{c.count}</div>
             </div>
-          )}
+          ))}
         </div>
-        <div className="mono" style={{ fontSize: 18, color: "var(--faint)", flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>
-          ▸
-        </div>
-      </div>
-
-      {isOpen && (
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
-          {!detail ? (
-            <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div>
-          ) : (
-            <ProjectDetailBody project={p} detail={detail} />
-          )}
-        </div>
-      )}
-    </Card>
+        <div style={{ fontSize: 11.5, color: "var(--faint)" }}>Полная доска с карточками, историей и follow-up — во вкладке «Лиды».</div>
+      </ViewBody>
+    </>
   )
 }
 
-// Внутренняя иерархия одного Work: прогресс → Stage-путь → Task-дерево
-// (parent_id) → артефакты. Это и есть Work → Stage → Task → Subtask из BOS §5,
-// а не 4 несвязанные вкладки.
-// Отделы — та же карта, что в Сводке (DashboardView.tsx): держим локально,
-// т.к. это чисто отображение, не доменная логика.
+// ── Экран проекта: прогресс → команда → этапы → сценарий → задачи → артефакты.
+// Это и есть Work → Stage → Task → Subtask из BOS §5, теперь на отдельном
+// экране вместо инлайн-раскрытия. ────────────────────────────────────────────
 const DEPT_NAMES: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
 
-function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }) {
+function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: {
+  project: any; detail: any; onBack: () => void; onPause: () => void; onResume: () => void
+}) {
   const isActive = p.status === "active"
+  const isQueued = p.status === "queued"
+  const isPaused = p.status === "paused"
+  const isOngoing = isActive || isQueued || isPaused  // разовые Project ставятся на паузу, закрытые (done) — уже история
+  const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
+  return (
+    <>
+      <DetailHeader badge={typeBadge} title={p.title} onBack={onBack} sub={p.goal}
+        statusPill={isActive ? <Pill accent>Активный</Pill>
+          : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
+          : isPaused ? <Pill>⏸ На паузе</Pill>
+          : <Pill color="var(--success)">Закрыт</Pill>}
+        actions={isOngoing && p.type === "project" ? (
+          isPaused ? (
+            <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+              border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
+          ) : (
+            <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+              border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+          )
+        ) : undefined} />
+      <ViewBody>
+        {isPaused && (
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, padding: "10px 14px",
+            background: "var(--surface-soft)", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)" }}>
+            ⏸ Проект на паузе — команда не берёт по нему новых задач. Уже начатое доделывается, слот освобождён для очереди.
+          </div>
+        )}
+        {!detail ? (
+          <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div>
+        ) : (
+          <ProjectDetailBody project={p} detail={detail} />
+        )}
+      </ViewBody>
+    </>
+  )
+}
+
+function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }) {
+  const isActive = p.status === "active" || p.status === "paused"
   const tasks: any[] = detail.tasks || []
   const stages = (detail.milestones?.stages || []).filter((s: any) => s.item_count > 0 || s.status !== "pending")
   const sites: any[] = detail.sites || []
