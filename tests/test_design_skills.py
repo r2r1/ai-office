@@ -28,7 +28,7 @@ def test_landing_conversion_has_style_catalog():
     for name in ("Терракотовый ремесленный", "Графитовый индастриал", "Свежий фермерский"):
         assert name in s.playbook, f"направление {name!r} пропало из каталога"
     # Cross-reference на дизайн-токены vite_react_site не потерян при правках.
-    assert "React + Vite" in s.playbook and "Framer Motion" in s.playbook
+    assert "React + Vite" in s.playbook and "Motion" in s.playbook
 
 
 def test_realistic_agent_query_matches_landing_conversion():

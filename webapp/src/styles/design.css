@@ -160,6 +160,14 @@ body {
 
 @media (hover: none), (pointer: coarse) { .mouse-spot { display: none !important; } }
 
+/* Bento-сетка (лендинг, блок «Что внутри») — на узких экранах схлопывается
+   в одну колонку, gridColumn/gridRow span из JS перестают иметь смысл при
+   1 колонке, поэтому явно сбрасываем их через !important. */
+@media (max-width: 720px) {
+  .bento-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
+  .bento-grid > * { grid-column: auto !important; grid-row: auto !important; }
+}
+
 /* Рендер .md-файлов во вкладке «Код» (offer.md/tech_design.md/strategy.md и т.п. —
    пишут агенты) — раньше показывались сырым текстом с "#"/"**"/"-". */
 .md-preview { font-size: 13.5px; line-height: 1.65; color: var(--text-dim); }

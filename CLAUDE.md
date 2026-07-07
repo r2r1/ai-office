@@ -258,8 +258,9 @@ use_skill(...)».
 `kind`: `builtin` — работа делается встроенной моделью по плейбуку; `external` —
 плейбук говорит делегировать внешнему исполнителю/репозиторию (задел на External
 Workers из `docs/3.md`). Системный скилл сайта — `vite_react_site`
-(`builtin_skills/vite_react_site.md`): React + Vite (настоящая сборка) + Framer
-Motion для анимаций/3D-эффектов, доступен ролям `designer`/`developer`. Раньше
+(`builtin_skills/vite_react_site.md`): React + Vite (настоящая сборка) + Motion
+(бывш. Framer Motion, пакет `motion`) для анимаций/3D-эффектов, доступен ролям
+`designer`/`developer`. Раньше
 было 4 конкурирующих скилла под разные стеки (Alpine+Tailwind CDN, Vue/esm.sh,
 vanilla HTML, React/esm.sh без сборки) — консолидированы в один: непредсказуемое
 качество вразнобой по 4 наборам багов не окупало разнообразие. Клиент, которому
