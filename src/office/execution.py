@@ -183,7 +183,10 @@ async def publish_site_auto(publish, note: str = "") -> bool:
 
     tid = ctx.get_tenant()
     title = (brief.get().get("goal", "") or "Сайт")[:60]
-    slug = sites.main_slug()  # СТАБИЛЬНЫЙ адрес: одна ссылка на весь прогон, не плодим сайты
+    # Слаг ТЕКУЩЕГО проекта (Фаза 3, параллельные проекты) — стабильный адрес
+    # на весь прогон ЭТОГО проекта, но не общий на все параллельные проекты
+    # тенанта (иначе публикация проекта B перезаписывает адрес проекта A).
+    slug = sites.slug_for_current_project()
     site = sites.save_dir(title, sdir, slug, note=note)
     rev = site.get("revision", 1)
     from src.office import trace

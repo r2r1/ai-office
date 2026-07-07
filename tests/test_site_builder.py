@@ -75,7 +75,7 @@ def test_gate_disabled_gives_actionable_problem():
         # Приёмка/критик видят структурную critical-проблему с ПОНЯТНЫМ выходом
         prob = sb.cached_problem()
         assert prob and prob["severity"] == "critical" and prob["code"] == "build_disabled"
-        assert "esm.sh" in prob["text"]  # агенту предложен путь деградации
+        assert "React + Vite + Framer Motion" in prob["text"]  # агенту предложен путь деградации (в скилле)
         # published_root: публиковать нечего (исходники Vite — не сайт)
         assert sb.published_root() is None
         # критик отдаёт её первой критической проблемой

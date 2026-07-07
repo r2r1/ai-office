@@ -333,10 +333,11 @@ def cached_problem() -> dict | None:
         tail = (cache.get("log_tail") or "")[-400:]
         if "отключена оператором" in reason:
             return {"code": "build_disabled", "severity": "critical",
-                    "text": "Проект требует сборки (package.json+build), но исполнение "
-                            "сборки отключено оператором платформы. Собери сайт БЕЗ шага "
-                            "сборки: статический HTML/CSS/JS или React/framer-motion через "
-                            "esm.sh-importmap (скилл «3D-лендинг»), без package.json."}
+                    "text": "Проект требует сборки (package.json+build), но исполнение сборки "
+                            "отключено оператором платформы. Удали package.json/vite.config.js/"
+                            "src/*.jsx и перепиши site/index.html в статический HTML/CSS/JS без "
+                            "framework/JSX/type=module — раздел «ЕСЛИ СБОРКА ОТКЛЮЧЕНА» в скилле "
+                            "«Сайт на React + Vite + Framer Motion» (use_skill за ним же)."}
         return {"code": "build_failed", "severity": "critical",
                 "text": f"Сборка сайта не проходит ({reason}). Хвост лога:\n{tail}\n"
                         f"Почини ошибку сборки в исходниках (read_file → write_file)."}

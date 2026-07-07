@@ -45,10 +45,11 @@ def for_project(project_id: str) -> list[dict]:
     return sorted(items, key=lambda x: x["updated_ts"], reverse=True)
 
 
-# Стабильный слаг ОСНОВНОГО сайта тенанта. Раньше и авто-публикация, и ручной
-# publish_site считали слаг от разных заголовков → у одного контента появлялось
-# два адреса («будто новый сайт каждый раз»). Теперь главный сайт живёт по ОДНОМУ
-# адресу, а публикация лишь обновляет его файлы и версию.
+# Стабильный слаг ОСНОВНОГО сайта тенанта — легаси-случай (project_dir == "",
+# т.е. публикация из КОРНЯ workspace, как было до Фазы 3 параллельных проектов).
+# Раньше и авто-публикация, и ручной publish_site считали слаг от разных
+# заголовков → у одного контента появлялось два адреса («будто новый сайт
+# каждый раз»). Теперь главный сайт живёт по ОДНОМУ адресу для этого случая.
 _MAIN_SLUG = "site"
 
 
@@ -56,16 +57,31 @@ def main_slug() -> str:
     return _MAIN_SLUG
 
 
+def slug_for_current_project() -> str:
+    """Слаг публикации для ТЕКУЩЕГО workspace-скоупа (BOS §10, Фаза 3 параллельных
+    проектов). Каждый проект получил СВОЮ подпапку workspace/{workspace_dir}/ —
+    у каждого должен быть и свой адрес сайта, иначе публикация из проекта B
+    перезаписывает запись slug="site" проекта A в sites.json, а раздача (server.py
+    _serve_site_file) резолвит файлы БЕЗ project-скоупа и ищет несуществующую
+    workspace/site/ в корне тенанта — 404 независимо от того, чей это сайт
+    (реальный кейс: 2 параллельных проекта, оба «опубликованы» на /site/{tid}/site,
+    страница не открывалась ни для одного). project_dir="" (легаси/корень) —
+    поведение не меняется, как и было."""
+    from src.office import workspace
+    pd = workspace.get_project_dir()
+    return pd or _MAIN_SLUG
+
+
 def save(title: str, html: str, slug: str = "") -> dict:
-    from src.office import projects
+    from src.office import workspace
     sites = _all()
     slug = slug or make_slug(title)
     now = time.time()
     existing = sites.get(slug)
-    proj = projects.active()
     site = {"slug": slug, "title": (title or "").strip(), "html": html,
             "created_ts": existing["created_ts"] if existing else now, "updated_ts": now,
-            "project": (existing or {}).get("project") or (proj["id"] if proj else "")}
+            "project_dir": workspace.get_project_dir(),
+            "project": (existing or {}).get("project") or _current_project_id()}
     sites[slug] = site
     ctx.write_json(_FILE, sites)
     return site
@@ -79,8 +95,13 @@ def save_dir(title: str, root: str, slug: str = "", note: str = "") -> dict:
 
     `note` — краткое «что изменилось» в этой правке. Копится в журнал ревизий,
     чтобы каждая публикация была понятной правкой, а не «новым сайтом».
+
+    `project_dir` фиксируется ТЕКУЩИМ workspace-скоупом (`workspace.get_project_dir()`
+    на момент вызова, не `projects.active()` — «самый старый активный проект» может
+    быть НЕ тем, что реально сейчас публикует при нескольких параллельных проектах)
+    — server.py использует его, чтобы раздавать файлы из ПРАВИЛЬНОЙ папки проекта.
     """
-    from src.office import projects
+    from src.office import workspace
     sites = _all()
     slug = slug or make_slug(title)
     now = time.time()
@@ -90,14 +111,29 @@ def save_dir(title: str, root: str, slug: str = "", note: str = "") -> dict:
     if note:
         changelog.append({"rev": revision, "note": note.strip()[:200], "ts": now})
         changelog = changelog[-30:]
-    proj = projects.active()
     site = {"slug": slug, "title": (title or "").strip(), "root": (root or "").strip("/"),
             "created_ts": existing["created_ts"] if existing else now, "updated_ts": now,
             "revision": revision, "changelog": changelog,
-            "project": (existing or {}).get("project") or (proj["id"] if proj else "")}
+            "project_dir": workspace.get_project_dir(),
+            "project": (existing or {}).get("project") or _current_project_id()}
     sites[slug] = site
     ctx.write_json(_FILE, sites)
     return site
+
+
+def _current_project_id() -> str:
+    """id проекта, которому принадлежит ТЕКУЩИЙ workspace-скоуп — по обратному
+    поиску workspace_dir в реестре проектов, а не projects.active() («самый
+    старый активный»), которая может указать на ДРУГОЙ параллельный проект."""
+    from src.office import workspace, projects
+    pd = workspace.get_project_dir()
+    if not pd:
+        p = projects.active()
+        return p["id"] if p else ""
+    for p in projects.all_projects():
+        if p.get("workspace_dir") == pd:
+            return p["id"]
+    return ""
 
 
 def get(slug: str) -> dict | None:

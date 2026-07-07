@@ -127,14 +127,17 @@ def test_style_line_self_heal_idempotent():
 
 
 def test_task_context_contains_stack_hint_for_designer():
+    """Подсказка про стек есть у designer/developer (текст зависит от
+    site_builder.build_allowed() — сборка вкл/выкл — но она всегда присутствует)
+    и отсутствует у marketer."""
     ctx.set_tenant("stack_hint_unit")
     from src.saas import context
     context.write_json("brief.json", {"niche": "кухни", "goal": "сайт", "audience": "семьи"})
     from src.office import prompt_builder
     tc = prompt_builder.task_context("designer", "сделай сайт")
-    assert "системным стеком платформы" in tc
+    assert "use_skill" in tc and ("системным стеком" in tc or "сборка" in tc.lower())
     tc_marketer = prompt_builder.task_context("marketer", "напиши оффер")
-    assert "системным стеком платформы" not in tc_marketer
+    assert "React + Vite + Framer Motion" not in tc_marketer
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 

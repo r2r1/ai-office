@@ -966,7 +966,16 @@ _FORBIDDEN_NAMES = {".env", "requirements.txt", "config.py", "bot.py", "main.py"
 
 
 def _serve_site_file(site: dict, subpath: str):
-    """Отдаёт файл из папки опубликованного сайта с корректным content-type."""
+    """Отдаёт файл из папки опубликованного сайта с корректным content-type.
+
+    Резолвит путь ВНУТРИ project_dir этого сайта (Фаза 3, параллельные проекты —
+    у каждого проекта своя подпапка workspace/{project_dir}/). Реальный кейс:
+    без этого HTTP-обработчик резолвил "site/index.html" от КОРНЯ workspace
+    тенанта (там, где такой папки физически нет для проектных сайтов) — публикация
+    отчитывалась об успехе, но публичный адрес отдавал 404 для ЛЮБОГО из
+    параллельных проектов. site["project_dir"] пишет sites.save_dir/save на
+    момент публикации (workspace.get_project_dir() ТОГДА, не сейчас — HTTP-запрос
+    не имеет собственного project-скоупа)."""
     import mimetypes
     import re as _re
     from pathlib import PurePosixPath
@@ -978,12 +987,13 @@ def _serve_site_file(site: dict, subpath: str):
     ext = PurePosixPath(rel).suffix.lower()
     if name in _FORBIDDEN_NAMES or (ext and ext not in _WEB_ASSET_EXT):
         return HTMLResponse("<h1>Не найдено</h1>", status_code=404)
-    full = workspace_module.resolve(rel)
-    if full is None or not full.is_file():
-        idx = (f"{root}/index.html").strip("/") if root else "index.html"
-        full = workspace_module.resolve(idx)
+    with workspace_module.project_scope(site.get("project_dir", "")):
+        full = workspace_module.resolve(rel)
         if full is None or not full.is_file():
-            return HTMLResponse("<h1>Страница не найдена</h1>", status_code=404)
+            idx = (f"{root}/index.html").strip("/") if root else "index.html"
+            full = workspace_module.resolve(idx)
+    if full is None or not full.is_file():
+        return HTMLResponse("<h1>Страница не найдена</h1>", status_code=404)
     ctype = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
     if ctype == "text/html":
         # Внедряем <base>, чтобы относительные пути (css/js/картинки/ссылки между
