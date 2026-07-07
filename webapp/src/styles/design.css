@@ -35,25 +35,27 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #060606;
+  --bg: #050505;
   /* НЕЙТРАЛЬНО-серый градиент фона (без синевы) */
-  --bg-grad: radial-gradient(140% 110% at 50% -10%, #1a1a1a 0%, #101010 38%, #060606 75%);
+  --bg-grad: radial-gradient(140% 110% at 50% -10%, #1a1a1a 0%, #101010 38%, #050505 75%);
   --text: #ffffff;
   --text-dim: #9a9a9a;
   --muted: #6d6d6d;
   --faint: #4a4a4a;
   --whisper: #3a3a3a;
   --ghost: #2a2a2a;
-  /* НЕЙТРАЛЬНО-серое глянцевое стекло (R=G=B, никакого синего), чуть высветлено */
-  --surface: rgba(44,44,44,0.55);
-  --surface-strong: rgba(54,54,54,0.8);
-  --surface-soft: rgba(32,32,32,0.5);
+  /* Ахроматичное стекло: чёрные поверхности разной непрозрачности под
+     backdrop-filter, чтобы ambient blobs просвечивали сквозь карточки —
+     не серая заливка (было #242424 и т.п.), а прозрачный чёрный. */
+  --surface: rgba(18,18,18,0.45);
+  --surface-strong: rgba(20,20,20,0.7);
+  --surface-soft: rgba(10,10,10,0.4);
   --surface-card: #242424;
   --surface-head: #1f1f1f;
-  --hairline: rgba(255,255,255,0.10);
-  --hairline-strong: rgba(255,255,255,0.22);
-  --hairline-soft: rgba(255,255,255,0.05);
-  --inset-hi: rgba(255,255,255,0.12);
+  --hairline: rgba(255,255,255,0.06);
+  --hairline-strong: rgba(255,255,255,0.12);
+  --hairline-soft: rgba(255,255,255,0.04);
+  --inset-hi: rgba(255,255,255,0.05);
   /* глянцевый блик сверху стекла */
   --glass-sheen: rgba(255,255,255,0.09);
   /* тени почти убраны — стекло держится на blur + hairline, а не на тенях */
@@ -166,6 +168,18 @@ body {
 @media (max-width: 720px) {
   .bento-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
   .bento-grid > * { grid-column: auto !important; grid-row: auto !important; }
+}
+
+/* Асимметричный сплит-хиро (лендинг) — на узких экранах превью офиса уходит
+   под текст, а не сжимается вдвое. */
+@media (max-width: 860px) {
+  .hero-grid { grid-template-columns: 1fr !important; }
+}
+
+/* Growth Arc (лендинг, «офис растёт вместе с бизнесом») — асимметричные
+   колонки схлопываются в одну на узких экранах. */
+@media (max-width: 760px) {
+  .growth-grid { grid-template-columns: 1fr !important; }
 }
 
 /* Рендер .md-файлов во вкладке «Код» (offer.md/tech_design.md/strategy.md и т.п. —
