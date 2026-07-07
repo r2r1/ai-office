@@ -10,6 +10,9 @@ cryptography>=42.0.0
 python-multipart>=0.0.9   # приём заявок из нативных HTML-форм (multipart/urlencoded)
 telethon>=1.44.0           # личный Telegram-аккаунт (MTProto) — писать в ЛС лидам,
                            # в отличие от Bot API, которое не может начать диалог первым
+pandas>=2.2.0              # системный инструмент analyst для расчётов по структурированным
+                           # данным (builtin_skills/data_insights.md) — execute_code запускает
+                           # analyst-скрипты через sys.executable (тот же venv, что сервер)
 
 # Опционально: «зрячая» проверка сайта критиком (рендер в headless-браузере).
 # Без него критик работает, но пропускает визуальные проверки (overflow/консоль).

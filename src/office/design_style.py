@@ -73,49 +73,6 @@ def pick_for(niche: str = "", audience: str = "") -> str:
     return DIRECTIONS[int(digest, 16) % len(DIRECTIONS)]
 
 
-# ── Ротация стеков сайта ─────────────────────────────────────────────────────
-# Тот же принцип, что у стиля: без детерминированной подсказки designer/developer
-# ВСЕГДА выбирают один и тот же путь (vanilla HTML/CSS/JS через static_landing_site) —
-# «сайт всегда делается на html» был прод-жалобой владельца. Стек — это «как»,
-# он живёт в скиллах; здесь только детерминированный выбор, КАКОЙ скилл предложить.
-# Названия сформулированы так, чтобы use_skill с этим текстом попадал в keywords
-# нужного скилла (см. tests/test_design_skills.py).
-STACKS: list[str] = [
-    "Vanilla HTML/CSS/JS — премиальный статический сайт, без сборки",
-    "React 18 + framer-motion через esm.sh — живые 3D/motion-эффекты, без сборки",
-    "Vue 3 через esm.sh — реактивные интерактивные секции, без сборки",
-    "Alpine.js + Tailwind CSS по CDN — лёгкая утилитарная вёрстка, без сборки",
-]
-
-
-def pick_stack_for(niche: str = "", audience: str = "") -> str:
-    """Детерминированный выбор стека сайта по нише (соль «stack|» — чтобы выбор
-    НЕ коррелировал со стилем: разные измерения разнообразия)."""
-    key = "stack|" + ((niche or "").strip().lower() or (audience or "").strip().lower() or "default")
-    digest = hashlib.md5(key.encode("utf-8")).hexdigest()
-    return STACKS[int(digest, 16) % len(STACKS)]
-
-
-def has_stack_line(content: str) -> bool:
-    return bool(content) and not content.startswith("Файл не найден") and "Стек:" in content
-
-
-def ensure_stack_line(niche: str = "", audience: str = "") -> str:
-    """Гарантирует строку «Стек: …» в docs/site_content.md (та же механика self-heal,
-    что у ensure_style_line). Идемпотентно; уже существующий сайт из-за смены
-    рекомендации НЕ переписывается — скиллы это прямо запрещают."""
-    from src.office import workspace
-    content = workspace.read_file("docs/site_content.md")
-    if has_stack_line(content):
-        return content
-    stack = pick_stack_for(niche, audience)
-    line = f"Стек: {stack} — рекомендация платформы (можно переопределить осознанно)\n\n"
-    body = "" if not content or content.startswith("Файл не найден") else content
-    new_content = line + body
-    workspace.write_file("docs/site_content.md", new_content)
-    return new_content
-
-
 # ── Генератор шкалы оттенков (design tokens) ────────────────────────────────
 # Портировано из паттерна ui-design-system (claude-skills/product-team): HSV-шкала
 # 50→900 из ОДНОГО акцентного hex, а не ручной подбор hover/active-оттенков моделью
@@ -186,9 +143,9 @@ def has_tokens_block(content: str) -> bool:
 
 def ensure_design_tokens(niche: str = "", audience: str = "") -> str:
     """Гарантирует готовый CSS-блок токенов в docs/site_content.md — та же
-    механика self-heal, что у ensure_style_line/ensure_stack_line. Использует
-    ТО ЖЕ направление, что уже выбрано (или будет выбрано) ensure_style_line —
-    иначе токены и «Стиль: …» могли бы разъехаться по разным направлениям."""
+    механика self-heal, что у ensure_style_line. Использует ТО ЖЕ направление,
+    что уже выбрано (или будет выбрано) ensure_style_line — иначе токены и
+    «Стиль: …» могли бы разъехаться по разным направлениям."""
     from src.office import workspace
     content = workspace.read_file("docs/site_content.md")
     if has_tokens_block(content):

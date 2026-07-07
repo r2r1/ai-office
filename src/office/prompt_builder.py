@@ -179,16 +179,17 @@ def task_context(role: str, task: str, skill: str = "",
     portfolio_section = portfolio_block(role)
     lessons_section = lessons.context_block(role)
     knowledge_section = knowledge.context_block(task, department=department)
-    # Рекомендованный стек сайта — детерминированная ротация по нише (design_style):
-    # без неё designer/developer всегда сваливались в один и тот же vanilla-HTML путь
-    # («сайт всегда делается на html» — жалоба владельца). Формулировка стека
-    # попадает в keywords нужного скилла при use_skill.
+    # Системный стек сайта — ОДИН на всю платформу (React + Vite + Framer Motion,
+    # см. builtin_skills/vite_react_site.md), без ротации по нише: раньше без
+    # детерминированной подсказки designer/developer всегда сваливались в
+    # vanilla-HTML («сайт всегда делается на html» — жалоба владельца), а после
+    # ротации по 4 стекам получили непредсказуемое качество на скилл (Alpine —
+    # порядок CDN-плагинов, esm.sh — рассинхрон importmap). Один стек — предсказуемо.
     stack_line = ""
     if role in ("designer", "developer"):
-        from src.office import design_style
-        stack_line = (f"Рекомендованный стек сайта проекта: {design_style.pick_stack_for(niche, audience)}. "
-                      "Строишь/правишь сайт — вызови use_skill, НАЗВАВ этот стек, и работай по плейбуку. "
-                      "Существующий сайт на другом стеке НЕ переписывай ради смены стека.\n")
+        stack_line = ("Строишь/правишь сайт — вызови use_skill за системным стеком платформы "
+                      "(React + Vite + Framer Motion) и работай по его плейбуку. Существующий "
+                      "сайт на другом стеке НЕ переписывай ради смены стека без явной просьбы клиента.\n")
     return (
         f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
         f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}{stack_line}"

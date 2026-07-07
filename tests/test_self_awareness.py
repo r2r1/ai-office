@@ -27,8 +27,8 @@ def test_describe_includes_all_tool_names():
 
 
 def test_describe_includes_skill_when_given():
-    text = self_awareness.describe("developer", ["write_file"], skill="framer_motion_3d_site")
-    assert "framer_motion_3d_site" in text
+    text = self_awareness.describe("developer", ["write_file"], skill="vite_react_site")
+    assert "vite_react_site" in text
 
 
 def test_describe_omits_skill_line_when_absent():

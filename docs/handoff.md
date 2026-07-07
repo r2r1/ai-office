@@ -1646,6 +1646,53 @@ token '<'`». Между rev 1 (08:51) и rev 6 (09:08) — **17 минут и 5
 
 ---
 
+## 🧹 2026-07-07 — Консолидация скиллов сайта: 4 стека → 1 системный (React+Vite+Framer Motion)
+
+Владелец: «много бесполезных скиллов, в том числе Alpine — нужно выбрать системный
+стек... если пользователь захочет Alpine, он добавит его сам». Раньше на «построй
+сайт» боролись 4 конкурирующих скилла (vanilla HTML, React+framer-motion через
+esm.sh без сборки, Vue 3 через esm.sh, Alpine.js+Tailwind CDN), ротируемых
+детерминированно по нише (`design_style.STACKS`/`pick_stack_for`) — разброс без
+пользы: у каждого стека свой класс багов (Alpine — порядок CDN-плагинов, esm.sh —
+рассинхрон importmap/явный импорт React), непредсказуемое качество для клиента.
+
+- **Удалены** `builtin_skills/alpine_tailwind_landing.md`, `static_landing_site.md`,
+  `vue_landing_site.md`, `framer_motion_3d_site.md` — 4 файла, конкурировавшие за
+  одну и ту же задачу.
+- **`builtin_skills/vite_react_site.md` переписан** в единственный системный скилл
+  сайта: React + Vite (настоящая сборка, `npm install`/`build` делает платформа) +
+  Framer Motion для анимаций/3D (из `framer_motion_3d_site.md` унаследованы приёмы:
+  parallax через `useScroll`/`useTransform`, tilt-карточки через
+  `useMotionValue`/`useSpring`, stagger/whileInView, критерий «не 3D, а плашка» —
+  но БЕЗ esm.sh-специфичных багов типа явного импорта React/`h()`-сигнатуры,
+  которые исчезают вместе со сборкой). Также вобрал найденные в реальном прогоне
+  UX-требования к форме: ошибки валидации только после blur/попытки отправки
+  (не сразу при монтировании), текст кнопки переключается целиком, не задваивается.
+- **`design_style.py`**: удалены `STACKS`/`pick_stack_for`/`has_stack_line`/
+  `ensure_stack_line` — ротация по нише больше не нужна, стек один. `execution.py`
+  (вызов `ensure_stack_line` в auto-heal перед стартом сайта) и `prompt_builder.py`
+  (`task_context` designer/developer) — правлены под статичную подсказку «есть один
+  системный стек» вместо ротируемого «Рекомендованный стек: …».
+- **`landing_conversion.md`**: cross-reference за дизайн-токенами переставлен с
+  удалённого `static_landing_site` на `vite_react_site`.
+- **`data_insights.md`** (analyst): закреплён pandas как системный инструмент для
+  расчётов по структурированным данным — `write_file` + `execute_code` пишет и
+  реально прогоняет Python/pandas-скрипт вместо оценки цифр «на глаз»; добавлен
+  `pandas>=2.2.0` в `requirements.txt` (был в окружении неявно, не зафиксирован).
+  Симметрично уже существующему единственному скиллу ботов (`telegram_bot_aiogram`).
+- **`critic.py`** сохранил детерминированную проверку порядка Alpine-плагинов
+  (добавлена накануне для живого прод-бага) — она общая по HTML, не привязана к
+  файлу скилла, и продолжит ловить Alpine-код, если клиент подключит свой скилл.
+- **Тесты**: `test_run_quality_fixes.py`/`test_design_skills.py` переписаны под
+  один системный скилл (`test_website_query_routes_to_single_system_skill`,
+  `test_removed_competing_stack_skills_not_registered`, `test_no_stack_rotation_
+  helpers_left`); убраны тесты на ротацию/лейблы 4 стеков.
+
+`py_compile` + `tsc --noEmit` чисты, `tests/run_all.py` зелёный (кроме прежнего
+несвязанного `test_knowledge_embeddings.py`). LLM не вызывался ($0).
+
+---
+
 ## 🏗 2026-07-03 — Site Builder: рендер сайтов любого стека (статика → Vite/React)
 
 Раньше публикация хостила папку site/ как статику — рендерились только сайты без

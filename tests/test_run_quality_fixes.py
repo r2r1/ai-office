@@ -6,9 +6,11 @@
 2. Ниша «то же самое, что и на сайте» доходила до всех промптов, критик ВЫДУМАЛ
    бизнес («ремонт квартир» вместо доходной недвижимости) → onboarding подставляет
    title/meta_description из автоскана; summary_line включает их.
-3. Сайт всегда строился на vanilla HTML → детерминированная ротация стеков
-   (design_style.STACKS) + новые скиллы Vue/Alpine; каждый лейбл стека
-   маршрутизируется use_skill в СВОЙ скилл.
+3. Сайт всегда строился на vanilla HTML → сначала лечили ротацией 4 стеков
+   (design_style.STACKS + Vue/Alpine скиллы), потом консолидировали в ОДИН
+   системный стек платформы (React + Vite + Framer Motion, vite_react_site) —
+   ротация без пользы разбрасывала баг-классы по 4 скиллам вместо одного набора
+   проверок; альтернативный стек клиент подключает сам как установленный скилл.
 4. CEO «обновил цель отдела» ×28 при неизменной доске → анти-шум delegate.
 
     python tests/test_run_quality_fixes.py
@@ -80,50 +82,47 @@ def test_summary_line_includes_title_and_description():
     assert "Управление арендой" in line
 
 
-def test_stack_rotation_deterministic_and_diverse():
-    assert design_style.pick_stack_for("кухни") == design_style.pick_stack_for("кухни")
-    picked = {design_style.pick_stack_for(n) for n in
-              ("кухни", "потолки", "стоматология", "автосервис", "доходная недвижимость",
-               "цветы", "фитнес", "юрист")}
-    assert len(picked) >= 2, f"ротация выродилась в один стек: {picked}"
+def test_no_stack_rotation_helpers_left():
+    """Ротация стеков (design_style.STACKS/pick_stack_for/ensure_stack_line)
+    удалена вместе с конкурирующими скиллами — платформа держит ОДИН системный
+    стек, не выбирает между несколькими на каждую нишу."""
+    assert not hasattr(design_style, "STACKS")
+    assert not hasattr(design_style, "pick_stack_for")
+    assert not hasattr(design_style, "ensure_stack_line")
 
 
-def test_each_stack_label_routes_to_own_skill():
-    """use_skill с текстом лейбла стека должен попадать в СВОЙ скилл — иначе
-    ротация бессмысленна (всё снова свалится в static_landing_site)."""
-    expected = {
-        "Vanilla HTML/CSS/JS": "static_landing_site",
-        "React 18 + framer-motion": "framer_motion_3d_site",
-        "Vue 3 через esm.sh": "vue_landing_site",
-        "Alpine.js + Tailwind": "alpine_tailwind_landing",
-    }
-    for label, skill_id in expected.items():
-        stack = next(s for s in design_style.STACKS if s.startswith(label.split()[0]))
-        got = skills.match(f"построить сайт: {stack}", role="designer")
-        assert got is not None, f"нет скилла под {label}"
-        assert got.id == skill_id, f"{label} → {got.id}, ожидался {skill_id}"
+def test_website_query_routes_to_single_system_skill():
+    """Любая формулировка «построить сайт» маршрутизируется в ЕДИНСТВЕННЫЙ
+    системный скилл сайта — не разбегается по 4 конкурирующим стекам."""
+    for need in ("построить сайт с 3D-эффектами", "сделать премиальный лендинг",
+                 "лендинг с анимациями при скролле"):
+        got = skills.match(need, role="designer")
+        assert got is not None, f"нет скилла под {need!r}"
+        assert got.id == "vite_react_site", f"{need!r} → {got.id}, ожидался vite_react_site"
 
 
 def test_new_skills_registered_with_form_requirements():
-    for sid in ("vue_landing_site", "alpine_tailwind_landing", "analytics_counter"):
+    for sid in ("vite_react_site", "analytics_counter"):
         s = skills.get(sid)
         assert s is not None, f"скилл {sid} не зарегистрирован"
-    assert "/api/site-lead" in skills.get("vue_landing_site").playbook
-    assert "/api/site-lead" in skills.get("alpine_tailwind_landing").playbook
+    assert "/api/site-lead" in skills.get("vite_react_site").playbook
     assert "metrika.html" in skills.get("analytics_counter").playbook
 
 
-def test_stack_line_self_heal_idempotent():
-    ctx.set_tenant("stack_line_unit")
+def test_removed_competing_stack_skills_not_registered():
+    """Alpine/Vue/vanilla/esm.sh-3D скиллы убраны — один системный стек сайта."""
+    for sid in ("alpine_tailwind_landing", "static_landing_site",
+                "vue_landing_site", "framer_motion_3d_site"):
+        assert skills.get(sid) is None, f"скилл {sid} должен быть удалён"
+
+
+def test_style_line_self_heal_idempotent():
+    ctx.set_tenant("style_line_unit")
     from src.office import workspace
-    content = design_style.ensure_stack_line("кухни", "семьи")
-    assert "Стек:" in content
-    again = design_style.ensure_stack_line("кухни", "семьи")
-    assert again.count("Стек:") == 1
-    # Стиль и стек сосуществуют в одном файле
-    design_style.ensure_style_line("кухни", "семьи")
-    final = workspace.read_file("docs/site_content.md")
-    assert "Стиль:" in final and "Стек:" in final
+    content = design_style.ensure_style_line("кухни", "семьи")
+    assert "Стиль:" in content
+    again = design_style.ensure_style_line("кухни", "семьи")
+    assert again.count("Стиль:") == 1
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
@@ -133,9 +132,9 @@ def test_task_context_contains_stack_hint_for_designer():
     context.write_json("brief.json", {"niche": "кухни", "goal": "сайт", "audience": "семьи"})
     from src.office import prompt_builder
     tc = prompt_builder.task_context("designer", "сделай сайт")
-    assert "Рекомендованный стек" in tc
+    assert "системным стеком платформы" in tc
     tc_marketer = prompt_builder.task_context("marketer", "напиши оффер")
-    assert "Рекомендованный стек" not in tc_marketer
+    assert "системным стеком платформы" not in tc_marketer
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 

@@ -3,11 +3,12 @@
 
 Эмпирическая находка при разборе прод-лога: `use_skill` designer/developer/
 marketer в реальных прогонах ВСЕГДА матчился на `landing_conversion` (7 из 7
-вызовов в разобранном логе), `static_landing_site` не был выбран НИ РАЗУ —
-значит его инструкции (дизайн-токены, каталог направлений, вариативность
-стека) почти никогда не доходили до модели. Фикс: каталог именованных стилей
-переехал в `landing_conversion.md` (реально читаемый файл) + explicit
-cross-reference на `static_landing_site` за дизайн-токенами/esm.sh-библиотеками.
+вызовов в разобранном логе), скилл за дизайн-токенами не был выбран НИ РАЗУ —
+значит его инструкции (дизайн-токены, каталог направлений) почти никогда не
+доходили до модели. Фикс: каталог именованных стилей переехал в
+`landing_conversion.md` (реально читаемый файл) + explicit cross-reference на
+`vite_react_site` (единственный системный скилл сайта после консолидации
+стеков — Alpine/Vue/vanilla/esm.sh-3D скиллы удалены) за дизайн-токенами.
 
     python tests/test_design_skills.py
 """
@@ -26,8 +27,8 @@ def test_landing_conversion_has_style_catalog():
     # Каталог направлений присутствует (хотя бы несколько именованных стилей).
     for name in ("Терракотовый ремесленный", "Графитовый индастриал", "Свежий фермерский"):
         assert name in s.playbook, f"направление {name!r} пропало из каталога"
-    # Cross-reference на дизайн-токены static_landing_site не потерян при правках.
-    assert "Премиальный сайт (без 3D)" in s.playbook
+    # Cross-reference на дизайн-токены vite_react_site не потерян при правках.
+    assert "React + Vite" in s.playbook and "Framer Motion" in s.playbook
 
 
 def test_realistic_agent_query_matches_landing_conversion():
@@ -39,13 +40,13 @@ def test_realistic_agent_query_matches_landing_conversion():
     assert m is not None and m.id == "landing_conversion"
 
 
-def test_explicit_query_still_reaches_static_landing_site():
+def test_explicit_query_still_reaches_vite_react_site():
     """Явный запрос за дизайн-токенами (как теперь инструктирует landing_conversion
-    в cross-reference) обязан достучаться до static_landing_site — иначе
+    в cross-reference) обязан достучаться до vite_react_site — иначе
     инструкция-ссылка бессмысленна."""
-    need = "премиальный статический сайт дизайн-токены"
+    need = "React Vite сайт дизайн-токены"
     m = skills.match(need, "designer")
-    assert m is not None and m.id == "static_landing_site"
+    assert m is not None and m.id == "vite_react_site"
 
 
 def _run():

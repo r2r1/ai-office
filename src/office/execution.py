@@ -452,10 +452,11 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 from src.office import design_style
                 b = brief.get()
                 design_style.ensure_style_line(b.get("niche", ""), b.get("audience", ""))
-                # Та же механика для стека: без детерминированной подсказки сайт
-                # ВСЕГДА строился на vanilla HTML (жалоба владельца) — теперь ниша
-                # стабильно получает один из 4 стеков (vanilla/React/Vue/Alpine).
-                design_style.ensure_stack_line(b.get("niche", ""), b.get("audience", ""))
+                # Стек больше НЕ ротируется по нише (был выбор из 4 конкурирующих
+                # скиллов — vanilla/React-esm.sh/Vue/Alpine) — платформа держит один
+                # системный стек (vite_react_site), явно называемый в use_skill
+                # designer/developer через ключевые слова скилла; ensure_stack_line
+                # удалён вместе с design_style.STACKS.
                 # Готовая CSS-шкала оттенков акцента (50-900) вместо того, чтобы
                 # designer/developer придумывали hover/active-цвета на глаз —
                 # несогласованно между файлами одной и той же страницы.

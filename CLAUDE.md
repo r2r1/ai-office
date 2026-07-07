@@ -257,18 +257,22 @@ use_skill(...)».
 
 `kind`: `builtin` — работа делается встроенной моделью по плейбуку; `external` —
 плейбук говорит делегировать внешнему исполнителю/репозиторию (задел на External
-Workers из `docs/3.md`). Флагманский скилл — `framer_motion_3d_site`
-(`builtin_skills/framer_motion_3d_site.md`): премиальный 3D-лендинг на React +
-framer-motion через esm.sh, без шага сборки; доступен ролям `designer`/`developer`.
-Добавить новый скилл — положить `.md`-файл в `builtin_skills/` (см. формат в
-`skill_store.py`).
+Workers из `docs/3.md`). Системный скилл сайта — `vite_react_site`
+(`builtin_skills/vite_react_site.md`): React + Vite (настоящая сборка) + Framer
+Motion для анимаций/3D-эффектов, доступен ролям `designer`/`developer`. Раньше
+было 4 конкурирующих скилла под разные стеки (Alpine+Tailwind CDN, Vue/esm.sh,
+vanilla HTML, React/esm.sh без сборки) — консолидированы в один: непредсказуемое
+качество вразнобой по 4 наборам багов не окупало разнообразие. Клиент, которому
+нужен другой стек — подключает его САМ как устанавливаемый скилл (`skill_store.py`),
+это не платформенный дефолт. Добавить новый скилл — положить `.md`-файл в
+`builtin_skills/` (см. формат в `skill_store.py`).
 
-⚠️ **Дизайн-скиллы (`static_landing_site`, `framer_motion_3d_site`) не выбирают
-палитру сами** — это решение маркетинга. Стиль хранится строкой «Стиль: …» в
-`docs/site_content.md`, которую пишет `marketer` (скилл `landing_conversion`,
-общий для `marketer`/`designer`/`developer`); designer/developer читают её или
-спрашивают через `ask_colleague("marketer", ...)`. Без этого агент скатывается в
-один из «AI-дефолтов» палитры (тёмно-синий+cyan/violet «SaaS-гласморфизм» и т.п.) —
+⚠️ **Дизайн-скилл (`vite_react_site`) не выбирает палитру сам** — это решение
+маркетинга. Стиль хранится строкой «Стиль: …» в `docs/site_content.md`, которую
+пишет `marketer` (скилл `landing_conversion`, общий для `marketer`/`designer`/
+`developer`); designer/developer читают её или спрашивают через
+`ask_colleague("marketer", ...)`. Без этого агент скатывается в один из
+«AI-дефолтов» палитры (тёмно-синий+cyan/violet «SaaS-гласморфизм» и т.п.) —
 одинаковый для любой ниши сайт был реальным багом прод-прогонов.
 
 ### 3.7 Ключевые модули `src/`
