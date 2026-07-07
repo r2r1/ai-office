@@ -118,6 +118,31 @@ def build(role: str, task: str, agent_id: str, skill: str = "") -> str:
     return identity + policies + brief_block() + memory_module.context_block() + tools
 
 
+def portfolio_block(role: str) -> str:
+    """Обзор всех проектов компании для ролей, видящих бизнес насквозь (BOS §6.2).
+    Пусто для рядового воркера и когда проектов ещё нет. Сериализатор Project в
+    промпт — ровно один (projects.portfolio), новой сущности мира не вводит.
+    Публичная функция (не приватный хелпер task_context): нужна ТАКЖЕ
+    orchestrator.decide_company/leaders.decide — их промпт строится отдельно
+    (company_system), не через task_context, и раньше портфель CEO/лидерам,
+    принимающим РЕАЛЬНЫЕ решения об отделах, вообще не долетал."""
+    from src.office import org, projects
+    if not org.is_portfolio_role(role):
+        return ""
+    items = projects.portfolio()
+    if not items:
+        return ""
+    lines = "\n".join(
+        f"  • {p['title'] or '(без названия)'} — {p['status']}, папка: {p['workspace_dir'] or '(корень)'}"
+        for p in items
+    )
+    return ("\n=== ПОРТФЕЛЬ ПРОЕКТОВ КОМПАНИИ (ты видишь бизнес целиком) ===\n"
+            f"{lines}\n"
+            "Файлы любого проекта можешь посмотреть через list_project_files/"
+            "read_project_file (только чтение) — решай на срезе всего бизнеса, "
+            "а не одного проекта.\n")
+
+
 def task_context(role: str, task: str, skill: str = "",
                  department: str = "", objective: str = "") -> str:
     """Контекст задачи (user-сообщение воркера): бизнес → цель → этап → отдел →
@@ -147,6 +172,11 @@ def task_context(role: str, task: str, skill: str = "",
             dept_line += f"Цель отдела от CEO: {objective}\n"
     tdd = architect.load()
     tdd_section = f"\n=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ АРХИТЕКТОРА (кратко) ===\n{tdd[:3000]}\n" if tdd else ""
+    # Портфельный слот (BOS §6.2): роли, видящие бизнес насквозь (CEO/лидеры/
+    # надпроектные сервисные), получают обзор ВСЕХ проектов прямо в промпте, а не
+    # только по запросу инструмента — чтобы решения уровня бизнеса принимались на
+    # срезе портфеля, а не одного проекта. Воркеру этого нет: он заперт в своём.
+    portfolio_section = portfolio_block(role)
     lessons_section = lessons.context_block(role)
     knowledge_section = knowledge.context_block(task, department=department)
     # Рекомендованный стек сайта — детерминированная ротация по нише (design_style):
@@ -163,7 +193,9 @@ def task_context(role: str, task: str, skill: str = "",
         f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
         f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}{stack_line}"
         f"Твоя задача от руководителя: {task}\n"
-        f"{tdd_section}{knowledge_section}{lessons_section}\n"
+        f"{tdd_section}{portfolio_section}{knowledge_section}{lessons_section}\n"
+        f"Если workspace непуст — начни с list_files, прежде чем писать новый файл, "
+        f"чтобы не создать дубликат или не потерять чужую работу.\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
         f"или request_research. Если нужен доступ к внешнему сервису — get_connection или ask_user с инструкцией."
     )

@@ -16,6 +16,7 @@ llm.run_agent(tool_handlers={...}).
 from typing import Awaitable, Callable
 
 from src.office import workspace as workspace_module
+from src.office import project_map
 
 
 def build(agent_id: str, role: str,
@@ -40,6 +41,11 @@ def build(agent_id: str, role: str,
             actual_path = res.split(":", 1)[1].strip().split(" (")[0]
             await publish({"type": "file_written", "agent_id": agent_id, "path": actual_path,
                            "text": f"📝 {agent_id}: {res}"})
+            if actual_path != project_map._MAP_FILE:
+                try:
+                    project_map.refresh()
+                except Exception:
+                    pass
         return res
 
     async def _handle_read_file(args: dict) -> str:

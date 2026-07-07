@@ -224,6 +224,27 @@ def tree_text() -> str:
     return "\n".join(f"  {f['path']} ({f['size']} б)" for f in files)
 
 
+# ── Кросс-проектное ЧТЕНИЕ (иерархия доступа лидеров) ─────────────────────────
+# Лидеры/CEO видят бизнес насквозь — читают файлы ЛЮБОГО проекта тенанта, не
+# только своего. Реализовано поверх project_scope() (не сменой мутируемого
+# _project_dir): область гарантированно возвращается по выходу, и здесь есть
+# ТОЛЬКО чтение — записи в чужой проект по построению нет (инвариант единой
+# ответственности за артефакт). project_dir обязан приходить уже
+# провалидированным через projects.valid_workspace_dir (имя из реестра, не
+# сырая строка от модели) — иначе см. риск path-инъекции в PRD иерархии доступа.
+
+def read_file_in(project_dir: str, path: str) -> str:
+    """Читает файл конкретного проекта тенанта (read-only, для лидеров)."""
+    with project_scope(project_dir):
+        return read_file(path)
+
+
+def tree_text_in(project_dir: str) -> str:
+    """Дерево файлов конкретного проекта тенанта (read-only, для лидеров)."""
+    with project_scope(project_dir):
+        return tree_text()
+
+
 def _js_syntax_error(code: str, as_module: bool = True) -> str:
     """
     Проверяет JS через `node --check` (реальный парсер). '' если ок или node недоступен.

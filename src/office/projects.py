@@ -115,6 +115,30 @@ def workspace_dir_of(project_id: str) -> str:
     return (p or {}).get("workspace_dir", "")
 
 
+def valid_workspace_dir(workspace_dir: str) -> str | None:
+    """Валидирует папку проекта, пришедшую ИЗВНЕ (аргумент инструмента от LLM):
+    возвращает её, только если это РЕАЛЬНАЯ workspace_dir существующего проекта
+    тенанта, иначе None. Нужен иерархии доступа (portfolio-инструменты лидеров):
+    read_project_file принимает project_dir как строку от модели, и её нельзя
+    отдавать в workspace.project_scope сырой — иначе модель могла бы передать
+    "../<другой-тенант>" или произвольный путь. Пропускаем только имена из
+    реестра проектов — инъекция пути отсекается по построению."""
+    wd = (workspace_dir or "").strip()
+    if not wd:
+        return None
+    known = {p["workspace_dir"] for p in all_projects() if p.get("workspace_dir")}
+    return wd if wd in known else None
+
+
+def portfolio() -> list[dict]:
+    """Компактный срез всех проектов тенанта для portfolio-инструментов лидеров:
+    только поля, нужные для навигации (id, заголовок, статус, папка). Полные
+    записи (с внутренними полями плана) лидеру в промпт не нужны."""
+    return [{"id": p["id"], "title": p.get("title", ""), "status": p.get("status", ""),
+             "workspace_dir": p.get("workspace_dir", "")}
+            for p in all_projects()]
+
+
 def active() -> dict | None:
     """Первый активный проект — для звонков, которым нужен ОДИН проект "по умолчанию"
     (site/task без явного project_id и т.п.). При нескольких активных это не
@@ -143,13 +167,15 @@ def active_project_count() -> int:
 
 
 def _promote_queued(items: list[dict]) -> None:
-    """Если после закрытия проекта освободился слот — активирует самый старый
-    ПРОЕКТ из очереди (FIFO). Процессы в очередь никогда не попадают (см.
-    create()), поэтому этот проход их не касается."""
+    """Если после закрытия/паузы проекта освободился слот — активирует проект
+    из очереди с наивысшим приоритетом (меньшее число `priority` — раньше в
+    очереди; по умолчанию это порядок создания — FIFO, но владелец может
+    поменять порядок вручную, см. reorder_queue). Процессы в очередь никогда
+    не попадают (см. create()), поэтому этот проход их не касается."""
     limit = get_limit()
     n_active = sum(1 for p in items if p.get("status") == "active" and _is_capped_type(p))
     queued = sorted((p for p in items if p.get("status") == "queued"),
-                     key=lambda p: p.get("created_ts", 0))
+                     key=lambda p: p.get("priority", p.get("created_ts", 0)))
     for p in queued:
         if n_active >= limit:
             break
@@ -219,6 +245,56 @@ def ensure_active() -> dict:
     return create(goal[:80] or "Первый проект", goal)
 
 
+def pause(pid: str) -> dict | None:
+    """Ставит АКТИВНЫЙ проект на паузу — освобождает слот параллельности (кто-то
+    из очереди может его занять), но НЕ закрывает Work (в отличие от close()):
+    просто временно снимает его с назначения новых задач (см. plan.
+    ready_for_department — не отдаёт задачи проектов не в статусе active).
+    Уже начатую задачу это не прерывает на лету — воркер доделывает то, что
+    уже взял, просто дальше не получает ничего нового. None — проект не
+    найден или не был активен (пауза осмысленна только для active)."""
+    d = _data()
+    items = d.get("items", [])
+    target = next((p for p in items if p["id"] == pid), None)
+    if not target or target.get("status") != "active":
+        return None
+    target["status"] = "paused"
+    _promote_queued(items)
+    _save(d)
+    return dict(target)
+
+
+def resume(pid: str) -> dict | None:
+    """Снимает проект с паузы: сразу активный, если есть свободный слот —
+    иначе встаёт в очередь на общих основаниях (та же логика лимита, что и
+    при создании нового проекта)."""
+    d = _data()
+    items = d.get("items", [])
+    target = next((p for p in items if p["id"] == pid), None)
+    if not target or target.get("status") != "paused":
+        return None
+    n_active = sum(1 for p in items if p.get("status") == "active" and _is_capped_type(p))
+    target["status"] = "active" if (not _is_capped_type(target) or n_active < get_limit()) else "queued"
+    _save(d)
+    return dict(target)
+
+
+def reorder_queue(order: list) -> None:
+    """Приоритет очереди — владелец решает, какой из ожидающих проектов важнее,
+    а не FIFO по умолчанию (см. _promote_queued: сортирует по `priority`,
+    меньшее число активируется раньше). `order` — id проектов в НОВОМ порядке
+    (обычно весь список очереди целиком, как его прислал фронт после
+    перетаскивания/стрелок приоритета) — индекс в списке становится
+    приоритетом."""
+    d = _data()
+    items = d.get("items", [])
+    by_id = {p["id"]: p for p in items}
+    for i, pid in enumerate(order):
+        if isinstance(pid, str) and pid in by_id:
+            by_id[pid]["priority"] = i
+    _save(d)
+
+
 def rename(pid: str, title: str) -> None:
     """Переименовывает проект (BOS §3: Gap создаёт Work, а не голую задачу — если под
     разрыв только что был авто-создан пустой активный проект вместо конкретной цели,
@@ -272,7 +348,8 @@ def context_block() -> str:
     queued = queued_list()
     lines = []
     for p in items[-5:]:
-        mark = "🟢" if p.get("status") == "active" else "⏳" if p.get("status") == "queued" else "✅"
+        status = p.get("status")
+        mark = "🟢" if status == "active" else "⏳" if status == "queued" else "⏸" if status == "paused" else "✅"
         left = p.get("left_behind") or {}
         tail = (f" (сдано {left.get('tasks_done', 0)} задач, лидов: {left.get('leads_count', 0)})"
                 if p.get("status") == "done" and left else "")

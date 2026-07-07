@@ -12,10 +12,16 @@ from src.agents import tool_schemas as _ts
 from src.agents import file_tool_handlers
 from src.agents import comms_tool_handlers
 from src.agents import integration_tool_handlers
+from src.agents import portfolio_tool_handlers
 from src.office import models as models_module
 from src.office import office_channel
+from src.office import self_awareness
 from src.office import state
 from src.office import workspace as workspace_module
+
+# Иерархия доступа (BOS §6.2): кто видит портфель целиком — единый источник
+# правды в org.is_portfolio_role (используется и здесь для гейта инструментов,
+# и в prompt_builder для портфельного слота промпта).
 
 # Тексты ролей и командные политики переехали в файлы (Prompt Builder — единая
 # сборка): роли — src/office/builtin_roles/<role>.md (читает roles.py), политики
@@ -111,6 +117,31 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         from src.office import org as org_module
         _ask_tool = _ts.ASK_USER_TOOL if role in org_module.LEAD_ROLES or role == "orchestrator" else _ts.ASK_LEADER_TOOL
 
+        _extra_tools = [_ts.REQUEST_RESEARCH_TOOL, _ask_tool, _ts.ASK_COLLEAGUE_TOOL,
+                        _ts.RAISE_EVENT_TOOL, _ts.DELEGATE_TASK_TOOL, _ts.CREATE_RECURRING_PROCESS_TOOL,
+                        _ts.GET_CONNECTION_TOOL,
+                        _ts.READ_OFFICE_CHAT_TOOL,
+                        _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,
+                        _ts.USE_SKILL_TOOL, _ts.FIND_SKILLS_TOOL, _ts.RECORD_METRIC_TOOL,
+                        _ts.WRITE_FILE_TOOL, _ts.READ_FILE_TOOL, _ts.LIST_FILES_TOOL, _ts.VERIFY_CODE_TOOL,
+                        *_code_exec_tools, _ts.DELETE_FILE_TOOL, _ts.CONFIGURE_BOT_TOOL]
+        # Иерархия доступа (BOS §6.2): кросс-проектное чтение портфеля — лидерам
+        # отделов, CEO и надпроектным сервисным ролям. Воркер заперт в своём проекте.
+        _portfolio_enabled = org_module.is_portfolio_role(role)
+        _portfolio_tools = ([_ts.LIST_PROJECTS_TOOL, _ts.LIST_PROJECT_FILES_TOOL, _ts.READ_PROJECT_FILE_TOOL]
+                            if _portfolio_enabled else [])
+        _portfolio_handlers = (portfolio_tool_handlers.build(agent_id, role, publish, _publish_and_log)
+                               if _portfolio_enabled else {})
+
+        # Platform Self-Knowledge (BOS §6.1), узкая версия: агент видит СВОЮ роль/
+        # скилл/список СВОИХ инструментов, а не исходный код платформы — доступно
+        # всем ролям, риска нет (это отражение собственной конфигурации, не чужого кода).
+        _tool_names = [t["function"]["name"] for t in _extra_tools] + \
+            [t["function"]["name"] for t in _portfolio_tools] + ["describe_self"]
+
+        async def _handle_describe_self(args: dict) -> str:
+            return self_awareness.describe(role, _tool_names, skill=skill)
+
         result = await llm.run_agent(
             system=system,
             user=task,
@@ -122,17 +153,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             on_activity=_touch_liveness,
-            extra_tools=[_ts.REQUEST_RESEARCH_TOOL, _ask_tool, _ts.ASK_COLLEAGUE_TOOL,
-                         _ts.RAISE_EVENT_TOOL, _ts.DELEGATE_TASK_TOOL, _ts.GET_CONNECTION_TOOL,
-                         _ts.READ_OFFICE_CHAT_TOOL,
-                         _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,
-                         _ts.USE_SKILL_TOOL, _ts.FIND_SKILLS_TOOL,
-                         _ts.WRITE_FILE_TOOL, _ts.READ_FILE_TOOL, _ts.LIST_FILES_TOOL, _ts.VERIFY_CODE_TOOL,
-                         *_code_exec_tools, _ts.DELETE_FILE_TOOL, _ts.CONFIGURE_BOT_TOOL],
+            extra_tools=[*_extra_tools, *_portfolio_tools, _ts.DESCRIBE_SELF_TOOL],
             tool_handlers={
                 **_comms_handlers,
                 **_integration_handlers,
                 **_file_handlers,
+                **_portfolio_handlers,
+                "describe_self": _handle_describe_self,
             },
         )
 

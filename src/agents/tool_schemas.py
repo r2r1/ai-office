@@ -152,6 +152,50 @@ READ_OFFICE_CHAT_TOOL = {
     },
 }
 
+# Инструмент: записать числовую метрику бизнеса (появится на бизнес-дашборде)
+RECORD_METRIC_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "record_metric",
+        "description": "Записывает числовое значение метрики бизнеса — единственный способ добавить "
+                       "НОВУЮ метрику на бизнес-дашборд (например курс валюты, остатки склада — что "
+                       "угодно, для чего ты написал скрипт/процесс сбора данных). Вызывай каждый раз, "
+                       "когда получил свежее значение (например из периодического процесса).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_id": {"type": "string", "description": "Короткий id латиницей, snake_case (например usd_rub_rate)"},
+                "value": {"type": "number", "description": "Числовое значение"},
+                "label": {"type": "string", "description": "Человекочитаемое название (например 'Курс USD/RUB')"},
+                "unit": {"type": "string", "description": "Единица (например 'руб', '$', 'шт')"},
+                "source": {"type": "string", "enum": ["факт", "оценка"], "description": "факт — измерено напрямую; оценка — вычислено/приблизительно"},
+            },
+            "required": ["metric_id", "value"],
+        },
+    },
+}
+
+# Инструмент: завести повторяющийся процесс (BOS §5 — Process, не Task с концом)
+CREATE_RECURRING_PROCESS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "create_recurring_process",
+        "description": "Заводит ПОВТОРЯЮЩИЙСЯ процесс — задача будет ставиться заново каждый цикл "
+                       "офиса, как только предыдущая закрыта (например периодический сбор внешних "
+                       "данных и запись через record_metric). Используй, когда клиент/задача просит "
+                       "что-то ОБНОВЛЯТЬ регулярно, а не сделать один раз.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Короткое название процесса"},
+                "role": {"type": "string", "description": "Роль исполнителя (developer, integrator, marketer, analyst, ...)"},
+                "instruction": {"type": "string", "description": "Что делать КАЖДЫЙ раз (конкретно, включая какой metric_id записывать через record_metric, если применимо)"},
+            },
+            "required": ["title", "role", "instruction"],
+        },
+    },
+}
+
 # Инструмент: список доступных интеграций
 LIST_INTEGRATIONS_TOOL = {
     "type": "function",
@@ -280,6 +324,62 @@ LIST_FILES_TOOL = {
         "name": "list_files",
         "description": "Показывает все файлы проекта в рабочей папке (что уже написано).",
         "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+# Platform Self-Knowledge (BOS §6.1) — узкая версия: агент видит СВОЮ роль,
+# скилл и список СВОИХ инструментов (см. office/self_awareness.py), а не
+# исходный код платформы (auth.py, crypto.py и т.д. не раскрываются).
+DESCRIBE_SELF_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "describe_self",
+        "description": ("Показывает твою собственную конфигурацию: роль, активный скилл, "
+                         "список доступных тебе инструментов. НЕ показывает код платформы — "
+                         "только твою текущую настройку."),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+# Иерархия доступа (BOS §6.1): лидеры/CEO видят бизнес НАСКВОЗЬ — читают файлы
+# любого проекта тенанта, не только своего. Read-only; выдаются только лидерским/
+# сервисным ролям (см. agent_factory). Рядовой воркер этих инструментов не видит.
+LIST_PROJECTS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_projects",
+        "description": ("Показывает ВСЕ проекты компании (id, заголовок, статус, папка) — "
+                         "обзор портфеля для решений уровня бизнеса, а не одного проекта."),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+LIST_PROJECT_FILES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_project_files",
+        "description": "Показывает дерево файлов конкретного проекта компании (не только твоего текущего).",
+        "parameters": {
+            "type": "object",
+            "properties": {"project_dir": {"type": "string", "description": "Папка проекта из list_projects (поле workspace_dir)"}},
+            "required": ["project_dir"],
+        },
+    },
+}
+
+READ_PROJECT_FILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_project_file",
+        "description": "Читает файл конкретного проекта компании (read-only, для обзора чужой работы).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_dir": {"type": "string", "description": "Папка проекта из list_projects (поле workspace_dir)"},
+                "path": {"type": "string", "description": "Путь файла внутри этого проекта"},
+            },
+            "required": ["project_dir", "path"],
+        },
     },
 }
 

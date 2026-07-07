@@ -39,6 +39,20 @@ DEPARTMENTS = {
 # Все роли-лидеры отделов
 LEAD_ROLES = {d["lead_role"] for d in DEPARTMENTS.values()}
 
+# Иерархия доступа (BOS §6.2): роли, чья зона ответственности ШИРЕ одного проекта
+# и которые потому видят бизнес насквозь — CEO, лидеры отделов и надпроектные
+# сервисные роли (архитектор проектирует по всем проектам, стратег/ресёрчер держат
+# картину бизнеса целиком, hr нанимает под общую структуру). Рядовой воркер сюда
+# НЕ входит — он заперт в своём project_dir. Единый источник правды и для гейта
+# портфельных инструментов (agent_factory), и для портфельного слота промпта
+# (prompt_builder) — иначе набор инструментов и текст промпта могли бы разойтись.
+_PORTFOLIO_SERVICE_ROLES = {"orchestrator", "architect", "strategist", "researcher", "hr"}
+
+
+def is_portfolio_role(role: str) -> bool:
+    """Видит ли роль портфель целиком (все проекты тенанта на чтение)."""
+    return role in _PORTFOLIO_SERVICE_ROLES or role in LEAD_ROLES
+
 
 def _load() -> dict:
     return ctx.read_json(_FILE, {})
