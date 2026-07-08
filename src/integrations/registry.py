@@ -16,6 +16,9 @@ from src.integrations.gmail             import INTEGRATION as _gmail
 from src.integrations.google_calendar   import INTEGRATION as _gcal
 from src.integrations.payments          import INTEGRATION as _payments
 from src.integrations.deploy            import INTEGRATION as _deploy
+from src.integrations.invoicing         import INTEGRATION as _invoicing
+from src.integrations.ads               import INTEGRATION as _ads
+from src.integrations.crm               import INTEGRATION as _crm
 from src.office import connections
 
 _ALL: dict[str, Integration] = {
@@ -28,6 +31,9 @@ _ALL: dict[str, Integration] = {
     _gcal.name:             _gcal,
     _payments.name:         _payments,
     _deploy.name:           _deploy,
+    _invoicing.name:        _invoicing,
+    _ads.name:              _ads,
+    _crm.name:              _crm,
 }
 
 # Все Google-интеграции держат токен под одним именем "google"
@@ -109,6 +115,9 @@ _SUGGEST_KEYWORDS: dict[str, tuple[str, ...]] = {
     "github":          ("код", "github", "репозитор", "разработ"),
     "payments":        ("оплат", "платеж", "платёж", "счёт", "счет", "payment"),
     "deploy":          ("деплой", "хостинг", "vercel", "netlify", "поднять сайт"),
+    "invoicing":       ("счёт", "счет", "инвойс", "invoice"),
+    "ads":             ("реклама", "таргет", "google ads", "meta ads", "продвижение"),
+    "crm":             ("crm", "pipedrive", "hubspot", "amocrm", "внешняя crm"),
 }
 
 
