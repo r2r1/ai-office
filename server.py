@@ -47,6 +47,7 @@ from src.saas import db as saas_db, store as saas_store, auth as saas_auth
 from src.saas import context as saas_context
 from src.office import philosophy as philosophy_module
 from src.office import constitution as constitution_module
+from src.integrations import payments as payments_module
 from src.office import autonomy as autonomy_module
 from src.office import trust as trust_module
 from src.office import decisions as decisions_module
@@ -160,7 +161,7 @@ async def auth_middleware(request: Request, call_next):
     """Блокирует неавторизованные запросы к /api/* в обычном (не demo) режиме."""
     path = request.url.path
     if not DEMO_MODE and path.startswith("/api/") and path not in _PUBLIC_API \
-            and not path.startswith("/api/lead/"):
+            and not path.startswith("/api/lead/") and not path.startswith("/api/payments/"):
         uid = saas_auth.read_session(request.cookies.get(saas_auth.SESSION_COOKIE, ""))
         if not uid:
             return JSONResponse({"error": "Требуется авторизация", "auth": False}, status_code=401)
@@ -952,6 +953,42 @@ async def serve_site_asset(tenant: str, slug: str, path: str):
     if site is None or site.get("html") is not None:
         return HTMLResponse("<h1>Не найдено</h1>", status_code=404)
     return _serve_site_file(site, path or "index.html")
+
+
+@app.get("/pay/{tenant}/{payment_id}", response_class=HTMLResponse)
+async def serve_test_checkout(tenant: str, payment_id: str):
+    """Публичная TEST-страница оплаты (см. src/integrations/payments.py) — пока нет
+    реального провайдера, ссылка ведёт сюда и позволяет вручную «оплатить» для
+    проверки сценария целиком (форма → лид → ссылка на оплату → статус paid)."""
+    saas_context.set_tenant(tenant)
+    p = payments_module.get(payment_id)
+    if p is None:
+        return HTMLResponse("<h1>Платёж не найден</h1>", status_code=404)
+    paid = p["status"] == "paid"
+    action = ("<p style='color:#1a7a4a;font-weight:600'>✅ Оплачено (тест)</p>" if paid else
+              f"<form method='post' action='/api/payments/{tenant}/{payment_id}/mark-paid'>"
+              f"<button style='padding:12px 20px;font-size:16px;border-radius:8px;border:none;"
+              f"background:#1a7a4a;color:#fff;cursor:pointer'>Оплатить (тест)</button></form>")
+    return HTMLResponse(f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<title>Тестовая оплата</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:420px;margin:60px auto;text-align:center">
+<h2>{p['description']}</h2>
+<p style="font-size:28px;font-weight:700">{p['amount']} {p['currency']}</p>
+<p style="color:#888;font-size:13px">⚠️ Тестовый режим — реальный платёжный провайдер не подключён,
+деньги не списываются.</p>
+{action}
+</body></html>""")
+
+
+@app.post("/api/payments/{tenant}/{payment_id}/mark-paid")
+async def mark_payment_paid(tenant: str, payment_id: str):
+    """Имитация вебхука провайдера — единственный способ перевести тестовый платёж
+    в paid, пока реального провайдера нет (см. payments.py::mark_paid)."""
+    saas_context.set_tenant(tenant)
+    p = payments_module.mark_paid(payment_id)
+    if p is None:
+        return JSONResponse({"error": "платёж не найден или уже обработан"}, status_code=404)
+    return RedirectResponse(url=f"/pay/{tenant}/{payment_id}", status_code=303)
 
 
 # Публично отдаём только веб-ресурсы. Если сайт опубликован из КОРНЯ workspace

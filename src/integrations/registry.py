@@ -14,6 +14,7 @@ from src.integrations.github            import INTEGRATION as _github
 from src.integrations.google_sheets     import INTEGRATION as _gsheets
 from src.integrations.gmail             import INTEGRATION as _gmail
 from src.integrations.google_calendar   import INTEGRATION as _gcal
+from src.integrations.payments          import INTEGRATION as _payments
 from src.office import connections
 
 _ALL: dict[str, Integration] = {
@@ -24,6 +25,7 @@ _ALL: dict[str, Integration] = {
     _gsheets.name:          _gsheets,
     _gmail.name:            _gmail,
     _gcal.name:             _gcal,
+    _payments.name:         _payments,
 }
 
 # Все Google-интеграции держат токен под одним именем "google"
@@ -103,6 +105,7 @@ _SUGGEST_KEYWORDS: dict[str, tuple[str, ...]] = {
     "google_calendar": ("календар", "запись на приём", "встреч", "расписан", "бронир"),
     "gmail":           ("почт", "email", "e-mail", "рассылк", "gmail"),
     "github":          ("код", "github", "репозитор", "разработ"),
+    "payments":        ("оплат", "платеж", "платёж", "счёт", "счет", "payment"),
 }
 
 
