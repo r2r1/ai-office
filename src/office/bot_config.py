@@ -24,6 +24,13 @@ _DEFAULTS = {
     "success_message": "Спасибо! Ваша заявка принята — мы скоро свяжемся с вами. ✅",
     "working_hours": "",         # справочно, показывается в приветствии если задано
     "lead_slug": "telegram-bot", # под каким slug писать лиды (вкладка «Лиды»)
+    # Реальное бронирование (src/office/booking.py) — без этого kind="booking" был
+    # анкетой без проверки занятости (docs/product-capability-gaps.md п.2).
+    "ask_datetime": False,           # True — бот спрашивает дату/время и бронирует слот
+    "slot_duration_min": 60,         # длительность услуги в минутах
+    "business_hours_start": "09:00",
+    "business_hours_end": "18:00",
+    "slot_step_min": 30,
     "webhook_secret": "",        # секрет в URL вебхука
     "bot_username": "",          # @username бота (для ссылок)
     # AI-агент режим: умный бот на базе LLM с контекстом офиса

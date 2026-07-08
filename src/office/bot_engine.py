@@ -13,7 +13,7 @@ import asyncio
 import httpx
 
 from src.saas import context as ctx
-from src.office import bot_config, leads, bus
+from src.office import bot_config, leads, bus, booking
 
 _SESS = "bot_sessions.json"
 _API = "https://api.telegram.org/bot{token}/{method}"
@@ -42,6 +42,12 @@ def _services_keyboard(services: list[str]) -> dict:
 
 
 _REMOVE_KB = {"remove_keyboard": True}
+
+
+def _slot_prompt(cfg: dict) -> str:
+    h1 = cfg.get("business_hours_start") or booking.DEFAULT_HOURS_START
+    h2 = cfg.get("business_hours_end") or booking.DEFAULT_HOURS_END
+    return f"На какую дату и время записать? (например: 15.07 14:00, работаем {h1}-{h2})"
 
 
 def _load_sessions() -> dict:
@@ -92,9 +98,11 @@ async def handle_update(update: dict) -> None:
             sessions[key] = {"step": "service", "service": "", "data": {}, "idx": 0}
             await _send(token, chat_id, greeting, _services_keyboard(services))
         else:
-            # Без услуг — сразу собираем поля
-            sessions[key] = {"step": "collect", "service": "", "data": {}, "idx": 0}
-            await _send(token, chat_id, greeting + f"\n\n{fields[0]}?", _REMOVE_KB)
+            # Без услуг — сразу собираем поля (или дату/время, если включено бронирование)
+            first_step = "slot" if cfg.get("ask_datetime") else "collect"
+            sessions[key] = {"step": first_step, "service": "", "data": {}, "idx": 0}
+            prompt = _slot_prompt(cfg) if first_step == "slot" else f"{fields[0]}?"
+            await _send(token, chat_id, greeting + f"\n\n{prompt}", _REMOVE_KB)
         _save_sessions(sessions)
         return
 
@@ -103,12 +111,45 @@ async def handle_update(update: dict) -> None:
     if step == "service":
         if text in services:
             sess["service"] = text
-            sess["step"] = "collect"
+            next_step = "slot" if cfg.get("ask_datetime") else "collect"
+            sess["step"] = next_step
             sess["idx"] = 0
-            await _send(token, chat_id, f"Отлично, «{text}».\n\n{fields[0]}?", _REMOVE_KB)
+            prompt = _slot_prompt(cfg) if next_step == "slot" else f"{fields[0]}?"
+            await _send(token, chat_id, f"Отлично, «{text}».\n\n{prompt}", _REMOVE_KB)
         else:
             await _send(token, chat_id, "Пожалуйста, выберите услугу кнопкой ниже.",
                         _services_keyboard(services))
+        sessions[key] = sess
+        _save_sessions(sessions)
+        return
+
+    if step == "slot":
+        duration = int(cfg.get("slot_duration_min") or booking.DEFAULT_SLOT_MIN)
+        parsed = booking.parse_datetime(text)
+        if parsed is None:
+            await _send(token, chat_id, "Не понял дату/время. Формат: 15.07 14:00 — "
+                                        "попробуйте ещё раз.")
+            return
+        date_iso, time_iso = parsed
+        if booking.is_free(date_iso, time_iso, duration):
+            sess["slot"] = {"date": date_iso, "time": time_iso, "duration_min": duration}
+            sess["step"] = "collect"
+            sess["idx"] = 0
+            await _send(token, chat_id, f"Записал на {date_iso} {time_iso}.\n\n{fields[0]}?", _REMOVE_KB)
+        else:
+            alts = booking.suggest_alternatives(
+                date_iso, duration,
+                hours_start=cfg.get("business_hours_start") or booking.DEFAULT_HOURS_START,
+                hours_end=cfg.get("business_hours_end") or booking.DEFAULT_HOURS_END,
+                step_min=int(cfg.get("slot_step_min") or booking.DEFAULT_STEP_MIN),
+            )
+            if alts:
+                opts = "\n".join(f"• {a}" for a in alts)
+                await _send(token, chat_id, f"Это время уже занято. Ближайшие свободные:\n{opts}\n\n"
+                                            "Напишите одно из них (или своё, например 15.07 14:00).")
+            else:
+                await _send(token, chat_id, "На эту неделю свободных мест не нашлось, попробуйте "
+                                            "другую дату.")
         sessions[key] = sess
         _save_sessions(sessions)
         return
@@ -227,9 +268,25 @@ async def _finalize(token: str, chat_id, cfg: dict, sess: dict) -> None:
     contact = data.get("Телефон") or data.get("Phone") or data.get("Контакт") or ""
     extras = [f"{k}: {v}" for k, v in data.items() if k not in ("Имя", "Name", "Телефон", "Phone")]
     parts = ([f"Услуга: {service}"] if service else []) + extras
+
+    slot = sess.get("slot")
+    booked = None
+    if slot:
+        # Между выбором слота и сбором остальных полей время могло уйти к другому
+        # клиенту — перепроверяем прямо перед созданием записи, а не доверяем
+        # выбору, сделанному минуту назад.
+        booked = booking.book(slot["date"], slot["time"], name, contact, service,
+                              duration_min=slot.get("duration_min", booking.DEFAULT_SLOT_MIN))
+        if booked is None:
+            await _send(token, chat_id, "К сожалению, это время только что заняли. "
+                                        "Напишите /start, чтобы выбрать другое.")
+            return
+        parts.append(f"Запись: {slot['date']} {slot['time']}")
     message = "; ".join(parts)
 
     lead = leads.add(cfg.get("lead_slug", "telegram-bot"), name, contact, message)
+    if booked:
+        booking.attach_lead(booked["id"], lead["id"])
     await _send(token, chat_id, cfg.get("success_message") or "Спасибо! Заявка принята. ✅")
 
     # Уведомляем интерфейс офиса (вкладка «Лиды» + тост)
