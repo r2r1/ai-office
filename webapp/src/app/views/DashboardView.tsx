@@ -48,9 +48,21 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
     { label: "Расход",   value: `$${state.cost.toFixed(4)}` },
   ]
 
-  async function handleInitiative(iid: string, action: "accept" | "reject") {
+  async function handleInitiative(iid: string, action: "accept" | "reject", override = false) {
     const ini = initiatives.find(i => i.id === iid)
-    const r = await api.post(`/api/initiative/${iid}/${action}`, {})
+    const r = await api.post(`/api/initiative/${iid}/${action}`, action === "accept" ? { override } : {})
+    // Гейт вердикта (docs/product-capability-gaps.md п.6): исследование сказало
+    // "не стоит" — сервер отказал без override. Не тихо проглатываем, а явно
+    // переспрашиваем: владелец видит рекомендацию и решает сам ещё раз.
+    if (r?.error === "initiative_blocked") {
+      const confirmed = window.confirm(
+        `⚠️ Офис рекомендует НЕ делать эту инициативу.\n\n${r.research || r.message}\n\nВсё равно принять?`
+      )
+      if (confirmed) {
+        await handleInitiative(iid, "accept", true)
+      }
+      return
+    }
     setInitiatives(prev => prev.filter(i => i.id !== iid))
     if (action === "accept" && r?.project_id && ini) {
       setAcceptedResult({ title: ini.title, projectId: r.project_id, projectTitle: r.project_title || ini.title })
@@ -133,6 +145,11 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 500, marginBottom: 5 }}>{ini.title}</div>
                       <div style={{ fontSize: 11.5, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 5 }}>{ini.rationale}</div>
+                      {ini.recommendation === "no-go" && (
+                        <div style={{ fontSize: 11, color: "var(--danger, #e05a5a)", marginBottom: 5 }}>
+                          ⚠️ Офис рекомендует не делать
+                        </div>
+                      )}
                       {ini.expected_outcome && <Pill accent>📈 {ini.expected_outcome}</Pill>}
                       {ini.estimated_effort && <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: 8 }}>Усилий: {ini.estimated_effort}</span>}
                     </div>

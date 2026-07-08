@@ -18,6 +18,18 @@ _MAX = 50
 _EXPIRE_SECS = 7 * 24 * 3600  # 7 дней
 
 
+class InitiativeBlocked(Exception):
+    """accept() отказал без override=True — исследование дало явный отрицательный
+    вердикт (docs/product-capability-gaps.md п.6). Раньше research был только
+    текстом ДЛЯ ЧТЕНИЯ: владелец мог принять инициативу вопреки любому выводу
+    анализа, потому что технически ничего этому не мешало — «AI Office проверит
+    жизнеспособность» не блокировало запуск, даже когда сам ответ был «не стоит»."""
+    def __init__(self, recommendation: str, research: str):
+        self.recommendation = recommendation
+        self.research = research
+        super().__init__(f"initiative blocked: recommendation={recommendation}")
+
+
 def _load() -> list:
     return ctx.read_json("initiatives", None) or []
 
@@ -54,6 +66,7 @@ def add(
         "tasks": tasks or [],
         "source": source,
         "research": "",
+        "recommendation": "unclear",  # go | no-go | unclear — см. set_research()
         "status": "researching" if needs_research else "pending",
         "expires_at": time.time() + _EXPIRE_SECS,
     })
@@ -75,13 +88,20 @@ def get(iid: str) -> dict | None:
     return None
 
 
-def set_research(iid: str, research: str, tasks: list | None = None) -> dict | None:
+def set_research(iid: str, research: str, tasks: list | None = None,
+                  recommendation: str = "unclear") -> dict | None:
     """Фиксирует результат глубокого исследования и переводит инициативу в
-    pending — только теперь она показывается пользователю на решение."""
+    pending — только теперь она показывается пользователю на решение.
+    `recommendation` ∈ go | no-go | unclear (см. initiative_research._parse_verdict —
+    детерминированный разбор явного маркера "ВЕРДИКТ: ..." в конце текста
+    исследования, не доверие свободной форме целиком)."""
+    if recommendation not in ("go", "no-go", "unclear"):
+        recommendation = "unclear"
     items = _load()
     for item in items:
         if item["id"] == iid:
             item["research"] = (research or "").strip()[:3000]
+            item["recommendation"] = recommendation
             if tasks:
                 item["tasks"] = tasks
             item["status"] = "pending"
@@ -108,12 +128,18 @@ def active() -> list:
     return [i for i in items if i["status"] in ("researching", "pending")]
 
 
-def accept(iid: str) -> list:
-    """Принять инициативу. Возвращает список задач для добавления в план."""
+def accept(iid: str, override: bool = False) -> list:
+    """Принять инициативу. Возвращает список задач для добавления в план.
+    Бросает InitiativeBlocked, если исследование дало вердикт "no-go" и
+    override не передан явно — «последнее слово у владельца» (BOS §2) остаётся
+    в силе, но требует ОСОЗНАННОГО подтверждения вопреки рекомендации, а не
+    тихого прохождения мимо неё."""
     items = _load()
     tasks = []
     for item in items:
         if item["id"] == iid:
+            if item.get("recommendation") == "no-go" and not override:
+                raise InitiativeBlocked(item["recommendation"], item.get("research", ""))
             item["status"] = "accepted"
             tasks = item.get("tasks") or []
             break

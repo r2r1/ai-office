@@ -2265,10 +2265,31 @@ async def accept_initiative(iid: str, request: Request):
     (status="queued") и активируется сам, когда что-то закроется."""
     from src.office import projects as projects_module
     initiative = next((i for i in initiatives_module.pending() if i["id"] == iid), None)
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    override = bool(body.get("override"))
+
+    # Явный гейт вердикта (docs/product-capability-gaps.md п.6): если анализ
+    # сказал "не стоит", принять инициативу всё ещё можно (последнее слово у
+    # владельца, BOS §2), но НЕ тихо мимо рекомендации — фронт должен явно
+    # переспросить и прислать override=true вторым запросом.
+    try:
+        tasks = initiatives_module.accept(iid, override=override)
+    except initiatives_module.InitiativeBlocked as e:
+        return JSONResponse({
+            "error": "initiative_blocked",
+            "recommendation": e.recommendation,
+            "research": e.research,
+            "message": "Исследование рекомендует НЕ делать эту инициативу. "
+                       "Чтобы принять вопреки рекомендации, повторите запрос с override=true.",
+        }, status_code=409)
+
     proj = projects_module.create((initiative or {}).get("title", ""),
                                    (initiative or {}).get("rationale", ""))
-
-    tasks = initiatives_module.accept(iid)
     added = 0
     # Двухпроходное построение графа: LLM отдаёт зависимости через СВОИ
     # временные id (t1, t2, ...) — реальные id задача получает только внутри
