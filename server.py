@@ -48,6 +48,7 @@ from src.saas import context as saas_context
 from src.office import philosophy as philosophy_module
 from src.office import constitution as constitution_module
 from src.integrations import payments as payments_module
+from src.office import domains as domains_module
 from src.office import autonomy as autonomy_module
 from src.office import trust as trust_module
 from src.office import decisions as decisions_module
@@ -165,6 +166,36 @@ async def auth_middleware(request: Request, call_next):
         uid = saas_auth.read_session(request.cookies.get(saas_auth.SESSION_COOKIE, ""))
         if not uid:
             return JSONResponse({"error": "Требуется авторизация", "auth": False}, status_code=401)
+    return await call_next(request)
+
+
+# Пути, которые кастомный домен НИКОГДА не должен перехватывать — иначе клиент,
+# указавший DNS на платформу, случайно закрыл бы себе доступ к API/SPA/другим
+# опубликованным сайтам через /site/*.
+_RESERVED_PREFIXES = ("/api/", "/auth/", "/webapp/", "/static/", "/site/", "/pay/")
+
+
+@app.middleware("http")
+async def custom_domain_middleware(request: Request, call_next):
+    """Отдаёт опубликованный сайт напрямую на кастомном домене клиента
+    (docs/product-capability-gaps.md п.5) — outermost middleware (регистрируется
+    последним = выполняется первым): для распознанного домена запрос вообще не
+    доходит до tenant_middleware/auth_middleware/роутов SPA."""
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    path = request.url.path
+    if host and not path.startswith(_RESERVED_PREFIXES):
+        mapped = domains_module.resolve(host)
+        if mapped is not None:
+            saas_context.set_tenant(mapped["tenant"])
+            site = sites_module.get(mapped["slug"])
+            if site is not None:
+                domains_module.mark_verified(host)
+                subpath = path.lstrip("/") or "index.html"
+                if site.get("html") is not None:
+                    if subpath in ("", "index.html"):
+                        return HTMLResponse(site["html"])
+                    return HTMLResponse("<h1>Не найдено</h1>", status_code=404)
+                return _serve_site_file(site, subpath)
     return await call_next(request)
 
 
@@ -1359,11 +1390,41 @@ async def apinet_balance():
 async def get_sites():
     """Список опубликованных лендингов (с числом заявок)."""
     tid = saas_context.get_tenant()
+    domains_by_slug: dict[str, list[str]] = {}
+    for d in domains_module.for_tenant(tid):
+        domains_by_slug.setdefault(d["slug"], []).append(d["domain"])
     out = []
     for s in sites_module.all_sites():
         out.append({**s, "leads": len(leads_module.for_site(s["slug"])),
-                    "url": f"/site/{tid}/{s['slug']}"})
+                    "url": f"/site/{tid}/{s['slug']}",
+                    "domains": domains_by_slug.get(s["slug"], [])})
     return {"sites": out}
+
+
+@app.post("/api/sites/{slug}/domain")
+async def add_site_domain(slug: str, request: Request):
+    """Привязать кастомный домен к опубликованному сайту (docs/product-capability-gaps.md
+    п.5). Клиент сам направляет DNS домена (A/CNAME) на платформу — это вне нашего
+    контроля; здесь только серверное сопоставление Host → тенант/сайт."""
+    tid = saas_context.get_tenant()
+    if sites_module.get(slug) is None:
+        return JSONResponse({"error": "сайт с таким адресом не найден"}, status_code=404)
+    body = await request.json()
+    domain = (body.get("domain") or "").strip()
+    result = domains_module.register(domain, tid, slug)
+    if "error" in result:
+        return JSONResponse(result, status_code=400)
+    return {"domain": result, "instructions": (
+        f"Направьте DNS домена {result['domain']} на этот сервер (A-запись на IP сервера "
+        f"или CNAME, в зависимости от вашего DNS-провайдера) — платформа не регистрирует "
+        f"домены и не управляет DNS сама.")}
+
+
+@app.delete("/api/sites/{slug}/domain/{domain}")
+async def remove_site_domain(slug: str, domain: str):
+    tid = saas_context.get_tenant()
+    ok = domains_module.unregister(domain, tid)
+    return {"ok": ok}
 
 
 @app.get("/api/leads")
