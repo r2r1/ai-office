@@ -88,7 +88,7 @@ def _is_bot_task(artifacts: list[str]) -> bool:
 
 def check(task_title: str, role: str, result: str,
           done_criterion: str = "", started_ts: float = 0.0,
-          artifacts: list[str] | None = None) -> dict:
+          artifacts: list[str] | None = None, project_id: str = "") -> dict:
     """
     Приёмка сдачи задачи. Возвращает:
       {"passed": bool, "problems": [...], "levels": {level: "ok"|"fail"|"skip"}}
@@ -118,9 +118,9 @@ def check(task_title: str, role: str, result: str,
     # functional), т.к. подтверждение владельца в v1 опционально (BOS §8 L1). Сигналит
     # работу вне согласованного контракта — задачи, добавленные после спецификации.
     from src.office import specification
-    spec_status = specification.status()
+    spec_status = specification.status(project_id)
     if spec_status and (done_criterion or "").strip():
-        if specification.covers(done_criterion):
+        if specification.covers(done_criterion, project_id):
             levels["specification"] = "ok"
         else:
             levels["specification"] = "warn"

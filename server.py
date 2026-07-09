@@ -2132,18 +2132,29 @@ async def get_project_detail(project_id: str):
 
 
 @app.get("/api/specification")
-async def get_specification():
-    """Спецификация работы — контракт приёмки (Acceptance L1)."""
+async def get_specification(project_id: str = ""):
+    """Спецификация работы — контракт приёмки (Acceptance L1). per-project
+    (см. specification.py): без project_id — контракт активного проекта по
+    умолчанию, как раньше; с project_id — контракт конкретного параллельного Work."""
     from src.office import specification as spec_module
-    return spec_module.get() or {"status": "none"}
+    return spec_module.get(project_id) or {"status": "none"}
+
+
+@app.get("/api/specifications")
+async def get_all_specifications():
+    """Контракты приёмки ВСЕХ проектов тенанта разом — вкладка «Проект» может
+    показать спецификацию каждого параллельного Work, не только активного."""
+    from src.office import specification as spec_module
+    return {"items": spec_module.all_specs()}
 
 
 @app.post("/api/specification/confirm")
 async def confirm_specification(request: Request):
-    """Владелец подтверждает спецификацию. Body: {note?}."""
+    """Владелец подтверждает спецификацию. Body: {note?, project_id?}."""
     from src.office import specification as spec_module
     data = await request.json() if (await request.body()) else {}
-    return {"ok": True, "specification": spec_module.confirm(data.get("note", ""))}
+    spec = spec_module.confirm(data.get("note", ""), data.get("project_id", ""))
+    return {"ok": True, "specification": spec}
 
 
 @app.post("/api/task/{task_id}/unblock")
@@ -2327,6 +2338,13 @@ async def accept_initiative(iid: str, request: Request):
             plan_module.set_deps(real_id, resolved)
 
     proj_after = projects_module.get(proj["id"]) if added else proj
+
+    # Своя спецификация для ЭТОГО проекта сразу, не когда-нибудь позже в цикле
+    # BOOTSTRAP (тот вызов покрывает только проект, созданный из брифа при
+    # старте офиса) — без этого 100% задач второго параллельного Work сверялись
+    # бы с чужим контрактом (реальный кейс, см. specification.py докстринг).
+    from src.office import specification as spec_module
+    spec_module.ensure(proj["id"])
 
     # Раньше принятие инициативы не оставляло НИ ОДНОГО следа в ленте событий —
     # новый проект с командой и бюджетом появлялся молча, владелец узнавал о нём

@@ -341,9 +341,11 @@ async def _run_office(tid: str) -> None:
 
     # Specification (Acceptance L1): контракт приёмки из брифа + плана — что делаем
     # и когда это успех. Не блокирует старт; владелец может подтвердить через API/UI.
+    # per-project (см. specification.py докстринг) — этот вызов покрывает проект,
+    # с которым бутстрап работает СЕЙЧАС (proj из projects.ensure_active() выше).
     from src.office import specification
-    if not specification.exists():
-        spec = specification.ensure()
+    if not specification.exists(proj["id"]):
+        spec = specification.ensure(proj["id"])
         if spec.get("functions"):
             await publish({"type": "system",
                            "text": f"📜 Спецификация сформирована: {len(spec['functions'])} "
