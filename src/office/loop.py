@@ -411,9 +411,18 @@ async def _run_office(tid: str) -> None:
         # тот же приём, что gap.replan(): новая задача только когда предыдущая
         # закрыта, иначе один процесс спамил бы задачу каждый цикл.
         from src.office import processes as processes_mod
-        proc_tasks = processes_mod.tick()
-        for pt in proc_tasks:
+        tick_result = processes_mod.tick()
+        for pt in tick_result["created"]:
             await publish({"type": "system", "text": f"🔄 Процесс поставил задачу: {pt['title'][:70]}"})
+        # Реальный кейс (лог прогона 2026-07-09): процесс 92 цикла подряд бился в
+        # один и тот же блокер вхолостую — теперь сам встаёт на паузу вместо
+        # бесконечного повтора (processes.tick, BLOCKER_PAUSE_THRESHOLD).
+        for pp in tick_result["paused"]:
+            await publish({"type": "system",
+                           "text": f"⏸ Процесс «{pp['title'][:60]}» поставлен на паузу — "
+                                   f"{processes_mod.BLOCKER_PAUSE_THRESHOLD} раза подряд упёрся в один "
+                                   f"и тот же блокер. Посмотрите «Работа → Процессы» и снимите паузу, "
+                                   f"когда причина устранена."})
 
         # Бюджетный лимит из Конституции: превышен общий лимит расхода → авто-пауза.
         if costs.over_limit():

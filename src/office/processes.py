@@ -131,41 +131,64 @@ def delete(pid: str) -> bool:
     return changed
 
 
-def _mark_run(pid: str) -> None:
-    items = _all()
-    for p in items:
-        if p["id"] == pid:
-            p["last_run_ts"] = time.time()
-            p["run_count"] = p.get("run_count", 0) + 1
-            break
-    _save(items)
+BLOCKER_PAUSE_THRESHOLD = 3
 
 
-def tick() -> list[dict]:
+def tick() -> dict:
     """Раз в цикл офиса: для каждого активного процесса, чья предыдущая задача
     уже закрыта, создаёт новую. Дедуп по requested_by=`process:<id>` смотрит
     только на pending/in_progress — тот же приём, что gap.replan() (см.
     src/office/gap.py): иначе процесс либо не запустился бы повторно после
-    первой задачи, либо заспамил бы доску одинаковыми задачами каждый цикл."""
-    from src.office import plan
-    created = []
+    первой задачи, либо заспамил бы доску одинаковыми задачами каждый цикл.
+
+    Реальный кейс из лога прогона 2026-07-09: процесс лидогенерации 92 цикла
+    подряд натыкался на ОДИН И ТОТ ЖЕ блокер ("нет доступа к LinkedIn-лидам") —
+    дедуп на уровне Event Layer поднимал сигнал CEO лишь однажды (как задумано),
+    но САМ процесс продолжал молотить вхолостую каждый цикл, каждый раз заново
+    оплачивая LLM-вызов ради того же тупика. Теперь: если предыдущий запуск
+    процесса закончился блокером той же роли — счётчик consecutive_blockers
+    растёт; после BLOCKER_PAUSE_THRESHOLD подряд процесс сам ставится на паузу
+    (не удаляется — владелец видит его и решает, что делать) вместо того, чтобы
+    тратить бюджет на заведомо повторяющийся отказ.
+
+    Возвращает {"created": [задачи], "paused": [процессы, которые встали на
+    паузу в этот тик]} — раньше возвращался голый список created."""
+    from src.office import plan, events as events_mod
     active_tags = {t.get("requested_by", "") for t in plan.all_tasks()
                    if t.get("status") in ("pending", "in_progress")}
-    for p in _all():
+    recent_events = events_mod.recent(50)
+    items = _all()
+    created = []
+    paused = []
+    for p in items:
         if p.get("status") != "active":
             continue
         tag = f"process:{p['id']}"
         if tag in active_tags:
             continue
+
+        last_run = p.get("last_run_ts") or 0
+        had_blocker = last_run and any(
+            e.get("kind") == "blocker" and e.get("from_role") == p.get("role")
+            and e.get("ts", 0) >= last_run for e in recent_events)
+        p["consecutive_blockers"] = (p.get("consecutive_blockers", 0) + 1) if had_blocker else 0
+
+        if p["consecutive_blockers"] >= BLOCKER_PAUSE_THRESHOLD:
+            p["status"] = "paused"
+            paused.append(dict(p))
+            continue
+
         title = p.get("instruction") or p["title"]
         task = plan.add_task(
             title, p.get("role", ""),
             f"Повторяющаяся задача процесса «{p['title']}» выполнена",
             requested_by=tag, project_id=p.get("project_id", ""),
         )
-        _mark_run(p["id"])
+        p["last_run_ts"] = time.time()
+        p["run_count"] = p.get("run_count", 0) + 1
         created.append(task)
-    return created
+    _save(items)
+    return {"created": created, "paused": paused}
 
 
 def reset() -> None:
