@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, SubTabs, Card, SectionLabel, Pill, MercuryBar } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, Card, SectionLabel, Pill, MercuryBar, ShowMore } from "./ui"
 import { BusinessDashboard } from "./BusinessDashboard"
 import type { Section } from "../types"
 
@@ -84,20 +84,21 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
           <div style={{ marginBottom: 22 }}>
             <SectionLabel>🎯 До цели</SectionLabel>
             <div style={{ display: "grid", gap: 10 }}>
-              {gaps.map((g: any, i: number) => (
-                <Card key={i} style={{
-                  borderLeft: `3px solid ${g.met ? "var(--success)" : "var(--mercury-a)"}`,
-                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
-                }}>
-                  <div style={{ fontSize: 13, color: "var(--text)" }}>{g.title}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                      {g.current} <span style={{ color: "var(--faint)" }}>из</span> {g.desired}
-                    </span>
-                    {g.met ? <Pill color="var(--success)">✓ достигнута</Pill> : <Pill accent>разрыв {g.gap}</Pill>}
-                  </div>
-                </Card>
-              ))}
+              <ShowMore items={gaps} initial={3}
+                render={(g: any, i: number) => (
+                  <Card key={i} style={{
+                    borderLeft: `3px solid ${g.met ? "var(--success)" : "var(--mercury-a)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+                  }}>
+                    <div style={{ fontSize: 13, color: "var(--text)" }}>{g.title}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>
+                        {g.current} <span style={{ color: "var(--faint)" }}>из</span> {g.desired}
+                      </span>
+                      {g.met ? <Pill color="var(--success)">✓ достигнута</Pill> : <Pill accent>разрыв {g.gap}</Pill>}
+                    </div>
+                  </Card>
+                )} />
             </div>
           </div>
         )}
@@ -139,7 +140,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
           <>
             <SectionLabel>💡 Инициативы CEO · {initiatives.length}</SectionLabel>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-              {initiatives.map((ini: any) => (
+              <ShowMore items={initiatives} initial={3} render={(ini: any) => (
                 <Card key={ini.id} style={{ borderLeft: "3px solid var(--mercury-a)", padding: "14px 16px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                     <div style={{ flex: 1 }}>
@@ -163,7 +164,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                     </div>
                   </div>
                 </Card>
-              ))}
+              )} />
             </div>
           </>
         )}

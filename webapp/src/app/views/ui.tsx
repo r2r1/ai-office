@@ -207,3 +207,52 @@ export function MercuryBar({ percent, style }: { percent: number; style?: CSSPro
 export const STATUS_COLOR: Record<string, string> = {
   active: "#a0e0ab", thinking: "#ffac2e", done: "var(--text-dim)", idle: "var(--whisper)",
 }
+
+/* ── Disclosure: свёрнутая по умолчанию секция «заголовок + краткая сводка →
+   клик разворачивает подробности». Раньше в проекте не было ни одного
+   переиспользуемого примитива для этого — каждый экран («Проект», «Компания»,
+   «Сводка») показывал ВСЁ содержимое плоско одновременно (этапы, граф задач,
+   команда, объективы — 6+ секций на одном экране без иерархии), поэтому
+   первый экран тонул в деталях вместо того, чтобы показать главное и дать
+   углубиться по запросу. summary — то, что видно всегда (даже свёрнуто). */
+export function Disclosure({ summary, children, defaultOpen = false, count }:
+  { summary: ReactNode; children: ReactNode; defaultOpen?: boolean; count?: number }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+          background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit",
+          fontFamily: "var(--font-sans)" }}>
+        <span style={{ fontSize: 10, color: "var(--faint)", transition: "transform 0.15s",
+          transform: open ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>{summary}</span>
+        {count != null && (
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)", flexShrink: 0 }}>{count}</span>
+        )}
+      </button>
+      {open && <div style={{ marginTop: 10, paddingLeft: 18 }}>{children}</div>}
+    </div>
+  )
+}
+
+/** Список с "показать ещё N" вместо рендера всех элементов сразу — раньше
+ * gap-карточки/цели/пилюли ролей рендерились ЦЕЛИКОМ независимо от количества. */
+export function ShowMore<T>({ items, initial, render, moreLabel }:
+  { items: T[]; initial: number; render: (item: T, i: number) => ReactNode; moreLabel?: (n: number) => string }) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? items : items.slice(0, initial)
+  const hidden = items.length - initial
+  return (
+    <>
+      {visible.map(render)}
+      {!expanded && hidden > 0 && (
+        <button onClick={() => setExpanded(true)}
+          style={{ fontSize: 11, color: "var(--mercury-a)", background: "none", border: "none",
+            cursor: "pointer", padding: "4px 0", textAlign: "left", fontFamily: "var(--font-sans)" }}>
+          {moreLabel ? moreLabel(hidden) : `Показать ещё ${hidden}`}
+        </button>
+      )}
+    </>
+  )
+}

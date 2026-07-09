@@ -4,7 +4,7 @@ import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import type { ReactNode } from "react"
-import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel } from "./ui"
+import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel, Disclosure, ShowMore } from "./ui"
 import { useThrottled } from "../hooks"
 
 // Карта сайта (рефакторинг 2026-07-08 — смена паттерна с inline-аккордеона на
@@ -810,10 +810,12 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
             Команда проекта · {roleCounts.size} {roleCounts.size === 1 ? "роль" : "ролей"}
             {depts.size > 1 ? ` · ${depts.size} отдела` : ""}
           </SectionLabel>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {[...roleCounts.entries()].map(([role, count]) => (
-              <Pill key={role}>{roleName(role)}{count > 1 ? ` × ${count}` : ""}</Pill>
-            ))}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <ShowMore items={[...roleCounts.entries()]} initial={5}
+              render={([role, count]) => (
+                <Pill key={role}>{roleName(role)}{count > 1 ? ` × ${count}` : ""}</Pill>
+              )}
+              moreLabel={n => `+${n}`} />
           </div>
           {depts.size > 1 && (
             <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 8 }}>
@@ -834,30 +836,37 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
         </div>
       )}
 
-      {stages.length > 0 && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>Этапы · {stages.length}</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {stages.map((s: any) => (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
-                  {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
-                </span>
-                <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {stages.length > 0 && (() => {
+        const current = stages.find((s: any) => s.status === "active") || stages.find((s: any) => s.status !== "done")
+        const doneCount = stages.filter((s: any) => s.status === "done").length
+        return (
+          <Disclosure count={stages.length}
+            summary={
+              <SectionLabel style={{ marginBottom: 0 }}>
+                Этапы · {doneCount}/{stages.length} завершено{current ? ` · сейчас: ${current.title}` : ""}
+              </SectionLabel>
+            }>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {stages.map((s: any) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                  <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
+                    {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
+                  </span>
+                  <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
+                </div>
+              ))}
+            </div>
+          </Disclosure>
+        )
+      })()}
 
       {tasks.some((t: any) => (t.deps || []).length > 0) && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>Сценарий выполнения</SectionLabel>
+        <Disclosure summary={<SectionLabel style={{ marginBottom: 0 }}>Сценарий выполнения (граф зависимостей)</SectionLabel>}>
           <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 10 }}>
             План составлен ДО начала работы — офис действует по нему, а не придумывает следующий шаг на ходу.
           </div>
           <TaskGraph tasks={tasks} />
-        </div>
+        </Disclosure>
       )}
 
       <div>

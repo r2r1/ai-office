@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty, ShowMore } from "./ui"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
 import { FileExplorer } from "./FileExplorer"
 import { ConnectionsBody } from "./ConnectionsView"
@@ -129,7 +129,8 @@ function GoalsTab() {
             Целей пока нет. Добавьте измеримую цель — офис будет сверять с ней работу.
           </div>
         )}
-        {active.map((o: any) => {
+        <ShowMore items={active} initial={4} moreLabel={n => `Показать ещё ${n} цел${n === 1 ? "ь" : n < 5 ? "и" : "ей"}`}
+          render={(o: any) => {
           const g = gaps.find((x: any) => x.objective_id === o.id)
           return (
             <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 12.5,
@@ -173,7 +174,7 @@ function GoalsTab() {
                 style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 14 }}>×</button>
             </div>
           )
-        })}
+        }} />
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
           <input value={title} onChange={e => setTitle(e.target.value)}
             placeholder="Цель — например: заявки с сайта каждую неделю"
@@ -268,14 +269,15 @@ function ProfileTab() {
         {(cons?.custom_rules || []).length === 0 && (
           <div style={{ fontSize: 12, color: "var(--muted)" }}>Правил пока нет. Добавьте, что офису делать нельзя.</div>
         )}
-        {(cons?.custom_rules || []).map((r: string, i: number) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-dim)" }}>
-            <span style={{ color: "var(--mercury-a)" }}>•</span>
-            <span style={{ flex: 1 }}>{r}</span>
-            <button onClick={() => removeRule(r)}
-              style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 14 }}>×</button>
-          </div>
-        ))}
+        <ShowMore items={cons?.custom_rules || []} initial={5}
+          render={(r: string, i: number) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-dim)" }}>
+              <span style={{ color: "var(--mercury-a)" }}>•</span>
+              <span style={{ flex: 1 }}>{r}</span>
+              <button onClick={() => removeRule(r)}
+                style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 14 }}>×</button>
+            </div>
+          )} />
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <input value={newRule} onChange={e => setNewRule(e.target.value)}
             onKeyDown={e => e.key === "Enter" && addRule()}
