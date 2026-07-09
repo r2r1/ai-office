@@ -342,6 +342,11 @@ def build(agent_id: str, role: str,
         my_rec = registry_module.get(agent_id)
         proc = processes_module.create(title, proc_role, instruction,
                                        project_id=(my_rec.project_id if my_rec else ""))
+        if proc.get("_deduped"):
+            return (f"Похожий активный процесс «{proc['title']}» (id={proc['id']}) уже существует "
+                    f"для роли {proc_role} в этом проекте — новый НЕ создан, чтобы не дублировать "
+                    f"работу. Если нужно изменить его поведение, дождись, пока текущая задача "
+                    f"процесса закроется, и поставь правку через delegate_task, а не заводи ещё один.")
         await publish({"type": "speech", "agent_id": agent_id,
                        "text": f"🔄 Завёл повторяющийся процесс: {title[:60]}"})
         return (f"Процесс «{title}» создан (id={proc['id']}) — с этого момента задача "

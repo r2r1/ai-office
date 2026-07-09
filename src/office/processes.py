@@ -38,6 +38,30 @@ def _save(items: list[dict]) -> None:
     ctx.write_json(_FILE, {"items": items})
 
 
+def _similar_active(title: str, role: str, project_id: str) -> dict | None:
+    """Уже есть активный процесс той же роли/проекта с похожим названием?
+    Тот же приём, что initiatives.has_pending_similar (word-overlap > 50%).
+    Реальный кейс из лога прогона 2026-07-09: salesman завёл ПЯТЬ отдельных
+    процессов с названием "Лидогенерация и продажи внедрения ИИ-агентов" за
+    один прогон (proc1..proc5) — каждый тикал каждый цикл независимо, впустую
+    тратя бюджет на переписывание одного и того же docs/outreach.md."""
+    words_new = set((title or "").lower().split())
+    if not words_new:
+        return None
+    for p in _all():
+        if p.get("status") != "active" or p.get("role") != role:
+            continue
+        if p.get("project_id", "") != (project_id or ""):
+            continue
+        words_old = set((p.get("title") or "").lower().split())
+        if not words_old:
+            continue
+        overlap = len(words_new & words_old) / max(len(words_new), len(words_old), 1)
+        if overlap > 0.5:
+            return dict(p)
+    return None
+
+
 def create(title: str, role: str, instruction: str, cadence: str = "every_cycle",
            project_id: str = "") -> dict:
     """`project_id` — если процесс родился ВНУТРИ конкретного проекта (например
@@ -49,7 +73,14 @@ def create(title: str, role: str, instruction: str, cadence: str = "every_cycle"
     просто нет (реальный кейс: t1.py лежал в проекте p4, а задача процесса
     "запусти t1.py" досталась воркеру проекта p3 — тот не находил файл).
     Пусто — прежнее поведение (компания-wide процесс, заведённый вручную из UI
-    вне контекста конкретного проекта)."""
+    вне контекста конкретного проекта).
+
+    Дедуп: похожий АКТИВНЫЙ процесс той же роли/проекта — возвращает его вместо
+    создания нового (помечен `_deduped=True`, чтобы вызывающий код мог сказать
+    агенту «уже есть», а не тихо расплодить дубли, см. _similar_active)."""
+    existing = _similar_active(title, role, project_id)
+    if existing:
+        return {**existing, "_deduped": True}
     items = _all()
     proc = {
         "id": f"proc{len(items) + 1}_{int(time.time()) % 100000}",
