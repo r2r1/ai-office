@@ -24,6 +24,7 @@ from typing import Optional, Callable, Awaitable
 from src.core import llm
 from src.office import models as models_module, org as org_module
 from src.office import prompt_builder
+from src.office import roles as roles_module
 
 # Документированный инвариант «на роль — один агент» (CLAUDE.md §3.2). Enforcement
 # живёт в call-sites: registry.has_role (planning_engine.hire_leader), leaders.decide
@@ -321,6 +322,19 @@ async def board_decide(
     return result
 
 
+def _known_roles_block() -> str:
+    """Реальный кейс (лог прогона 2026-07-09): CEO придумал роли "copywriter" и
+    "product analyst" для задач инициативы — таких ролей в офисе не существует,
+    задачи молча осиротели (planning_engine.has_orphan_tasks — ни один отдел их
+    не обслуживает), а вместо них отдел придумал СОВСЕМ ДРУГОЙ план с нуля. Клиент
+    принял одну инициативу, а получил другую. roles.known_roles() — тот же
+    источник правды, что уже валидирует delegate_task (comms_tool_handlers.py) —
+    явно подмешиваем его в промпт вместо того, чтобы полагаться на угадывание."""
+    return ("\n\nДоступные роли для поля \"role\" в задачах (используй ТОЛЬКО эти "
+            "значения — другой роли в офисе не существует, и задача не будет выполнена): "
+            + ", ".join(sorted(roles_module.known_roles())))
+
+
 async def generate_initiative(
     goal: str,
     strategy: str,
@@ -334,7 +348,7 @@ async def generate_initiative(
         "Сформулируй инициативу с конкретными задачами."
     )
     system, _pid = prompt_builder.company_system(
-        "ceo_initiative", "orchestrator_1", "orchestrator", user)
+        "ceo_initiative", "orchestrator_1", "orchestrator", user, extra=_known_roles_block())
     raw = await llm.run_agent(
         system=system,
         user=user,
@@ -365,7 +379,7 @@ async def generate_onboarding_result(
         await publish({"type": "thinking", "agent_id": "orchestrator_1",
                        "text": "Готовлю анализ и первые предложения для клиента..."})
     system, _pid = prompt_builder.company_system(
-        "onboarding_result", "orchestrator_1", "orchestrator", user)
+        "onboarding_result", "orchestrator_1", "orchestrator", user, extra=_known_roles_block())
     raw = await llm.run_agent(
         system=system,
         user=user,

@@ -7,7 +7,7 @@
   "expected_outcome": "Конкретный ожидаемый результат (например: +15% конверсии)",
   "estimated_effort": "1-2 цикла",
   "tasks": [
-    {"id": "t1", "title": "Задача 1", "role": "designer", "done_criterion": "..."},
+    {"id": "t1", "title": "Задача 1", "role": "developer", "done_criterion": "..."},
     {"id": "t2", "title": "Задача 2", "role": "developer", "done_criterion": "...", "deps": ["t1"]}
   ]
 }

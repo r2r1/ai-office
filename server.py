@@ -2291,6 +2291,7 @@ async def accept_initiative(iid: str, request: Request):
     proj = projects_module.create((initiative or {}).get("title", ""),
                                    (initiative or {}).get("rationale", ""))
     added = 0
+    skipped_roles: list[str] = []
     # Двухпроходное построение графа: LLM отдаёт зависимости через СВОИ
     # временные id (t1, t2, ...) — реальные id задача получает только внутри
     # add_task(). Первый проход создаёт задачи и запоминает temp→real;
@@ -2301,6 +2302,15 @@ async def accept_initiative(iid: str, request: Request):
     for t in tasks:
         role = (t.get("role") or "").strip()
         title = (t.get("title") or "").strip()
+        # Реальный кейс (лог прогона 2026-07-09): CEO придумал роли "copywriter"/
+        # "product analyst" для задач инициативы — такой роли в офисе нет, задача
+        # молча осиротела бы (planning_engine.has_orphan_tasks её просто скипнет
+        # позже), а отдел вместо неё изобрёл СОВСЕМ ДРУГОЙ план с нуля: клиент
+        # принял одну инициативу, а по факту получил другую. Отсекаем на входе,
+        # а не даём тихо разъехаться утверждённому плану и реально исполненному.
+        if role and role not in roles_module.known_roles():
+            skipped_roles.append(f"{title} (роль «{role}» не существует)")
+            continue
         if role and title:
             real = plan_module.add_task(title, role, t.get("done_criterion", ""),
                                         requested_by="user", project_id=proj["id"])
@@ -2318,9 +2328,22 @@ async def accept_initiative(iid: str, request: Request):
 
     proj_after = projects_module.get(proj["id"]) if added else proj
 
+    # Раньше принятие инициативы не оставляло НИ ОДНОГО следа в ленте событий —
+    # новый проект с командой и бюджетом появлялся молча, владелец узнавал о нём
+    # только случайно наткнувшись на вкладку «Проект». Теперь видно явно, что
+    # именно произошло и почему тратится бюджет.
+    await bus.publish({"type": "system",
+                       "text": f"💡 Инициатива «{(initiative or {}).get('title', '')}» принята — "
+                               f"открыт проект «{proj_after['title'] if proj_after else proj['title']}» "
+                               f"({added} задач(и))"})
+    if skipped_roles:
+        await bus.publish({"type": "system",
+                           "text": f"⚠️ {len(skipped_roles)} задач(и) инициативы пропущено "
+                                   f"(несуществующая роль): {'; '.join(skipped_roles[:3])}"})
+
     office_loop.wake_tenant()
     return {
-        "ok": True, "tasks_added": added,
+        "ok": True, "tasks_added": added, "tasks_skipped": len(skipped_roles),
         "project_id": proj_after["id"] if proj_after else "",
         "project_title": proj_after["title"] if proj_after else "",
     }
