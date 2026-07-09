@@ -61,6 +61,12 @@ function GoalsTab() {
   const [title, setTitle] = useState("")
   const [desired, setDesired] = useState("")
   const [measuredBy, setMeasuredBy] = useState("")
+  // Раньше "Заявки с сайта в неделю" (десяток по умолчанию — objectives.py::
+  // ensure_leads_objective) можно было только архивировать целиком, поменять
+  // "10" на своё число было нельзя нигде в интерфейсе — реальная жалоба клиента
+  // после прогона (лог 2026-07-09): "откуда взялось 10 и нет способа поменять".
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState("")
 
   const load = () => {
     api.objectives().then(d => setObjectives(d.objectives || []))
@@ -77,6 +83,16 @@ function GoalsTab() {
   }
   async function archive(id: string) {
     await api.updateObjective(id, { status: "archived" })
+    load()
+  }
+  function startEdit(o: any) {
+    setEditingId(o.id); setEditValue(o.desired || "")
+  }
+  async function saveEdit(id: string) {
+    const v = editValue.trim()
+    setEditingId(null)
+    if (!v) return
+    await api.updateObjective(id, { desired: v })
     load()
   }
 
@@ -120,11 +136,30 @@ function GoalsTab() {
               color: "var(--text-dim)", paddingBottom: 10, borderBottom: "1px solid var(--hairline)" }}>
               <span style={{ color: "var(--mercury-a)", marginTop: 1 }}>◎</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: "var(--text)", marginBottom: 3 }}>
-                  {o.title}{o.desired ? <span style={{ color: "var(--mercury-a)" }}> → {o.desired}</span> : null}
+                <div style={{ color: "var(--text)", marginBottom: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span>{o.title}</span>
+                  {editingId === o.id ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") saveEdit(o.id); if (e.key === "Escape") setEditingId(null) }}
+                        style={{ ...inputStyle, padding: "3px 8px", fontSize: 12, width: 110 }} />
+                      <button onClick={() => saveEdit(o.id)} title="Сохранить"
+                        style={{ background: "none", border: "none", color: "var(--success)", cursor: "pointer", fontSize: 13 }}>✓</button>
+                    </span>
+                  ) : (
+                    <span onClick={() => startEdit(o)} title="Изменить целевое значение"
+                      style={{ color: "var(--mercury-a)", cursor: "pointer", borderBottom: "1px dashed var(--mercury-a)" }}>
+                      {o.desired ? `→ ${o.desired}` : "→ задать значение"} ✎
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: o.measured_by ? "var(--success-dim)" : "var(--warning)" }}>
                   {o.measured_by ? `📏 ${o.measured_by}` : "⚠ пока не измерима — офис сначала создаст измеримость"}
+                  {o.source === "company" && (
+                    <span style={{ color: "var(--faint)", marginLeft: 6 }} title="Офис поставил эту цель сам при первой публикации сайта — значение можно поменять кликом выше">
+                      · поставлена офисом автоматически
+                    </span>
+                  )}
                 </div>
                 {g && (
                   <div style={{ fontSize: 11, marginTop: 3, color: g.met ? "var(--success-dim)" : "var(--mercury-a)" }}>
