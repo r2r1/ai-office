@@ -1,7 +1,8 @@
 # BOS Architecture — главная архитектурная спецификация AI-Office
 
-*Статус: **утверждаемая спецификация** (v2, 2026-07-05 — добавлена модель Work:
-Project/Process/Initiative, см. §5).
+*Статус: **утверждаемая спецификация** (v3, 2026-07-08 — §13/§14 сверены с кодом:
+шестёрка ядра реализована полностью, таблица mapping переписана с «судьбы» на
+факт; см. §14 «Что осталось нерешённым» для реального открытого долга).
 Правило проекта: **никакой новый код не появляется, если его место не определено в этом документе.**
 Если код не ложится в BOS — сначала правится спецификация (осознанно), потом пишется код.*
 
@@ -409,56 +410,65 @@ Developer #14) и **не подлежит удалению** — но не мо�
 
 ## 13. Mapping на текущие модули
 
-| BOS-компонент | Сегодня в коде | Судьба |
+*Обновлено 2026-07-08: шестёрка из §14 реализована полностью. Таблица ниже — не
+план, а фактическое состояние кода; статус ✅ значит «модуль есть и делает то,
+что описано в глоссарии», ⚠️ — «есть, но не то, что задумано изначально».*
+
+| BOS-компонент | Модуль в коде | Статус |
 |---|---|---|
-| World Model | размазан: brief, milestones, trust, costs, knowledge, state | собрать; Business State + snapshot/diff — новое |
-| Identity/DNA | philosophy.py, constitution.py | слить в сущность DNA с версиями |
-| Objectives | milestones.py (частично) | новая сущность с `measured_by`; milestones → view плана |
-| Intent | нет (substring-эвристики fallback-плана, директивы чата) | новая: `interpret(text) → Intent`, единый вход |
-| Capability | tool_router + skills (нижняя половина) | доменная надстройка + единый скорер потребностей |
-| Work (envelope) | нет — есть только `projects.py` (v1: один активный проект, без `type`) | обобщить `projects.py` → `work.py` с полем `type: project\|process\|initiative` |
-| Project | `projects.py`, `plan.py` (`task.project`) | Stage переезжает ПОД конкретный Work (сегодня `milestones.py` — общий список на компанию, не вложен) |
-| Process | нет — есть только частный случай `leads.py` (лид со статусом/историей) | обобщить `leads.py` → `process_instances.py`; Instance с `process_id/stage/history` |
-| Initiative | `initiatives.py` — уже есть: opportunity-событие → LLM генерирует карточку (rationale/expected_outcome/tasks) → accept (= decision spawn_project) / reject (= closed); `accept()` теперь заводит/переименовывает Work под инициативу, если активный проект пуст (тот же приём, что `gap.replan()`) | Дальше: явная фаза «исследование» отдельно от генерации карточки (сегодня совмещены в одном LLM-вызове) |
-| Task-дерево | плоские задачи в `plan.py`, без вложенности | добавить `parent_id` — вложенность вместо отдельной сущности Subtask |
-| Planning Engine | plan.py + детерминированная маршрутизация loop.py; `gap.replan()` создаёт голую задачу, а не Work | вынести из loop.py; `gap.replan()` создаёт Work; task.attempts, artifacts-декларации |
-| Decision Engine | orchestrator.decide + decisions.py | выход — diff плана; sandbox-проверки перед применением |
-| Execution Policy | agent_factory + models.py (ручной выбор) | формализовать 4 оси; cost-tier по типу задачи |
-| Prompt Builder | размазан по 5 файлам | единый builder, роли/политики → .md |
-| Acceptance | critic.py (только сайты) | обобщить в 5 уровней; Specification — новая |
-| Sandbox | нет | snapshot/diff мира; клон тенанта |
-| Events | events.py | + kind-контракт, + запись в History |
-| History | trace.py (отладка) + state.py (лента) | возвести trace в источник истории |
-| Providers | core/llm.py + integrations/ | + Billing-provider интерфейс (не привязываться к apinet) |
-| Platform Self-Knowledge | нет | новое: `office/self_awareness.py` + инструмент `describe_self` (роль/скилл/свои тулы, БЕЗ доступа к коду платформы) — доступен всем ролям |
-| Иерархия доступа к данным | `workspace.project_scope` (изоляция ЗАПИСИ воркеров) | + кросс-проектное ЧТЕНИЕ для лидеров/CEO: `agents/portfolio_tool_handlers.py` (`list_projects`/`list_project_files`/`read_project_file`), `projects.valid_workspace_dir`/`portfolio`, `workspace.read_file_in`/`tree_text_in`; единый гейт `org.is_portfolio_role`; портфельный слот промпта `prompt_builder._portfolio_block` |
-| Knowledge (materialized view) | `office/knowledge.py` — retrieval top-N | + `office/project_map.py` — кэш `list_files()` для workspace тенанта, не новая сущность World Model |
+| World Model | `office/world.py` | ✅ SSOT-агрегатор: `snapshot()`/`diff()`/`save_snapshot()`/`context_block()` собирают срез из 16 модулей-источников (brief, objectives, philosophy/constitution как DNA, plan, costs, sites, leads, events, autonomy, trust…), кеш на цикл (`invalidate_cache()` из loop.py) |
+| Identity/DNA | `office/philosophy.py`, `office/constitution.py` | ⚠️ Остаются двумя файлами — world.py читает их КАК DNA-часть снапшота, но версионирования и единого класса DNA нет. Ближайший неразобранный долг раздела |
+| Objectives | `office/objectives.py` | ✅ Отдельная сущность; `add()` принимает `measured_by`, пустое значение = «неизмеримо», не участвует в Gap Analysis (см. `gap.py`); `milestones.py` остаётся view плана, не Objective |
+| Gap | `office/gap.py` | ✅ Появился (в v2 таблицы отсутствовал): `compute()` — вычислимый разрыв per objective, `replan()` — детерминированно создаёт Work под незакрытый разрыв, `resolvable()` — единственный источник правды «какие measured_by реально резолвятся» (раньше owner мог задать нерезолвящийся measured_by, и Gap Analysis тихо его игнорировал — исправлено) |
+| Intent | `office/intent.py` | ✅ `capture()` регистрирует намерение, `set_interpretation()` фиксирует CEO-триаж; v1 намеренно примитивна (интерпретатор — `orchestrator.interpret_directive`), но единый вход есть |
+| Capability | `office/tool_router.py`, `office/capability.py`, `office/skills.py` | ✅ Доменная надстройка появилась (`capability.py`) поверх Tool Router/Skills |
+| Work (envelope) | `office/projects.py` | ✅ `create(title, goal, type="project"\|"process"\|"initiative")`; `type` определяет и лимит параллельности (только `project` считается в `DEFAULT_MAX_ACTIVE`), и участие в Stage-пути. Отдельного файла `work.py` не понадобилось — `projects.py` обобщён на месте |
+| Project | `office/projects.py` + `office/milestones.py` | ✅ Milestone (Stage) привязан к `project_id`; старые записи без проекта лениво приписываются активному |
+| Process | `office/process_instances.py` | ✅ `register()` заводит конвейер, Instance с `process_id/stage/history`; `leads.py` — первая специализация («sales» поверх этого движка), внешний контракт (`add/get/set_status`) не тронут — server.py/ResultsView.tsx/metrics.py/gap.py ничего не заметили |
+| Initiative | `office/initiatives.py` | ✅ opportunity-событие → карточка (rationale/expected_outcome/tasks) → `accept()` (= spawn/переименование Work) / `reject()` (= closed). Явная фаза «исследование» отдельно от генерации карточки — по-прежнему не разделена (один LLM-вызов), это открытый пункт |
+| Task-дерево | `office/plan.py` | ✅ `parent_id` есть, `subtasks_of()` читает вложенность — отдельной сущности Subtask нет, как и задумано |
+| Planning Engine | `office/planning_engine.py` | ✅ Вынесен из loop.py отдельным модулем: `orchestrate()`, `run_leaders()`, `fallback_plan()`; `gap.replan()` создаёт Work, не голую задачу |
+| Decision Engine | `office/decision_engine.py` | ✅ `PlanDiff` + `propose → check → apply\|reject`; Sandbox-проверки (бюджет, конфликт артефактов, вето Конституции) над копией среза мира; отклонённое решение — с причиной, видно в `/api/decisions` |
+| Execution Policy | `office/execution_policy.py` | ✅ Формализованы все три решения: модель по задаче не по отделу (`decide()`), `estimate_cost()` до исполнения (пишется в trace), `missing_for_plan()` — capability-гейт на bootstrap |
+| Prompt Builder | `office/prompt_builder.py` | ✅ Единая точка сборки; фиксированные слоты; каждый промпт целиком логируется в `prompts.jsonl`; роли/политики — `.md`-файлы |
+| Acceptance | `office/acceptance.py` + `office/specification.py` | ✅ Все 5 уровней явно в коде: L1 Specification (не блокирует v1), L2 Build (`workspace.verify`), L3 Functional (critic), L4 Business (заметка, ждёт метрик — не блокирует), L5 Acceptance (вердикт в задаче) |
+| Sandbox | `office/sandbox.py` | ✅ Универсальный `run(subject, change, checks)`; вето только у детерминированных проверок; первый потребитель — Decision Engine. Sandbox Company (клон тенанта для A/B стратегий/разработки скилла) — механизм готов принять, конкретного потребителя ещё нет |
+| Events | `office/events.py` | ✅ Модуль есть; kind-контракт (`blocker`/`problem`/`opportunity`/`signal`/`info`) — не проверено углублённо в этом проходе, требует отдельного аудита при следующей правке events.py |
+| History | `office/trace.py` + `office/state.py` | ✅ `trace.py` — источник истины для полного лога решений/промптов (world.py и prompt_builder.py пишут туда), `state.py` — лента событий UI |
+| Providers | `core/llm.py` + `integrations/*` | ⚠️ Billing-provider интерфейс НЕ появился — есть только обработка «Quota/billing 403» внутри `execution.py` (пауза офиса), не абстракция над платёжным провайдером. Открытый пункт, привязка к apinet остаётся |
+| Platform Self-Knowledge | `office/self_awareness.py` | ✅ `describe()` — роль/активный скилл/свои инструменты, без доступа к исходникам платформы; доступен всем ролям |
+| Иерархия доступа к данным | `agents/portfolio_tool_handlers.py` | ✅ `list_projects`/`list_project_files`/`read_project_file` — кросс-проектное ЧТЕНИЕ для портфельных ролей; `projects.valid_workspace_dir` валидирует, `org.is_portfolio_role` — единый гейт |
+| Knowledge (materialized view) | `office/knowledge.py` + `office/project_map.py` | ✅ Оба модуля на месте — retrieval top-N и кэш `list_files()` |
 
 ## 14. Порядок разработки ядра
 
-Утверждённая последовательность (фундаментальное перепроектирование завершено):
+Утверждённая последовательность — **все шесть шагов реализованы**:
 
-1. **Prompt Builder** — инфраструктура для всего остального; роли/политики в .md;
-   лог промпта. *(+ вне очереди: атомарный write_json — 5 строк, страхует данные)*
-2. **World Model v1** — типизированные Brief/S  tate/DNA/Objectives; snapshot+diff;
-   правило «новых знаний вне мира не заводим»; интерфейс `interpret() → Intent`
-   (реализация v1 примитивна — важен вход).
-3. **Acceptance Layer** — Specification + 5 уровней; done только через приёмку;
-   task.attempts с эскалацией.
-4. **Project** — сущность между компанией и планом; миграция plan.json;
-   заодно `agent_id → worker_id`. *(готово: `projects.py`, v1 — один активный проект)*
-5. **Execution Policy** — формальный выбор исполнителя; cost-tier; estimated_cost
-   платных действий; Capability check как гейт планирования.
-6. **Work-модель (Project/Process/Initiative)** — обобщить `projects.py` → `work.py`
-   с полем `type`; Stage переезжает под конкретный Work (сегодня `milestones.py` —
-   общий список на компанию); Task получает `parent_id`; `gap.replan()` создаёт
-   Work вместо голой задачи; `leads.py` обобщается в `process_instances.py`
-   (первый настоящий Process); Initiative уже существовала (`initiatives.py`) —
-   `accept()` теперь спавнит/переименовывает Work, а не молча копит задачи в чужом
-   активном проекте. *(готово частично — см. §13)*
+1. **Prompt Builder** — ✅ готово (`office/prompt_builder.py`).
+2. **World Model v1** — ✅ готово (`office/world.py`: snapshot+diff+context_block).
+3. **Acceptance Layer** — ✅ готово (`office/acceptance.py` + `office/specification.py`, 5 уровней).
+4. **Project** — ✅ готово (`office/projects.py`, лимит параллельности только для `type=project`).
+5. **Execution Policy** — ✅ готово (`office/execution_policy.py`, три решения формализованы).
+6. **Work-модель (Project/Process/Initiative)** — ✅ готово: `projects.py` несёт поле
+   `type`, `office/process_instances.py` обобщил `leads.py` (первый настоящий Process),
+   `office/gap.py` создаёт Work вместо голой задачи, `plan.py` получил `parent_id`.
 
-После шестёрки — инфраструктура по мере роста: sqlite (перед первыми десятками
-клиентов), embeddings retrieval, вынос живости из памяти процесса, воркеры-процессы.
+### Что осталось нерешённым (следующая волна, не новая шестёрка)
+
+- **DNA как единая версионируемая сущность.** `philosophy.py`/`constitution.py`
+  остаются раздельными файлами без истории версий — world.py их читает как DNA,
+  но слияния не произошло.
+- **Billing-provider интерфейс.** Платёжная логика по-прежнему привязана к apinet
+  (`execution.py` реагирует на quota/billing 403 паузой, не через абстракцию).
+- **Events kind-контракт.** Нужен явный аудит: гарантированно ли `blocker` всегда
+  получает детерминированную реакцию, как описано в §11.
+- **Sandbox Company.** Механизм (`sandbox.py`) общий и готов, но клон тенанта под
+  A/B стратегии/разработку скилла ещё не имеет конкретного потребителя.
+- **Initiative: явная фаза «исследование».** Сегодня совмещена с генерацией
+  карточки в одном LLM-вызове — разделение осталось из v2 таблицы неисполненным.
+
+Дальше — инфраструктура по мере роста: sqlite (перед первыми десятками клиентов),
+embeddings retrieval, вынос живости из памяти процесса, воркеры-процессы.
 
 **Не разрабатывать:** микросервисы, Kafka, полную симуляцию мира, собственный
 мультипровайдерный LLM-слой, LLM-решателей там, где хватает детерминированного кода.
