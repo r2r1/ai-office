@@ -717,12 +717,24 @@ async def get_logs():
         lines.append(f"  {a['agent_id']} ({a.get('model','')}): ${a['cost']:.4f} | "
                      f"вход {a['in_tokens']} / выход {a['out_tokens']} | вызовов {a['calls']}")
 
-    # Команда
+    # Команда — сгруппирована по проектам (реальный кейс: живой UI TeamView.tsx
+    # группирует с 2026-07-06, этот текстовый экспорт — нет; клиент, скачавший
+    # лог прогона с двумя параллельными проектами, видел плоский список без
+    # деления и решил, что разделения по проектам не существует вовсе).
+    from src.office import projects as projects_module
     lines.append("\n## КОМАНДА")
+    proj_titles = {p["id"]: p["title"] for p in projects_module.all_projects()}
+    by_project: dict[str, list] = {}
     for a in registry.all_agents():
-        lines.append(f"  [{a.status}] {a.agent_id} ({a.role}) — {a.task[:80]}")
-        if a.last_message:
-            lines.append(f"      последнее: {a.last_message[:120]}")
+        by_project.setdefault(a.project_id or "", []).append(a)
+    # Штаб (без project_id) — первой секцией, дальше проекты в порядке появления.
+    for pid in sorted(by_project.keys(), key=lambda p: (p != "", p)):
+        label = "Штаб (без привязки к проекту)" if not pid else f"Проект «{proj_titles.get(pid, pid)}»"
+        lines.append(f"  --- {label} ---")
+        for a in by_project[pid]:
+            lines.append(f"  [{a.status}] {a.agent_id} ({a.role}) — {a.task[:80]}")
+            if a.last_message:
+                lines.append(f"      последнее: {a.last_message[:120]}")
 
     # Этапы
     lines.append("\n## ЭТАПЫ ПУТИ")
