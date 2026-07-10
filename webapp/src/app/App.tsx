@@ -1,22 +1,28 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { TopBar } from "./components/TopBar"
 import { NavRail } from "./components/NavRail"
 import { TabBridge } from "./components/TabBridge"
 import { OfficeView } from "./components/OfficeView"
 import { RightPanel } from "./components/RightPanel"
-import { ProjectView } from "./views/ProjectView"
-import { DashboardView } from "./views/DashboardView"
-import { CompanyView } from "./views/CompanyView"
-import { ChatsView } from "./views/ChatsView"
-import { TeamView } from "./views/TeamView"
-import { ScenarioView } from "./views/ScenarioView"
-import { LeadsView } from "./views/LeadsView"
-import { AccountView } from "./views/AccountView"
 import { useOfficeSelector, useUnread } from "../data/OfficeProvider"
-import { OnboardingFlow } from "./onboarding/OnboardingFlow"
 import { api } from "../data/api"
 import type { Section, Theme } from "./types"
+
+// Вкладки рендерятся ПО ОДНОЙ за раз (переключатель view ниже) — идеальная
+// граница код-сплиттинга: клиент, который весь визит смотрит только «Сводку»,
+// раньше всё равно качал ProjectView (1164 строки), CompanyView (778 строк) и
+// остальные 7 вкладок в одном общем бандле. OnboardingFlow — тоже: нужен
+// ровно один раз в жизни тенанта, но раньше грузился всем и всегда.
+const ProjectView   = lazy(() => import("./views/ProjectView").then(m => ({ default: m.ProjectView })))
+const DashboardView = lazy(() => import("./views/DashboardView").then(m => ({ default: m.DashboardView })))
+const CompanyView   = lazy(() => import("./views/CompanyView").then(m => ({ default: m.CompanyView })))
+const ChatsView     = lazy(() => import("./views/ChatsView").then(m => ({ default: m.ChatsView })))
+const TeamView      = lazy(() => import("./views/TeamView").then(m => ({ default: m.TeamView })))
+const ScenarioView  = lazy(() => import("./views/ScenarioView").then(m => ({ default: m.ScenarioView })))
+const LeadsView     = lazy(() => import("./views/LeadsView").then(m => ({ default: m.LeadsView })))
+const AccountView   = lazy(() => import("./views/AccountView").then(m => ({ default: m.AccountView })))
+const OnboardingFlow = lazy(() => import("./onboarding/OnboardingFlow").then(m => ({ default: m.OnboardingFlow })))
 
 /** Маленький чип-счётчик слоя памяти. */
 function MemChip({ label }: { label: string }) {
@@ -182,8 +188,12 @@ export default function App() {
   // onboardingStarted держит поток на экране, даже когда ready успел стать
   // true раньше, чем клиент дошёл до "Готово" (см. комментарий у объявления).
   if ((ready === false || onboardingStarted) && !onboarded) {
-    return <OnboardingFlow onStart={() => setOnboardingStarted(true)}
-      onDone={() => { setOnboarded(true); setView("office") }} />
+    return (
+      <Suspense fallback={null}>
+        <OnboardingFlow onStart={() => setOnboardingStarted(true)}
+          onDone={() => { setOnboarded(true); setView("office") }} />
+      </Suspense>
+    )
   }
 
   return (
@@ -382,15 +392,17 @@ export default function App() {
                 style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}
                 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
-                {view === "office" && officeMode === "scene" && <OfficeView onOpenAgent={openAgent} />}
-                {view === "office" && officeMode === "graph" && <ScenarioView onOpenChat={openChat} />}
-                {view === "dashboard"   && <DashboardView onNavigate={changeView} onOpenProject={goToProject} />}
-                {view === "project"     && <ProjectView focusProjectId={focusProjectId} onFocusHandled={() => setFocusProjectId(undefined)} />}
-                {view === "team"        && <TeamView onOpenChat={openChat} onOpenInbox={() => openChat("")} />}
-                {view === "leads"       && <LeadsView />}
-                {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
-                {view === "company"     && <CompanyView />}
-                {view === "account"     && <AccountView />}
+                <Suspense fallback={null}>
+                  {view === "office" && officeMode === "scene" && <OfficeView onOpenAgent={openAgent} />}
+                  {view === "office" && officeMode === "graph" && <ScenarioView onOpenChat={openChat} />}
+                  {view === "dashboard"   && <DashboardView onNavigate={changeView} onOpenProject={goToProject} />}
+                  {view === "project"     && <ProjectView focusProjectId={focusProjectId} onFocusHandled={() => setFocusProjectId(undefined)} />}
+                  {view === "team"        && <TeamView onOpenChat={openChat} onOpenInbox={() => openChat("")} />}
+                  {view === "leads"       && <LeadsView />}
+                  {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
+                  {view === "company"     && <CompanyView />}
+                  {view === "account"     && <AccountView />}
+                </Suspense>
               </motion.div>
             </AnimatePresence>
           </div>

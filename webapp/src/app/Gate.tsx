@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useState } from "react"
 import { motion } from "motion/react"
-import App from "./App"
 import { OfficeProvider } from "../data/OfficeProvider"
 import { LandingView } from "./landing/LandingView"
 import { AuthModal } from "./auth/AuthModal"
 import { api } from "../data/api"
+
+// Посетитель лендинга ещё не авторизован — незачем качать весь авторизованный
+// App (все 9 вкладок, ProjectView на 1164 строки и т.д.) вместе с публичной
+// страницей. Раньше App импортировался статически прямо здесь — единственный
+// бандл выходил 567KB/174KB gzip (Vite сам предупреждал при сборке), и его
+// целиком получал каждый, кто просто зашёл посмотреть лендинг.
+const App = lazy(() => import("./App"))
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 type Phase = "loading" | "landing" | "app"
@@ -24,7 +30,11 @@ export function Gate() {
   useEffect(() => { check() }, [check])
 
   if (phase === "loading") return <Splash />
-  if (phase === "app") return <OfficeProvider><App /></OfficeProvider>
+  if (phase === "app") return (
+    <OfficeProvider>
+      <Suspense fallback={<Splash />}><App /></Suspense>
+    </OfficeProvider>
+  )
 
   return (
     <>
