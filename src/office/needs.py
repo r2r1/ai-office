@@ -45,9 +45,23 @@ def score_keywords(need: str, keywords: list[str]) -> int:
     return total
 
 
-def overlap(need: str, capability_tokens: set[str]) -> int:
-    """Пересечение токенов потребности с токенами описания способности (роутер)."""
-    return len(tokens(need) & capability_tokens)
+def overlap(need: str, capability_tokens: set[str]) -> float:
+    """Пересечение токенов потребности с токенами описания способности (роутер),
+    нормализованное по объёму объединения (Jaccard). Раньше был сырой count —
+    способность с длинным description (много токенов в имени/description/action)
+    получала случайные совпадения "бесплатно": чем больше токенов, тем выше шанс
+    задеть слово из потребности даже нерелевантно, и score "прыгал" непредсказуемо
+    при росте реестра интеграций. Jaccard штрафует широкие множества токенов за
+    неспецифичность. Шкала *10 — чтобы остаться в том же порядке величины, что
+    старый int-count, и не ломать порог tool_router.best()."""
+    need_t = tokens(need)
+    if not need_t or not capability_tokens:
+        return 0.0
+    inter = need_t & capability_tokens
+    if not inter:
+        return 0.0
+    union = need_t | capability_tokens
+    return round(len(inter) / len(union) * 10, 2)
 
 
 # «бот» как ГОЛАЯ подстрока опасен: это корень слов «раБОТать», «доработать»,

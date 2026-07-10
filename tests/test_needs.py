@@ -59,6 +59,24 @@ def test_real_bot_mentions_still_detected():
     assert plan._derive_artifacts("developer", "Настроить Telegram-бота") == ["bot"]
 
 
+def test_overlap_normalizes_by_union_not_raw_count():
+    """Реальный кейс: способность с длинным description не должна побеждать за
+    счёт того, что у неё просто больше слов, а не потому что она релевантнее."""
+    need = "опубликовать лендинг клиенту"
+    short_caps = needs.tokens("website publish_landing опубликовать лендинг сайта")
+    long_caps = needs.tokens(
+        "crm export_lead выгрузить лида в срм систему учёта клиентов сделки "
+        "воронка продаж контакты история переписки менеджер клиент лендинг"
+    )
+    # У длинной способности случайно есть общее слово "лендинг" — с сырым
+    # count пересечение было бы одинаковым/близким, с Jaccard длинная явно проигрывает.
+    assert needs.overlap(need, short_caps) > needs.overlap(need, long_caps)
+
+
+def test_overlap_zero_when_no_intersection():
+    assert needs.overlap("что-то совсем другое", needs.tokens("опубликовать лендинг")) == 0.0
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):
