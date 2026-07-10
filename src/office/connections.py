@@ -73,7 +73,12 @@ def delete(cid: str) -> bool:
 
 
 def get_by_name(name: str) -> dict | None:
-    """Возвращает подключение с РАСШИФРОВАННЫМИ полями (для агентов/интеграций)."""
+    """Возвращает подключение с РАСШИФРОВАННЫМИ полями (для агентов/интеграций).
+    Нечёткий фолбэк (подстрока) — для агента, который называет сервис приблизительно
+    (get_connection). Для идентификации КОНКРЕТНОЙ интеграции (registry.credentials_for/
+    is_connected) используй get_exact_by_name — нечёткий матч здесь способен задеть
+    чужую интеграцию с похожим префиксом имени (реальный риск: "crm" — подстрока
+    "crm_bitrix24", "telegram" — подстрока "telegram_personal")."""
     name = (name or "").lower().strip()
     conns = _all()
     for c in conns:
@@ -81,6 +86,40 @@ def get_by_name(name: str) -> dict | None:
             return _decrypted(c)
     for c in conns:
         if name and name in c["name"].lower():
+            return _decrypted(c)
+    return None
+
+
+def get_exact_by_name(name: str) -> dict | None:
+    """Первый профиль с ТОЧНЫМ совпадением имени — без нечёткого фолбэка."""
+    name = (name or "").lower().strip()
+    for c in _all():
+        if c["name"].lower() == name:
+            return _decrypted(c)
+    return None
+
+
+def get_all_by_name(name: str) -> list[dict]:
+    """Все подключения (профили) с данным именем, расшифрованные. Один провайдер
+    способности может иметь НЕСКОЛЬКО одновременных профилей у тенанта (два
+    портала Bitrix24 разных отделов и т.п.) — save() уже допускает несколько
+    записей с одинаковым name и разными значениями (дедуп только по name+values),
+    просто раньше не было способа прочитать больше первой."""
+    name = (name or "").lower().strip()
+    return [_decrypted(c) for c in _all() if c["name"].lower() == name]
+
+
+def list_profiles(name: str) -> list[dict]:
+    """Профили провайдера для UI — значения замаскированы."""
+    name = (name or "").lower().strip()
+    return [_masked(c) for c in _all() if c["name"].lower() == name]
+
+
+def get_profile(cid: str) -> dict | None:
+    """Конкретный профиль по id подключения — когда нужен НЕ первый попавшийся
+    (роутер/агент выбирает между несколькими профилями одной способности)."""
+    for c in _all():
+        if c["id"] == cid:
             return _decrypted(c)
     return None
 

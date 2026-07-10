@@ -19,6 +19,7 @@ from src.integrations.deploy            import INTEGRATION as _deploy
 from src.integrations.invoicing         import INTEGRATION as _invoicing
 from src.integrations.ads               import INTEGRATION as _ads
 from src.integrations.crm               import INTEGRATION as _crm
+from src.integrations.crm_bitrix24      import INTEGRATION as _crm_bitrix24
 from src.office import connections
 
 _ALL: dict[str, Integration] = {
@@ -34,6 +35,7 @@ _ALL: dict[str, Integration] = {
     _invoicing.name:        _invoicing,
     _ads.name:              _ads,
     _crm.name:              _crm,
+    _crm_bitrix24.name:     _crm_bitrix24,
 }
 
 # Все Google-интеграции держат токен под одним именем "google"
@@ -56,14 +58,27 @@ def get(name: str) -> Integration | None:
     return None
 
 
-def credentials_for(integ: Integration) -> dict:
-    """Возвращает поля учётных данных из сохранённого подключения (или {})."""
+def credentials_for(integ: Integration, profile_id: str = "") -> dict:
+    """Возвращает поля учётных данных из сохранённого подключения (или {}).
+    `profile_id` — конкретный профиль, когда у провайдера их несколько
+    (см. profiles_for); без него — первый профиль (обратная совместимость с
+    однопрофильными тенантами). Точный матч по имени (get_exact_by_name), НЕ
+    нечёткий — иначе "crm" рискует зацепить связку "crm_bitrix24"."""
+    if profile_id:
+        conn = connections.get_profile(profile_id)
+        return conn.get("fields", {}) if conn else {}
     # Google-интеграции используют общее подключение "google"
     if integ.name in _GOOGLE_SERVICES:
-        conn = connections.get_by_name("google")
+        conn = connections.get_exact_by_name("google")
         return conn.get("fields", {}) if conn else {}
-    conn = connections.get_by_name(integ.name) or connections.get_by_name(integ.title)
+    conn = connections.get_exact_by_name(integ.name)
     return conn.get("fields", {}) if conn else {}
+
+
+def profiles_for(integ: Integration) -> list[dict]:
+    """Все профили подключения провайдера (замаскированные, для UI) — когда
+    тенант держит несколько одновременных подключений одной способности."""
+    return connections.list_profiles(integ.name)
 
 
 def is_connected(integ: Integration) -> bool:
@@ -76,8 +91,8 @@ def is_connected(integ: Integration) -> bool:
     # OAuth-интеграции
     if integ.oauth_url:
         if integ.name in _GOOGLE_SERVICES:
-            return connections.get_by_name("google") is not None
-        return connections.get_by_name(integ.name) is not None
+            return connections.get_exact_by_name("google") is not None
+        return connections.get_exact_by_name(integ.name) is not None
 
     # Интеграции без кредов (website и т.п.)
     if not integ.cred_fields:
@@ -118,6 +133,7 @@ _SUGGEST_KEYWORDS: dict[str, tuple[str, ...]] = {
     "invoicing":       ("счёт", "счет", "инвойс", "invoice"),
     "ads":             ("реклама", "таргет", "google ads", "meta ads", "продвижение"),
     "crm":             ("crm", "pipedrive", "hubspot", "amocrm", "внешняя crm"),
+    "crm_bitrix24":    ("bitrix", "битрикс", "bitrix24"),
 }
 
 

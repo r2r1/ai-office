@@ -33,9 +33,14 @@ _CATALOG: dict[str, dict] = {
                      "hint": "GitHub (OAuth или PAT в «Доступы»)"},
     "calendar":     {"label": "Google Calendar", "backed_by": "google_calendar",
                      "hint": "подключение Google Calendar (OAuth)"},
-    "crm":          {"label": "CRM (экспорт/анализ лидов)", "backed_by": "crm",
-                     "hint": "интеграция crm — сейчас TEST-режим, всегда доступна; "
-                             "реальный провайдер (Pipedrive/HubSpot/amoCRM) подключится сюда же"},
+    # Несколько провайдеров ОДНОЙ способности (BOS: "CRM может быть много и
+    # разных профилей") — crm: TEST-режим, всегда "have"; crm_bitrix24: реальный
+    # провайдер (входящий вебхук), требует подключения. "have", если подключён
+    # ХОТЯ БЫ ОДИН — какой из них реально отвечает на use_capability, решает
+    # tool_router по обычному скорингу (см. tests/test_tool_router.py).
+    "crm":          {"label": "CRM (экспорт/анализ лидов)", "backed_by": ("crm", "crm_bitrix24"),
+                     "hint": "TEST-режим подключён всегда; для реального экспорта — "
+                             "Bitrix24 (входящий вебхук) или другой провайдер"},
 }
 
 # Слова задачи → capability_id. ЕДИНАЯ точка вывода required_capabilities (как
@@ -73,28 +78,46 @@ def required_of(task: dict) -> list[str]:
     return derive_required(task)
 
 
+def _providers(spec: dict) -> tuple[str, ...]:
+    """backed_by нормализован к кортежу — способность может закрываться ЛЮБЫМ
+    из нескольких провайдеров (BOS: "CRM может быть много и разных профилей"),
+    не обязательно одним. Старые записи со строкой (backed_by="platform") не
+    трогаем — просто заворачиваем в кортеж из одного элемента."""
+    backed = spec.get("backed_by", "")
+    if isinstance(backed, (list, tuple)):
+        return tuple(backed)
+    return (backed,) if backed else ()
+
+
 def _backing_status(cap_id: str) -> str:
     """have | available для способности вне зависимости от плана (умеем ли в
-    принципе прямо сейчас)."""
+    принципе прямо сейчас) — "have", если подключён ХОТЯ БЫ ОДИН из провайдеров."""
     spec = _CATALOG.get(cap_id)
     if not spec:
         return "available"
-    backed = spec["backed_by"]
-    if backed == "platform":
+    providers = _providers(spec)
+    if "platform" in providers:
         return "have"
     from src.integrations import registry as ir
-    integ = ir.get(backed)
-    return "have" if (integ and ir.is_connected(integ)) else "available"
+    for name in providers:
+        integ = ir.get(name)
+        if integ and ir.is_connected(integ):
+            return "have"
+    return "available"
 
 
 def _acquire(cap_id: str) -> dict:
-    """Как приобрести недостающую способность (варианты §5)."""
+    """Как приобрести недостающую способность (варианты §5) — если провайдеров
+    несколько, все они варианты приобретения (подключи ЛЮБОЙ из)."""
     spec = _CATALOG.get(cap_id, {})
-    backed = spec.get("backed_by", "")
-    if backed and backed != "platform":
-        return {"method": "connect_integration", "integration": backed,
+    providers = [p for p in _providers(spec) if p and p != "platform"]
+    if not providers:
+        return {"method": "ask_user", "hint": spec.get("hint", "")}
+    if len(providers) == 1:
+        return {"method": "connect_integration", "integration": providers[0],
                 "hint": spec.get("hint", "")}
-    return {"method": "ask_user", "hint": spec.get("hint", "")}
+    return {"method": "connect_integration", "options": providers,
+            "hint": spec.get("hint", "")}
 
 
 def registry() -> dict:
