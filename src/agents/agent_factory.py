@@ -13,6 +13,7 @@ from src.agents import file_tool_handlers
 from src.agents import comms_tool_handlers
 from src.agents import integration_tool_handlers
 from src.agents import portfolio_tool_handlers
+from src.office import mcp_bridge
 from src.office import models as models_module
 from src.office import office_channel
 from src.office import self_awareness
@@ -142,6 +143,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         async def _handle_describe_self(args: dict) -> str:
             return self_awareness.describe(role, _tool_names, skill=skill)
 
+        # MCP-мост (Layer 2, платформенные серверы) — те же слоты extra_tools/
+        # tool_handlers, что и у остальных источников инструментов, только схема
+        # приходит живым list_tools() вместо статичного tool_schemas.py. Сервер
+        # недоступен/не настроен → build() отдаёт пустые списки, агент просто не
+        # видит эти инструменты (деградация, не сбой создания агента).
+        _mcp_schemas, _mcp_handlers = await mcp_bridge.build(role)
+
         result = await llm.run_agent(
             system=system,
             user=task,
@@ -153,12 +161,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             on_activity=_touch_liveness,
-            extra_tools=[*_extra_tools, *_portfolio_tools, _ts.DESCRIBE_SELF_TOOL],
+            extra_tools=[*_extra_tools, *_portfolio_tools, _ts.DESCRIBE_SELF_TOOL, *_mcp_schemas],
             tool_handlers={
                 **_comms_handlers,
                 **_integration_handlers,
                 **_file_handlers,
                 **_portfolio_handlers,
+                **_mcp_handlers,
                 "describe_self": _handle_describe_self,
             },
         )
