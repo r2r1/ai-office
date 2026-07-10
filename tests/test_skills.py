@@ -102,6 +102,70 @@ def test_negation_penalizes_matched_keyword():
         restore()
 
 
+# ── Фаза 5: ленивая загрузка каталога в prompt_block ─────────────────────────
+# all_skills() подменяется напрямую (не register()) — реальный builtin-каталог
+# содержит скиллы с roles=[] (видны ЛЮБОЙ роли, напр. publish_landing), которые
+# сдвигали бы позиции/количество в тестах truncation, завязанных на точные числа.
+
+def _fake_skills(n: int, kind: str = "plain") -> list:
+    return [skills.Skill(id=f"__p5_{kind}_{i}", title=f"Скилл {i}", description="",
+                         keywords=[]) for i in range(n)]
+
+
+def _with_fake_catalog(items: list, fn):
+    orig = skills.all_skills
+    skills.all_skills = lambda role="": items
+    try:
+        fn()
+    finally:
+        skills.all_skills = orig
+
+
+def test_prompt_block_shows_all_when_catalog_within_limit():
+    def _go():
+        block = skills.prompt_block("any_role", limit=6)
+        for i in range(3):
+            assert f"Скилл {i}" in block
+        assert "не показаны" not in block
+    _with_fake_catalog(_fake_skills(3, "small"), _go)
+
+
+def test_prompt_block_truncates_when_catalog_exceeds_limit():
+    def _go():
+        block = skills.prompt_block("any_role", limit=6)
+        shown = sum(1 for i in range(10) if f"Скилл {i}" in block)
+        assert shown == 6
+        assert "ещё 4" in block
+        assert "find_skills" in block
+    _with_fake_catalog(_fake_skills(10, "big"), _go)
+
+
+def test_prompt_block_ranks_by_task_relevance_when_truncated():
+    """Реальная цель фазы: релевантный задаче скилл должен попасть в топ-N,
+    даже если каталог роли большой и стоит ПОСЛЕДНИМ по порядку реестра."""
+    target = skills.Skill(id="__p5_target", title="Целевой скилл", description="то, что нужно",
+                          keywords=["уникальнаяцельзадачи"])
+    items = _fake_skills(10, "rank") + [target]  # target — 11-й, за пределами top-6 без ранжирования
+    def _go():
+        block = skills.prompt_block("any_role", task="нужен уникальнаяцельзадачи прямо сейчас", limit=6)
+        assert "Целевой скилл" in block
+    _with_fake_catalog(items, _go)
+
+
+def test_prompt_block_deterministic_without_task_when_truncated():
+    """Без task (или без релевантных совпадений) — берём первые limit в порядке
+    all_skills(), не падаем и не выдумываем сортировку по нулевому score.
+    all_skills сама подменена (не полагаемся на порядок реестра относительно
+    builtin-скиллов с roles=[], которые видны любой роли и сдвигали бы позиции)."""
+    def _go():
+        block = skills.prompt_block("any_role", limit=6)
+        for i in range(6):
+            assert f"Скилл {i}" in block
+        assert "Скилл 6" not in block
+        assert "Скилл 7" not in block
+    _with_fake_catalog(_fake_skills(8, "notask"), _go)
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):

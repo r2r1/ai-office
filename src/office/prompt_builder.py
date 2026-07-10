@@ -113,8 +113,10 @@ def build(role: str, task: str, agent_id: str, skill: str = "") -> str:
         identity += f"\n\nТвоя специализация в этом проекте: {skill}"
     policies = "\n\n" + policy("team") + "\n\n" + policy("autonomy") + "\n\n" + policy("inter_agent")
     # Каталог скиллов подмешивается ДИНАМИЧЕСКИ из реестра под роль: добавили скилл
-    # с roles=[...] — он сам появился в промпте только у релевантных ролей.
-    tools = skills_module.prompt_block(role)
+    # с roles=[...] — он сам появился в промпте только у релевантных ролей. task
+    # передаём дальше — при большом каталоге роли prompt_block ранжирует по нему
+    # (Фаза 5: ленивая загрузка каталога, не только фильтр по роли).
+    tools = skills_module.prompt_block(role, task)
     return identity + policies + brief_block() + memory_module.context_block() + tools
 
 
