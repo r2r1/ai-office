@@ -106,13 +106,26 @@ def artifacts_of(task: dict) -> list[str]:
 
 
 def _required_caps(t: dict) -> list[str]:
-    """Требуемые способности задачи: явные из LLM-плана или выведенные
-    (capability.derive_required — единая точка). Lazy-импорт: capability читает plan."""
+    """Требуемые способности задачи: явные из LLM-плана → декларация составного
+    глагола (workflows.py, Layer 4) → выведенные по словам заголовка
+    (capability.derive_required). Составной глагол ("проанализировать Битрикс")
+    не выводится из одного слова — у него есть точная декларация, ей отдаём
+    приоритет перед угадыванием. Lazy-импорт: оба модуля читают plan."""
     explicit = [c for c in (t.get("required_capabilities") or []) if c]
     if explicit:
         return explicit
+    from src.office import workflows
+    wf_caps = workflows.required_capabilities_of(t.get("title") or "")
+    if wf_caps is not None:
+        return wf_caps
     from src.office import capability
     return capability.derive_required(t)
+
+
+def _workflow_id(title: str) -> str:
+    from src.office import workflows
+    wf = workflows.match(title or "")
+    return wf.id if wf else ""
 
 
 def _save(d: dict) -> None:
@@ -150,6 +163,8 @@ def set_tasks(tasks: list[dict]) -> None:
             "artifacts": [a for a in (t.get("artifacts") or []) if a] or _derive_artifacts(role, t.get("title") or ""),
             # Декларация требуемых способностей (BOS §5): внешние доступы под задачу
             "required_capabilities": _required_caps(t),
+            # Составной глагол (Layer 4), если заголовок его матчит — "" для обычных задач
+            "workflow_id": _workflow_id(t.get("title") or ""),
         })
     # Чистим deps от ссылок на НЕсуществующие id: LLM иногда генерит зависимость на
     # опечатанный/выдуманный id, и такая задача (и всё, что от неё зависит) НИКОГДА не
@@ -203,6 +218,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "parent": (parent or "").strip(),
         "artifacts": _derive_artifacts(role, title),
         "required_capabilities": _required_caps({"title": title}),
+        "workflow_id": _workflow_id(title),
     }
     tasks.append(task)
     d["tasks"] = tasks

@@ -33,6 +33,9 @@ _CATALOG: dict[str, dict] = {
                      "hint": "GitHub (OAuth или PAT в «Доступы»)"},
     "calendar":     {"label": "Google Calendar", "backed_by": "google_calendar",
                      "hint": "подключение Google Calendar (OAuth)"},
+    "crm":          {"label": "CRM (экспорт/анализ лидов)", "backed_by": "crm",
+                     "hint": "интеграция crm — сейчас TEST-режим, всегда доступна; "
+                             "реальный провайдер (Pipedrive/HubSpot/amoCRM) подключится сюда же"},
 }
 
 # Слова задачи → capability_id. ЕДИНАЯ точка вывода required_capabilities (как
