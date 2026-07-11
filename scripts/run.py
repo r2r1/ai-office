@@ -45,6 +45,13 @@ if __name__ == "__main__":
         host=os.getenv("HOST", "127.0.0.1"),
         port=int(os.getenv("PORT", "8000")),
         reload=True,
+        # app_dir — иначе "Could not import module server" при запуске как
+        # `python scripts/run.py`: Python кладёт в sys.path[0] папку САМОГО
+        # скрипта (scripts/), не текущую директорию и не корень проекта, даже
+        # если cwd — корень. uvicorn.run(app_dir=...) добавляет путь в
+        # sys.path И передаёт его в reload-сабпроцесс (обычный sys.path.insert
+        # здесь не помог бы — сабпроцесс перезапуска стартует заново).
+        app_dir=str(_root),
         # Следим только за кодом — не за данными тенантов, куда пишут агенты.
         reload_dirs=["src", "."],
         reload_includes=["*.py"],
