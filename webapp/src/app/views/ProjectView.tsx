@@ -903,12 +903,14 @@ function ArtifactRow({ d }: { d: any }) {
   const [open, setOpen] = useState(false)
   const content = (d.content || "").trim()
   const isLong = content.length > ARTIFACT_PREVIEW_LEN
-  // Защита от старых записей (до фикса короткой подписи на бэкенде) — там
-  // task мог содержать весь контекст задачи целиком, не только короткий титул.
-  const taskLabel = (d.task || "").length > 100 ? (d.task || "").slice(0, 100) + "…" : d.task
   return (
     <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.4 }}>
-      <div>📝 {taskLabel} <span style={{ color: "var(--faint)" }}>· {roleName(d.role)}</span></div>
+      {/* line-clamp вместо slice(0,100) — раньше резало строку по символам
+          (реальный баг на скриншоте: "ЗАДАЧА ВЫПОЛНЕНА, КОГД" обрывалось
+          прямо посреди слова). CSS-перенос уважает границы слов сам. */}
+      <div style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+        📝 {d.task} <span style={{ color: "var(--faint)" }}>· {roleName(d.role)}</span>
+      </div>
       {content && (
         <>
           {open && (
@@ -1057,7 +1059,8 @@ function ProjectTaskTree({ tasks }: { tasks: any[] }) {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+      gap: 14, alignItems: "start" }}>
       {cols.map(col => {
         const items = tasks.filter((t: any) => t.status === col.key && isRoot(t))
         return (
