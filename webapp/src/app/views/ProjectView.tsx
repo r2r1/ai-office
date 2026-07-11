@@ -485,7 +485,7 @@ function ProjectRow({ project: p, onClick, onMoveUp, onMoveDown }: {
       title={p.title}
       sub={
         <>
-          {p.goal && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
+          {p.goal && p.goal !== p.title && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{p.goal}</div>}
           {p.status === "done" && (
             <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8, display: "flex", gap: 14, flexWrap: "wrap" }}>
               <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
@@ -751,57 +751,49 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: 
   const isDone = p.status === "done"
   const isOngoing = isActive || isQueued || isPaused
   return (
-    <ViewBody style={{ padding: 0 }}>
-      <div style={{ padding: "20px 28px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <button onClick={onBack} style={{
-            display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: "var(--radius-pill)",
-            fontSize: 12, cursor: "pointer", border: "1px solid var(--hairline-strong)",
-            background: "var(--surface-soft)", color: "var(--text-dim)" }}>← Назад к работе</button>
-          {isOngoing && p.type === "project" && (
-            isPaused ? (
-              <button onClick={onResume} style={{ padding: "8px 15px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
-            ) : (
-              <button onClick={onPause} style={{ padding: "8px 15px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-                border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
-            )
-          )}
-        </div>
+    <>
+      <DetailHeader badge={WORK_TYPE_BADGE.project} title={p.title} onBack={onBack}
+        sub={p.goal && p.goal !== p.title ? p.goal : undefined}
+        statusPill={isActive ? <Pill accent>Активный</Pill>
+          : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
+          : isPaused ? <Pill>⏸ На паузе</Pill>
+          : <Pill color="var(--success)">Закрыт</Pill>}
+        actions={isOngoing && p.type === "project" ? (
+          isPaused ? (
+            <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+              border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
+          ) : (
+            <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+              border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+          )
+        ) : undefined} />
+      <ViewBody>
         {isPaused && (
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 16, padding: "10px 14px",
-            background: "var(--surface-soft)", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)" }}>
+          <Card style={{ marginBottom: 14, fontSize: 12, color: "var(--muted)" }}>
             ⏸ Проект на паузе — команда не берёт по нему новых задач. Уже начатое доделывается, слот освобождён для очереди.
-          </div>
+          </Card>
         )}
-      </div>
-      {!detail ? (
-        <div style={{ fontSize: 12, color: "var(--faint)", padding: "20px 28px" }}>Загрузка…</div>
-      ) : (
-        <ProjectDetailBody project={p} detail={detail} isDone={isDone} />
-      )}
-    </ViewBody>
+        {!detail ? (
+          <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div>
+        ) : (
+          <ProjectDetailBody project={p} detail={detail} isDone={isDone} />
+        )}
+      </ViewBody>
+    </>
   )
 }
 
-// ── Hero + якорь-навигация + дерево(по этапам)/инспектор + результаты-карточки
-// + команда-полоска. Явный заказ: "не таск-трекер — окно внутрь работы офиса".
 // Дерево вложено ПО ЭТАПАМ по-настоящему (milestone_id, см. plan.py/milestones.py
-// — раньше Stage и Task были двумя не связанными системами, вложенность была
-// бы обманом). Один общий скролл, якоря вместо вкладок (SubTabs здесь не подходит —
-// вкладки переключают контент, якоря просто прокручивают уже видимую страницу).
+// — раньше Stage и Task были двумя не связанными системами, вложенность была бы
+// обманом). Тот же язык, что у остальных вкладок (Card/SectionLabel/Pill) — без
+// отдельного bespoke-хедера или "hero": проект в списке экранов выглядит так же,
+// как инициатива/процесс/продажи.
 type TreeSel =
   | { kind: "stage"; id: string }
   | { kind: "task"; id: string }
   | { kind: "result"; idx: number; type: "site" | "group" }
   | { kind: "team"; role: string }
   | null
-
-const ANCHORS = [
-  { id: "work", label: "Работа" },
-  { id: "results", label: "Результаты" },
-  { id: "team", label: "Команда" },
-]
 
 function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detail: any; isDone: boolean }) {
   const isActive = p.status === "active" || p.status === "paused"
@@ -821,15 +813,9 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
   }, [])
 
   const roleCounts = new Map<string, number>()
-  const depts = new Set<string>()
-  tasks.forEach((t: any) => {
-    if (t.role) roleCounts.set(t.role, (roleCounts.get(t.role) || 0) + 1)
-    if (t.department) depts.add(t.department)
-  })
+  tasks.forEach((t: any) => { if (t.role) roleCounts.set(t.role, (roleCounts.get(t.role) || 0) + 1) })
 
   const current = stages.find((s: any) => s.status === "active") || stages.find((s: any) => s.status !== "done")
-  const next = current ? stages[stages.findIndex((s: any) => s.id === current.id) + 1] : null
-  const doneCount = stages.filter((s: any) => s.status === "done").length
   const workingNow = tasks.filter((t: any) => t.status === "in_progress")
 
   const resultGroups: any[][] = []
@@ -861,21 +847,51 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
   })
 
   return (
-    <div>
-      <ProjectHero p={p} progress={progress} isActive={isActive} isDone={isDone}
-        current={current} next={next} workingNow={workingNow} lb={lb}
-        stages={stages} doneCount={doneCount} roleCounts={roleCounts} depts={depts} />
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {isDone ? (
+        <Card>
+          <SectionLabel>Итог</SectionLabel>
+          <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+            <MiniStat value={lb.tasks_done ?? 0} label="задач" />
+            <MiniStat value={(lb.sites || []).length} label="сайтов" />
+            <MiniStat value={lb.leads_count ?? 0} label="лидов" />
+          </div>
+          {roleCounts.size > 0 && (
+            <div style={{ fontSize: 12.5, color: "var(--faint)", marginTop: 16 }}>
+              Работали: {[...roleCounts.keys()].map(r => roleName(r)).join(", ")}
+            </div>
+          )}
+        </Card>
+      ) : isActive && (
+        <Card>
+          <SectionLabel>Прогресс</SectionLabel>
+          <MercuryBar percent={progress.percent ?? 0} style={{ height: 4 }} />
+          {stages.length > 0 && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12 }}>
+              {stages.map((s: any) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5,
+                  color: s.status === "done" ? "var(--text-dim)" : s.status === "active" ? "var(--text)" : "var(--faint)" }}>
+                  <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
+                    {s.status === "done" ? "✓" : s.status === "active" ? "●" : "○"}
+                  </span>
+                  {s.title}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 14 }}>
+            {workingNow.length > 0
+              ? workingNow.map((t: any) => `${roleName(t.role)} — ${t.title}`).join("; ")
+              : current ? `Сейчас: этап «${current.title}»` : "Ждёт следующего шага"}
+          </div>
+        </Card>
+      )}
 
-      <AnchorNav />
-
-      <div style={{ padding: "0 28px 64px" }}>
-        <section id="work" style={{ paddingTop: 48 }}>
-          <SectionHeading>Работа</SectionHeading>
-          <div className="glass" style={{ display: "flex", flexDirection: narrow ? "column" : "row",
-            gap: narrow ? 0 : 0, marginTop: 20, borderRadius: "var(--radius-lg)", padding: narrow ? 20 : "24px 0 24px 24px",
-            overflow: "hidden" }}>
-            <div style={{ width: narrow ? "100%" : 280, flexShrink: 0, paddingRight: narrow ? 0 : 24,
-              paddingBottom: narrow ? 20 : 0,
+      <Card>
+        <SectionLabel>Этапы и задачи</SectionLabel>
+        <div style={{ display: "flex", flexDirection: narrow ? "column" : "row", gap: narrow ? 20 : 28 }}>
+            <div style={{ width: narrow ? "100%" : 260, flexShrink: 0, paddingRight: narrow ? 0 : 20,
+              paddingBottom: narrow ? 16 : 0,
               borderRight: narrow ? "none" : "1px solid var(--hairline)",
               borderBottom: narrow ? "1px solid var(--hairline)" : "none" }}>
               {stages.map((s: any) => (
@@ -935,290 +951,118 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
                 <TaskInspector task={selectedTask} allTasks={tasks} onJump={(id: string) => setSel({ kind: "task", id })} />
               )}
             </div>
-          </div>
-        </section>
-
-        {(sites.length > 0 || resultGroups.length > 0) && (
-          <section id="results" style={{ paddingTop: 48 }}>
-            <SectionHeading>Результаты</SectionHeading>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14, marginTop: 20 }}>
-              {sites.map((s: any) => (
-                <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer" className="card"
-                  style={{ textDecoration: "none", display: "block", padding: "20px 22px", borderRadius: "var(--radius-lg)",
-                    transition: "transform 0.18s, border-color 0.18s" }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = "var(--hairline-strong)" }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.borderColor = "" }}>
-                  <div style={{ width: 40, height: 40, borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center",
-                    justifyContent: "center", fontSize: 19, background: "rgba(255,172,46,0.12)" }}>🌐</div>
-                  <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text)", marginTop: 14 }}>{s.title || s.slug}</div>
-                  <div style={{ fontSize: 12, color: "var(--mercury-a)", marginTop: 8 }}>Открыть ↗</div>
-                </a>
-              ))}
-              {resultGroups.map((g, i) => {
-                const latest = g[0]
-                const words = (latest.content || "").trim().split(/\s+/).filter(Boolean).length
-                const active = sel?.kind === "result" && sel.type === "group" && sel.idx === i
-                return (
-                  <button key={i} onClick={() => setSel({ kind: "result", idx: i, type: "group" })} className="card"
-                    style={{ textAlign: "left", cursor: "pointer", display: "block", padding: "20px 22px", borderRadius: "var(--radius-lg)",
-                      font: "inherit", color: "inherit", transition: "transform 0.18s, border-color 0.18s",
-                      borderColor: active ? "var(--mercury-a)" : undefined }}
-                    onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; if (!active) e.currentTarget.style.borderColor = "var(--hairline-strong)" }}
-                    onMouseLeave={e => { e.currentTarget.style.transform = ""; if (!active) e.currentTarget.style.borderColor = "" }}>
-                    <div style={{ width: 40, height: 40, borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center",
-                      justifyContent: "center", fontSize: 19, background: "var(--surface-soft)" }}>📄</div>
-                    <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text)", marginTop: 14,
-                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{latest.task}</div>
-                    <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 8 }}>
-                      {words > 0 ? `${words} слов` : roleName(latest.role)}{g.length > 1 ? ` · ${g.length} попытки` : ""}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-            {sel?.kind === "result" && (() => {
-              if (sel.type === "site") {
-                const s = sites[sel.idx]
-                if (!s) return null
-                return (
-                  <div className="card" style={{ marginTop: 16, padding: 20, borderRadius: "var(--radius-lg)" }}>
-                    <InspectorTitle>{s.title || s.slug}</InspectorTitle>
-                    <a href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
-                      style={{ fontSize: 13, color: "var(--mercury-a)", textDecoration: "none", display: "inline-flex",
-                        alignItems: "center", gap: 6, marginTop: 14 }}>Открыть сайт ↗</a>
-                  </div>
-                )
-              }
-              const g = resultGroups[sel.idx]
-              if (!g) return null
-              return (
-                <div className="card" style={{ marginTop: 16, padding: 20, borderRadius: "var(--radius-lg)" }}>
-                  <InspectorTitle>{g[0].task}</InspectorTitle>
-                  <ArtifactGroupInspector group={g} />
-                </div>
-              )
-            })()}
-          </section>
-        )}
-
-        {roleCounts.size > 0 && (
-          <section id="team" style={{ paddingTop: 48 }}>
-            <SectionHeading>Команда</SectionHeading>
-            <div className="glass" style={{ display: "flex", flexDirection: "column", marginTop: 20, borderRadius: "var(--radius-lg)",
-              padding: "6px 20px", overflow: "hidden" }}>
-              {[...roleCounts.entries()].map(([role, count], idx, arr) => {
-                const roleWorking = workingNow.find((t: any) => t.role === role)
-                const active = sel?.kind === "team" && sel.role === role
-                return (
-                  <button key={role} onClick={() => setSel({ kind: "team", role })}
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 8px", background: active ? "var(--surface-soft)" : "none",
-                      border: "none", borderBottom: idx < arr.length - 1 ? "1px solid var(--hairline)" : "none",
-                      borderRadius: "var(--radius-sm)", cursor: "pointer", textAlign: "left", width: "100%",
-                      transition: "background 0.15s" }}
-                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--surface-soft)" }}
-                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = "none" }}>
-                    <span style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, display: "flex",
-                      alignItems: "center", justifyContent: "center", fontSize: 15, background: "var(--surface-soft)",
-                      border: "1px solid var(--hairline)" }}>{roleIcon(role)}</span>
-                    <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", minWidth: 140 }}>
-                      {roleName(role)}{count > 1 ? ` × ${count}` : ""}
-                    </span>
-                    <span style={{ fontSize: 13, color: roleWorking ? "var(--text-dim)" : "var(--faint)", display: "flex", alignItems: "center", gap: 7 }}>
-                      {roleWorking && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mercury-a)", flexShrink: 0,
-                        boxShadow: "0 0 6px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite" }} />}
-                      {roleWorking ? roleWorking.title : "свободен"}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-            {sel?.kind === "team" && (() => {
-              const roleTasks = tasks.filter((t: any) => t.role === sel.role)
-              return (
-                <div className="card" style={{ marginTop: 16, padding: 20, borderRadius: "var(--radius-lg)" }}>
-                  <InspectorTitle>{roleName(sel.role)}</InspectorTitle>
-                  <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 2 }}>
-                    {roleTasks.map((t: any) => (
-                      <button key={t.id} onClick={() => { setSel({ kind: "task", id: t.id }); document.getElementById("work")?.scrollIntoView({ behavior: "smooth" }) }}
-                        style={{ textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "6px 0",
-                          fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
-                          textDecoration: t.status === "done" ? "line-through" : "none" }}>{t.title}</button>
-                    ))}
-                  </div>
-                </div>
-              )
-            })()}
-          </section>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Hero — первый экран (~700-800px). Живой статус вместо набора несвязанных
-// пилюль/баров: заголовок, тонкий прогресс + этапы-точки, "сейчас/после этого",
-// кто работает, KPI-цифры. Для закрытого проекта — другой хиро (итоговый отчёт).
-function ProjectHero({ p, progress, isActive, isDone, current, next, workingNow, lb, stages, doneCount, roleCounts, depts }: {
-  p: any; progress: any; isActive: boolean; isDone: boolean; current: any; next: any
-  workingNow: any[]; lb: any; stages: any[]; doneCount: number
-  roleCounts: Map<string, number>; depts: Set<string>
-}) {
-  if (isDone) {
-    return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: "easeOut" }}
-        style={{ margin: "24px 28px 0", padding: "36px 36px 32px", borderRadius: "var(--radius-xl)", position: "relative", overflow: "hidden" }}
-        className="glass">
-        <div style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 100% at 0% 0%, rgba(160,224,171,0.10), transparent 60%)", pointerEvents: "none" }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--success)", fontWeight: 600 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} /> Проект завершён
         </div>
-        <h1 className="display" style={{ fontSize: 34, fontWeight: 700, color: "var(--text)", lineHeight: 1.15,
-          letterSpacing: "-0.01em", margin: "10px 0 0", maxWidth: "26ch" }}>{p.title}</h1>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 28 }}>
-          <KpiStat value={lb.tasks_done ?? 0} label="задач" accent="var(--success)" />
-          <KpiStat value={(lb.sites || []).length} label="сайтов" accent="var(--mercury-a)" />
-          <KpiStat value={lb.leads_count ?? 0} label="лидов" />
-        </div>
-        {roleCounts.size > 0 && (
-          <div style={{ fontSize: 13, color: "var(--faint)", marginTop: 26, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ color: "var(--muted)" }}>Работали:</span>
-            {[...roleCounts.keys()].map(r => (
-              <span key={r} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span>{roleIcon(r)}</span>{roleName(r)}
-              </span>
+      </Card>
+
+      {(sites.length > 0 || resultGroups.length > 0) && (
+        <Card>
+          <SectionLabel>Результаты</SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+            {sites.map((s: any) => (
+              <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                style={{ textDecoration: "none", display: "block", padding: "14px 16px", borderRadius: "var(--radius-md)",
+                  background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
+                <div style={{ fontSize: 20 }}>🌐</div>
+                <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)", marginTop: 10 }}>{s.title || s.slug}</div>
+                <div style={{ fontSize: 11.5, color: "var(--mercury-a)", marginTop: 6 }}>Открыть ↗</div>
+              </a>
             ))}
+            {resultGroups.map((g, i) => {
+              const latest = g[0]
+              const words = (latest.content || "").trim().split(/\s+/).filter(Boolean).length
+              const active = sel?.kind === "result" && sel.type === "group" && sel.idx === i
+              return (
+                <button key={i} onClick={() => setSel({ kind: "result", idx: i, type: "group" })}
+                  style={{ textAlign: "left", cursor: "pointer", display: "block", padding: "14px 16px", borderRadius: "var(--radius-md)",
+                    background: active ? "var(--surface-strong)" : "var(--surface-soft)",
+                    border: `1px solid ${active ? "var(--hairline-strong)" : "var(--hairline)"}`, font: "inherit", color: "inherit" }}>
+                  <div style={{ fontSize: 20 }}>📄</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)", marginTop: 10,
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{latest.task}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>
+                    {words > 0 ? `${words} слов` : roleName(latest.role)}{g.length > 1 ? ` · ${g.length} попытки` : ""}
+                  </div>
+                </button>
+              )
+            })}
           </div>
-        )}
-      </motion.div>
-    )
-  }
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: "easeOut" }}
-      style={{ margin: "24px 28px 0", padding: "36px 36px 32px", borderRadius: "var(--radius-xl)", position: "relative", overflow: "hidden" }}
-      className="glass">
-      <div style={{ position: "absolute", inset: 0,
-        background: isActive
-          ? "radial-gradient(120% 100% at 0% 0%, rgba(255,172,46,0.09), transparent 60%)"
-          : "none", pointerEvents: "none" }} />
-      <h1 className="display" style={{ fontSize: 34, fontWeight: 700, color: "var(--text)", lineHeight: 1.15,
-        letterSpacing: "-0.01em", margin: 0, maxWidth: "26ch", position: "relative" }}>{p.title}</h1>
-      {p.goal && p.goal !== p.title && (
-        <div style={{ fontSize: 14, color: "var(--text-dim)", lineHeight: 1.6, marginTop: 10, maxWidth: "62ch", position: "relative" }}>{p.goal}</div>
+          {sel?.kind === "result" && (() => {
+            if (sel.type === "site") {
+              const s = sites[sel.idx]
+              if (!s) return null
+              return (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--hairline)" }}>
+                  <InspectorTitle>{s.title || s.slug}</InspectorTitle>
+                  <a href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                    style={{ fontSize: 13, color: "var(--mercury-a)", textDecoration: "none", display: "inline-flex",
+                      alignItems: "center", gap: 6, marginTop: 12 }}>Открыть сайт ↗</a>
+                </div>
+              )
+            }
+            const g = resultGroups[sel.idx]
+            if (!g) return null
+            return (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--hairline)" }}>
+                <InspectorTitle>{g[0].task}</InspectorTitle>
+                <ArtifactGroupInspector group={g} />
+              </div>
+            )
+          })()}
+        </Card>
       )}
 
-      {isActive && (
-        <>
-          <div style={{ marginTop: 28, position: "relative" }}>
-            <MercuryBar percent={progress.percent ?? 0} style={{ height: 6 }} />
-            {stages.length > 0 && (
-              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14 }}>
-                {stages.map((s: any) => (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13,
-                    color: s.status === "done" ? "var(--text-dim)" : s.status === "active" ? "var(--text)" : "var(--faint)" }}>
-                    <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
-                      {s.status === "done" ? "✓" : s.status === "active" ? "●" : "○"}
-                    </span>
-                    {s.title}
-                  </div>
-                ))}
-              </div>
-            )}
+      {roleCounts.size > 0 && (
+        <Card>
+          <SectionLabel>Команда</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {[...roleCounts.entries()].map(([role, count], idx, arr) => {
+              const roleWorking = workingNow.find((t: any) => t.role === role)
+              const active = sel?.kind === "team" && sel.role === role
+              return (
+                <button key={role} onClick={() => setSel({ kind: "team", role })}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 4px", background: active ? "var(--surface-soft)" : "none",
+                    border: "none", borderBottom: idx < arr.length - 1 ? "1px solid var(--hairline)" : "none",
+                    cursor: "pointer", textAlign: "left", width: "100%" }}>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>{roleIcon(role)}</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)", minWidth: 130 }}>
+                    {roleName(role)}{count > 1 ? ` × ${count}` : ""}
+                  </span>
+                  <span style={{ fontSize: 12.5, color: roleWorking ? "var(--text-dim)" : "var(--faint)" }}>
+                    {roleWorking ? roleWorking.title : "свободен"}
+                  </span>
+                </button>
+              )
+            })}
           </div>
-
-          <div style={{ marginTop: 28, position: "relative", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-            <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-              <InspectorLabel>Сейчас происходит</InspectorLabel>
-              <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 8 }}>
-                {workingNow.length > 0 && (
-                  <span style={{ width: 6, height: 6, marginTop: 6, borderRadius: "50%", background: "var(--mercury-a)", flexShrink: 0,
-                    boxShadow: "0 0 6px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite" }} />
-                )}
-                <span>
-                  {workingNow.length > 0
-                    ? workingNow.map((t: any) => `${roleName(t.role)} — ${t.title}`).join("; ")
-                    : current ? `Этап «${current.title}»` : "Ждёт следующего шага"}
-                </span>
-              </div>
-              {next && <div style={{ fontSize: 13, color: "var(--faint)", marginTop: 6 }}>После этого — «{next.title}»</div>}
-            </div>
-
-            {workingNow.length > 0 && (
-              <div style={{ flex: "0 1 auto" }}>
-                <InspectorLabel>Работают</InspectorLabel>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-                  {workingNow.map((t: any, i: number) => (
-                    <div key={i} title={t.title} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "var(--text-dim)",
-                      padding: "5px 11px 5px 8px", borderRadius: "var(--radius-pill)", background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
-                      <span>{roleIcon(t.role)}</span>{roleName(t.role)}
-                    </div>
+          {sel?.kind === "team" && (() => {
+            const roleTasks = tasks.filter((t: any) => t.role === sel.role)
+            return (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--hairline)" }}>
+                <InspectorTitle>{roleName(sel.role)}</InspectorTitle>
+                <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 2 }}>
+                  {roleTasks.map((t: any) => (
+                    <button key={t.id} onClick={() => setSel({ kind: "task", id: t.id })}
+                      style={{ textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "6px 0",
+                        fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
+                        textDecoration: t.status === "done" ? "line-through" : "none" }}>{t.title}</button>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-        </>
+            )
+          })()}
+        </Card>
       )}
-
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 30, position: "relative" }}>
-        <KpiStat value={progress.done ?? doneCount} label="завершено" accent="var(--success)" />
-        <KpiStat value={Math.max(0, (progress.total ?? 0) - (progress.done ?? 0))} label="осталось" />
-      </div>
-      {depts.size > 1 && (
-        <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 22, position: "relative" }}>
-          Совместная работа отделов: {[...depts].map(d => DEPT_NAMES[d] || d).join(" + ")}
-        </div>
-      )}
-    </motion.div>
-  )
-}
-
-function KpiStat({ value, label, accent }: { value: number; label: string; accent?: string }) {
-  return (
-    <div style={{ padding: "12px 18px", borderRadius: "var(--radius-md)", background: "var(--surface-soft)",
-      border: "1px solid var(--hairline)", minWidth: 92 }}>
-      <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: accent || "var(--text)", lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 7 }}>{label}</div>
     </div>
   )
 }
 
-// Якоря вместо вкладок — прокручивают уже видимую страницу, не переключают
-// контент. Подсвечивает текущий раздел через IntersectionObserver.
-function AnchorNav() {
-  const [activeId, setActiveId] = useState("work")
-
-  useEffect(() => {
-    const els = ANCHORS.map(a => document.getElementById(a.id)).filter(Boolean) as HTMLElement[]
-    if (els.length === 0) return
-    const io = new IntersectionObserver(entries => {
-      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
-      if (visible[0]) setActiveId(visible[0].target.id)
-    }, { rootMargin: "-20% 0px -70% 0px" })
-    els.forEach(el => io.observe(el))
-    return () => io.disconnect()
-  }, [])
-
+function MiniStat({ value, label }: { value: number; label: string }) {
   return (
-    <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", gap: 6, padding: "12px 28px",
-      background: "var(--surface-head)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-      borderBottom: "1px solid var(--hairline)", marginTop: 40 }}>
-      {ANCHORS.map(a => (
-        <button key={a.id} onClick={() => document.getElementById(a.id)?.scrollIntoView({ behavior: "smooth" })}
-          style={{ background: activeId === a.id ? "var(--surface-strong)" : "none",
-            border: "1px solid transparent", borderColor: activeId === a.id ? "var(--hairline)" : "transparent",
-            borderRadius: "var(--radius-pill)", cursor: "pointer", padding: "6px 14px", fontSize: 13,
-            fontWeight: activeId === a.id ? 600 : 400, transition: "background 0.15s, color 0.15s",
-            color: activeId === a.id ? "var(--text)" : "var(--faint)" }}>
-          {a.label}
-        </button>
-      ))}
+    <div>
+      <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 5 }}>{label}</div>
     </div>
   )
-}
-
-function SectionHeading({ children }: { children: ReactNode }) {
-  return <div style={{ fontSize: 24, fontWeight: 600, color: "var(--text)", letterSpacing: "-0.01em" }}>{children}</div>
 }
 
 function TreeGroup({ label, count, children }: { label: string; count: number; children: ReactNode }) {
