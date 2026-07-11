@@ -9,6 +9,8 @@ file_tool_handlers.py, comms_tool_handlers.py — предыдущие прох�
 """
 
 import json
+import sys
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from src.office import skills as skills_module
@@ -188,6 +190,50 @@ def build(agent_id: str, role: str,
                        "text": f"📈 Записал метрику «{label}»: {value} {unit} — появится на дашборде"})
         return f"Записано: {point['metric_id']}={point['value']} {unit} ({source})."
 
+    async def _handle_discover_resource(args: dict) -> str:
+        """Discovery-слой (office/discovery.py): голая ссылка → что это и как
+        с этим работать. Не выполняет действие сама — только классифицирует и
+        рекомендует следующий шаг (существующая интеграция / register_external_api)."""
+        url = (args.get("url") or "").strip()
+        if not url:
+            return "Укажи url."
+        from src.office import discovery
+        classification = await discovery.probe(url)
+        rec = discovery.recommend(classification)
+        await publish_and_log({"type": "speech", "agent_id": agent_id,
+                               "text": f"🔎 {url} → {classification['kind']}"})
+        return f"Тип ресурса: {classification['kind']}.\n{rec}"
+
+    async def _handle_register_external_api(args: dict) -> str:
+        """Подключает обобщённый REST/OpenAPI MCP-мост под конкретный URL —
+        реализация Layer 4 "connect_external_resource": не пишет новый код,
+        конфигурирует уже существующий обобщённый шаблон
+        (mcp_generic_rest_server.py) через тенантский MCP-реестр, который сам
+        требует готовую Docker-песочницу (mcp_tenant_servers.add)."""
+        url = (args.get("url") or "").strip().rstrip("/")
+        label = (args.get("label") or "").strip()
+        if not url or not label:
+            return "Укажи url и label (короткое имя сервиса)."
+        auth_header = (args.get("auth_header") or "").strip()
+        auth_value = (args.get("auth_value") or "").strip()
+        env = {"BASE_URL": url}
+        if auth_header and auth_value:
+            env["AUTH_HEADER"] = auth_header
+            env["AUTH_VALUE"] = auth_value
+        from src.office import mcp_tenant_servers, exec_sandbox
+        try:
+            item = mcp_tenant_servers.add(
+                label, sys.executable,
+                [str(Path(__file__).resolve().parents[1] / "office" / "mcp_generic_rest_server.py")],
+                env=env, allow_network=True,
+            )
+        except exec_sandbox.SandboxUnavailable as e:
+            return f"Не удалось подключить «{label}»: {e}"
+        await publish_and_log({"type": "speech", "agent_id": agent_id,
+                               "text": f"🔌 Подключил «{label}» как MCP-инструмент ({url})"})
+        return (f"«{label}» подключён (id {item['id']}). Инструменты появятся у тебя со следующей "
+                f"задачи с префиксом mcp__tenant_{item['id']}__ — list_endpoints/call_endpoint.")
+
     return {
         "list_integrations": _handle_list_integrations,
         "use_integration": _handle_use_integration,
@@ -195,4 +241,6 @@ def build(agent_id: str, role: str,
         "use_skill": _handle_use_skill,
         "find_skills": _handle_find_skills,
         "record_metric": _handle_record_metric,
+        "discover_resource": _handle_discover_resource,
+        "register_external_api": _handle_register_external_api,
     }

@@ -124,6 +124,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                         _ts.READ_OFFICE_CHAT_TOOL,
                         _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,
                         _ts.USE_SKILL_TOOL, _ts.FIND_SKILLS_TOOL, _ts.RECORD_METRIC_TOOL,
+                        _ts.DISCOVER_RESOURCE_TOOL, _ts.REGISTER_EXTERNAL_API_TOOL,
                         _ts.WRITE_FILE_TOOL, _ts.READ_FILE_TOOL, _ts.LIST_FILES_TOOL, _ts.VERIFY_CODE_TOOL,
                         *_code_exec_tools, _ts.DELETE_FILE_TOOL, _ts.CONFIGURE_BOT_TOOL]
         # Иерархия доступа (BOS §6.2): кросс-проектное чтение портфеля — лидерам

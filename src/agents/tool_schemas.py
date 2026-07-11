@@ -175,6 +175,52 @@ RECORD_METRIC_TOOL = {
     },
 }
 
+# Инструмент: discovery по URL — «дай системе ссылку, пусть сама поймёт, что это»
+DISCOVER_RESOURCE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "discover_resource",
+        "description": "По ГОЛОЙ ссылке (без заранее написанной интеграции под неё) определяет, что "
+                       "это за ресурс — GitHub-репозиторий, OData-сервис (1С и т.п.), REST API со "
+                       "спецификацией OpenAPI, обычный сайт, или недоступен — и подсказывает, каким "
+                       "путём с ним работать (существующая интеграция / нужны креды / register_external_api). "
+                       "Вызывай ПЕРВЫМ, когда клиент даёт ссылку на внешнюю систему и просишь понять, что там.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Ссылка на внешний ресурс (http/https)"},
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+# Инструмент: подключить обобщённый REST API через MCP (для kind=rest_api_openapi
+# из discover_resource) — требует готовую Docker-песочницу (SANDBOX_MODE=docker),
+# иначе отказывает с понятным сообщением, не тихо деградирует.
+REGISTER_EXTERNAL_API_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "register_external_api",
+        "description": "Подключает произвольный REST API со спецификацией OpenAPI/Swagger как набор "
+                       "инструментов — используй ПОСЛЕ discover_resource, когда kind=\"rest_api_openapi\". "
+                       "Поднимает обобщённый MCP-мост в изолированном Docker-контейнере (не пишет новый "
+                       "код), который сам прочитает спецификацию сервиса. Требует включённой Docker-"
+                       "песочницы на платформе — если её нет, вернёт понятную ошибку, не сделает вид, "
+                       "что подключил.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Базовый URL API (тот же, что был в discover_resource)"},
+                "label": {"type": "string", "description": "Короткое человекочитаемое имя сервиса"},
+                "auth_header": {"type": "string", "description": "Имя заголовка авторизации, если нужен (напр. Authorization)"},
+                "auth_value": {"type": "string", "description": "Значение заголовка авторизации (получи у пользователя через ask_user, не выдумывай)"},
+            },
+            "required": ["url", "label"],
+        },
+    },
+}
+
 # Инструмент: завести повторяющийся процесс (BOS §5 — Process, не Task с концом)
 CREATE_RECURRING_PROCESS_TOOL = {
     "type": "function",
