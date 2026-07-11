@@ -779,6 +779,19 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: 
   )
 }
 
+// ── Дерево + инспектор (Figma/Linear/VS Code паттерн) ───────────────────────
+// Раньше — шесть секций одного визуального веса подряд, "полотно" (реальная
+// жалоба на скриншоте). Теперь: слева компактная навигация по всему, что есть
+// у проекта (этапы/задачи/результаты/команда), справа — контент выбранного
+// узла. Ничего не выбрано = обзор проекта (живой статус), а не пустой экран —
+// тот же принцип, что в Figma (нет selection → показаны свойства страницы).
+type TreeSel =
+  | { kind: "stage"; id: string }
+  | { kind: "task"; id: string }
+  | { kind: "result"; idx: number; type: "site" | "group" }
+  | { kind: "team"; role: string }
+  | null
+
 function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }) {
   const isActive = p.status === "active" || p.status === "paused"
   const tasks: any[] = detail.tasks || []
@@ -787,11 +800,17 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
   const deliverables: any[] = detail.deliverables || []
   const progress = detail.progress || {}
   const lb = p.left_behind || {}
+  const [sel, setSel] = useState<TreeSel>(null)
+  const [narrow, setNarrow] = useState(typeof window !== "undefined" ? window.innerWidth < 860 : false)
 
-  // Команда проекта: реальная кросс-функциональность (BOS §5 — «несколько
-  // воркеров и взаимодействие разных отделов, как в реальной компании»), а не
-  // догадка — считается из ролей/отделов задач, которые ЭТОТ Work реально
-  // породил, включая уже закрытые (история, кто участвовал).
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < 860)
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [])
+
+  // Команда проекта: реальная кросс-функциональность (BOS §5), не догадка —
+  // считается из ролей/отделов задач, которые ЭТОТ Work реально породил.
   const roleCounts = new Map<string, number>()
   const depts = new Set<string>()
   tasks.forEach((t: any) => {
@@ -799,367 +818,333 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
     if (t.department) depts.add(t.department)
   })
 
-  // Живой статус (UX-аудит п.1/2): один ответ на "что сейчас происходит",
-  // а не сборка из бейджа+прогресса+списка этапов по отдельности. Кто
-  // реально в работе — из tasks.assignee (plan.assign уже пишет agent_id
-  // туда), без нового бэкенд-эндпоинта.
   const current = stages.find((s: any) => s.status === "active") || stages.find((s: any) => s.status !== "done")
   const doneCount = stages.filter((s: any) => s.status === "done").length
   const workingNow = tasks.filter((t: any) => t.status === "in_progress")
 
+  // Группировка результатов по задаче — реассайн после провала приёмки даёт
+  // несколько попыток с одинаковым заголовком; последняя — узел дерева, старые
+  // видны в инспекторе за тогглом, не отдельными одинаковыми строками.
+  const resultGroups: any[][] = []
+  const byTaskKey = new Map<string, any[]>()
+  deliverables.forEach((d: any) => {
+    const key = d.task || ""
+    let g = byTaskKey.get(key)
+    if (!g) { g = []; byTaskKey.set(key, g); resultGroups.push(g) }
+    g.push(d)
+  })
+
+  const byId = new Map(tasks.map((t: any) => [t.id, t]))
+  const selectedTask = sel?.kind === "task" ? byId.get(sel.id) : null
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div style={{ display: "flex", flexDirection: narrow ? "column" : "row", gap: narrow ? 28 : 0 }}>
+      <div style={{ width: narrow ? "100%" : 272, flexShrink: 0, paddingRight: narrow ? 0 : 28,
+        borderRight: narrow ? "none" : "1px solid var(--hairline)" }}>
+        <TreeGroup label="Этапы" count={stages.length}>
+          {stages.map((s: any) => (
+            <TreeRow key={s.id} active={sel?.kind === "stage" && sel.id === s.id} onClick={() => setSel({ kind: "stage", id: s.id })}
+              icon={s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
+              iconColor={s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)"}
+              label={s.title} />
+          ))}
+        </TreeGroup>
+
+        <TreeGroup label="Задачи" count={tasks.length}>
+          {tasks.map((t: any) => (
+            <TreeRow key={t.id} active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
+              icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
+                : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
+              label={t.title} strike={t.status === "done"} />
+          ))}
+        </TreeGroup>
+
+        {(sites.length > 0 || resultGroups.length > 0) && (
+          <TreeGroup label="Результаты" count={sites.length + resultGroups.length}>
+            {sites.map((s: any, i: number) => (
+              <TreeRow key={`site-${i}`} active={sel?.kind === "result" && sel.type === "site" && sel.idx === i}
+                onClick={() => setSel({ kind: "result", idx: i, type: "site" })} icon="🌐" label={s.title || s.slug} />
+            ))}
+            {resultGroups.map((g, i) => (
+              <TreeRow key={`grp-${i}`} active={sel?.kind === "result" && sel.type === "group" && sel.idx === i}
+                onClick={() => setSel({ kind: "result", idx: i, type: "group" })} icon="📝" label={g[0].task} />
+            ))}
+          </TreeGroup>
+        )}
+
+        {roleCounts.size > 0 && (
+          <TreeGroup label="Команда" count={roleCounts.size}>
+            {[...roleCounts.entries()].map(([role, count]) => (
+              <TreeRow key={role} active={sel?.kind === "team" && sel.role === role} onClick={() => setSel({ kind: "team", role })}
+                icon={workingNow.some((t: any) => t.role === role) ? "●" : "○"}
+                iconColor={workingNow.some((t: any) => t.role === role) ? "var(--mercury-a)" : "var(--faint)"}
+                label={`${roleName(role)}${count > 1 ? ` × ${count}` : ""}`} />
+            ))}
+          </TreeGroup>
+        )}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0, paddingLeft: narrow ? 0 : 32, paddingTop: 2 }}>
+        {sel === null && (
+          <ProjectOverviewPane p={p} progress={progress} isActive={isActive} current={current}
+            workingNow={workingNow} lb={lb} doneCount={doneCount} stagesLen={stages.length}
+            depts={depts} />
+        )}
+        {sel?.kind === "stage" && (() => {
+          const s = stages.find((x: any) => x.id === sel.id)
+          if (!s) return null
+          return (
+            <div>
+              <InspectorTitle>{s.title}</InspectorTitle>
+              <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 10 }}>
+                {s.status === "done" ? "Завершён" : s.status === "active" ? "Сейчас в работе" : "Ещё не начат"}
+              </div>
+              {s.summary && <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.65, marginTop: 14, maxWidth: "62ch" }}>{s.summary}</div>}
+            </div>
+          )
+        })()}
+        {selectedTask && (
+          <TaskInspector task={selectedTask} allTasks={tasks} onJump={(id: string) => setSel({ kind: "task", id })} />
+        )}
+        {sel?.kind === "result" && sel.type === "site" && (() => {
+          const s = sites[sel.idx]
+          if (!s) return null
+          return (
+            <div>
+              <InspectorTitle>{s.title || s.slug}</InspectorTitle>
+              <a href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                style={{ fontSize: 13, color: "var(--mercury-a)", textDecoration: "none", display: "inline-flex",
+                  alignItems: "center", gap: 6, marginTop: 14 }}>Открыть сайт ↗</a>
+            </div>
+          )
+        })()}
+        {sel?.kind === "result" && sel.type === "group" && (() => {
+          const g = resultGroups[sel.idx]
+          if (!g) return null
+          return (
+            <div>
+              <InspectorTitle>{g[0].task}</InspectorTitle>
+              <ArtifactGroupInspector group={g} />
+            </div>
+          )
+        })()}
+        {sel?.kind === "team" && (() => {
+          const roleTasks = tasks.filter((t: any) => t.role === sel.role)
+          const isWorking = workingNow.some((t: any) => t.role === sel.role)
+          return (
+            <div>
+              <InspectorTitle>{roleName(sel.role)}</InspectorTitle>
+              <div style={{ fontSize: 12.5, color: isWorking ? "var(--mercury-a)" : "var(--faint)", marginTop: 8 }}>
+                {isWorking ? "● сейчас в работе" : "○ свободен"}
+              </div>
+              <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 2 }}>
+                {roleTasks.map((t: any) => (
+                  <button key={t.id} onClick={() => setSel({ kind: "task", id: t.id })}
+                    style={{ textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "7px 0",
+                      fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
+                      textDecoration: t.status === "done" ? "line-through" : "none" }}>{t.title}</button>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+      </div>
+    </div>
+  )
+}
+
+function TreeGroup({ label, count, children }: { label: string; count: number; children: ReactNode }) {
+  if (count === 0) return null
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase",
+        letterSpacing: "1.5px", marginBottom: 6, padding: "0 8px" }}>{label} · {count}</div>
+      <div style={{ display: "flex", flexDirection: "column" }}>{children}</div>
+    </div>
+  )
+}
+
+function TreeRow({ active, onClick, icon, iconColor, label, strike }: {
+  active: boolean; onClick: () => void; icon: string; iconColor?: string; label: string; strike?: boolean
+}) {
+  return (
+    <button onClick={onClick} style={{
+      display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
+      background: active ? "var(--surface-strong)" : "transparent", border: "none", cursor: "pointer",
+      padding: "7px 8px", borderRadius: "var(--radius-sm)", fontSize: 12.5,
+      color: active ? "var(--text)" : "var(--text-dim)", textDecoration: strike ? "line-through" : "none",
+      transition: "background 0.12s",
+    }}>
+      <span style={{ color: iconColor || "var(--faint)", fontSize: 9, flexShrink: 0, width: 10, textAlign: "center" }}>{icon}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+    </button>
+  )
+}
+
+function InspectorTitle({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", lineHeight: 1.4, letterSpacing: "-0.01em" }}>{children}</div>
+}
+
+function InspectorLabel({ children }: { children: ReactNode }) {
+  return <div className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase",
+    letterSpacing: "1.5px", marginBottom: 8 }}>{children}</div>
+}
+
+// Обзор — состояние по умолчанию (ничего не выбрано в дереве). Живой статус +
+// прогресс + цель проекта, то, что раньше было "первым экраном" целиком.
+function ProjectOverviewPane({ p, progress, isActive, current, workingNow, lb, doneCount, stagesLen, depts }: {
+  p: any; progress: any; isActive: boolean; current: any; workingNow: any[]; lb: any
+  doneCount: number; stagesLen: number; depts: Set<string>
+}) {
+  return (
+    <div>
+      <InspectorTitle>Обзор</InspectorTitle>
+      {p.goal && <div style={{ fontSize: 13.5, color: "var(--text-dim)", lineHeight: 1.65, marginTop: 12, maxWidth: "62ch" }}>{p.goal}</div>}
+      {depts.size > 1 && (
+        <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 10 }}>
+          Совместная работа отделов: {[...depts].map(d => DEPT_NAMES[d] || d).join(" + ")}
+        </div>
+      )}
+
       {isActive && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>Прогресс · {progress.done ?? 0}/{progress.total ?? 0} задач</SectionLabel>
+        <div style={{ marginTop: 32 }}>
+          <InspectorLabel>Прогресс · {progress.done ?? 0}/{progress.total ?? 0} задач</InspectorLabel>
           <MercuryBar percent={progress.percent ?? 0} />
-          {/* Hero-статус: живая точка + одна фраза "что происходит сейчас" —
-              раньше этот ответ надо было собирать из статус-пилюли, бара и
-              списка этапов по отдельности (UX-аудит, "первый экран"). */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12.5, color: "var(--text-dim)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13, color: "var(--text-dim)" }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mercury-a)",
               boxShadow: "0 0 8px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite", flexShrink: 0 }} />
             {workingNow.length > 0
               ? <span>Сейчас: {workingNow.map((t: any) => roleName(t.role)).join(", ")} {workingNow.length === 1 ? "работает" : "работают"} над задачей{current ? ` · этап «${current.title}»` : ""}</span>
-              : current
-                ? <span>Сейчас: этап «{current.title}»</span>
-                : <span>Ждёт следующего шага</span>}
+              : current ? <span>Сейчас: этап «{current.title}»</span> : <span>Ждёт следующего шага</span>}
           </div>
         </div>
       )}
 
-      {/* "Слой" результатов — раньше это была голая простыня текста, все записи
-          одного веса, дубли (реассайн после провала приёмки — та же задача,
-          два результата) выглядели как случайный повтор, не как история попыток.
-          Группируем по задаче: последняя попытка — карточка, старые — под тогглом,
-          не second копия той же строки. */}
-      {(sites.length > 0 || deliverables.length > 0) && (() => {
-        const groups: any[][] = []
-        const byTask = new Map<string, any[]>()
-        deliverables.forEach((d: any) => {
-          const key = d.task || ""
-          let g = byTask.get(key)
-          if (!g) { g = []; byTask.set(key, g); groups.push(g) }
-          g.push(d)
-        })
-        return (
-          <div>
-            <SectionLabel style={{ marginBottom: 8 }}>Результаты · {sites.length + groups.length}</SectionLabel>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {sites.map((s: any) => (
-                <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
-                  style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex",
-                    alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: "var(--radius-sm)",
-                    background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
-                  🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11, marginLeft: "auto" }}>Открыть ↗</span>
-                </a>
-              ))}
-              {groups.map((g, i) => <ArtifactGroupRow key={i} group={g} />)}
-            </div>
-          </div>
-        )
-      })()}
-
-      {roleCounts.size > 0 && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>
-            Команда проекта · {roleCounts.size} {roleCounts.size === 1 ? "роль" : "ролей"}
-            {depts.size > 1 ? ` · ${depts.size} отдела` : ""}
-          </SectionLabel>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <ShowMore items={[...roleCounts.entries()]} initial={5}
-              render={([role, count]) => (
-                <Pill key={role} accent={workingNow.some((t: any) => t.role === role)}>{roleName(role)}{count > 1 ? ` × ${count}` : ""}</Pill>
-              )}
-              moreLabel={n => `+${n}`} />
-          </div>
-          {depts.size > 1 && (
-            <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 8 }}>
-              Совместная работа отделов: {[...depts].map(d => DEPT_NAMES[d] || d).join(" + ")}
-            </div>
-          )}
+      {stagesLen > 0 && (
+        <div style={{ marginTop: 24, fontSize: 12.5, color: "var(--faint)" }}>
+          Этапы: {doneCount}/{stagesLen} завершено — список слева
         </div>
       )}
 
       {p.status === "done" && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>Что оставил после себя</SectionLabel>
-          <div style={{ fontSize: 12.5, color: "var(--text-dim)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ marginTop: 32 }}>
+          <InspectorLabel>Что оставил после себя</InspectorLabel>
+          <div style={{ fontSize: 13, color: "var(--text-dim)", display: "flex", gap: 22, flexWrap: "wrap" }}>
             <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
             <span>🌐 сайтов: {(lb.sites || []).length}</span>
             <span>👤 лидов: {lb.leads_count ?? 0}</span>
           </div>
         </div>
       )}
+    </div>
+  )
+}
 
-      {/* Операционная детализация — план и так уже выполнялся ДО открытия
-          страницы (см. подпись внутри), нужна редко: за одним раскрытием,
-          не тремя отдельными (UX-аудит п.5). */}
-      {(stages.length > 0 || tasks.length > 0) && (
-        <Disclosure summary={<SectionLabel style={{ marginBottom: 0 }}>Подробности плана</SectionLabel>}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            {stages.length > 0 && (
-              <div>
-                <SectionLabel style={{ marginBottom: 8 }}>
-                  Этапы · {doneCount}/{stages.length} завершено
-                </SectionLabel>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {stages.map((s: any) => (
-                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                      <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
-                        {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
-                      </span>
-                      <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+function TaskInspector({ task: t, allTasks, onJump }: { task: any; allTasks: any[]; onJump: (id: string) => void }) {
+  const [unblocking, setUnblocking] = useState(false)
+  const byId = new Map(allTasks.map((x: any) => [x.id, x]))
+  const deps = (t.deps || []).map((id: string) => byId.get(id)).filter(Boolean)
+  const children = allTasks.filter((x: any) => x.parent === t.id)
 
-            {tasks.some((t: any) => (t.deps || []).length > 0) && (
-              <div>
-                <SectionLabel style={{ marginBottom: 8 }}>Сценарий выполнения (граф зависимостей)</SectionLabel>
-                <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 10 }}>
-                  План составлен ДО начала работы — офис действует по нему, а не придумывает следующий шаг на ходу.
-                </div>
-                <TaskGraph tasks={tasks} />
-              </div>
-            )}
+  const unblock = async () => {
+    setUnblocking(true)
+    await api.unblockTask(t.id)
+    await refreshData(["plan"])
+    setUnblocking(false)
+  }
 
-            <div>
-              <SectionLabel style={{ marginBottom: 8 }}>Задачи · {tasks.length}</SectionLabel>
-              <ProjectTaskTree tasks={tasks} />
-            </div>
+  return (
+    <div>
+      <InspectorTitle>{t.title}</InspectorTitle>
+      <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+        <Pill accent={t.status === "in_progress"}>{roleName(t.role)}</Pill>
+        {(t.attempts || 0) > 0 && t.status !== "done" && <Pill color="var(--warning)">попытка {t.attempts}</Pill>}
+      </div>
+      {t.done_criterion && (
+        <div style={{ marginTop: 22 }}>
+          <InspectorLabel>Критерий готовности</InspectorLabel>
+          <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.65, maxWidth: "62ch" }}>{t.done_criterion}</div>
+        </div>
+      )}
+      {t.status === "blocked" && (
+        <div style={{ marginTop: 22 }}>
+          {t.blocked_reason && <div style={{ fontSize: 13, color: "var(--danger-soft)", lineHeight: 1.55, marginBottom: 10 }}>⛔ {t.blocked_reason}</div>}
+          <button onClick={unblock} disabled={unblocking}
+            style={{ fontSize: 12, padding: "7px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+              background: "var(--surface-soft)", border: "1px solid var(--hairline-strong)", color: "var(--text-dim)" }}>
+            {unblocking ? "…" : "↩ Вернуть в работу"}
+          </button>
+        </div>
+      )}
+      {deps.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <InspectorLabel>Зависит от</InspectorLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {deps.map((d: any) => (
+              <button key={d.id} onClick={() => onJump(d.id)} style={{ textAlign: "left", background: "none", border: "none",
+                cursor: "pointer", padding: 0, fontSize: 12.5, color: "var(--mercury-a)" }}>→ {d.title}</button>
+            ))}
           </div>
-        </Disclosure>
+        </div>
+      )}
+      {children.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <InspectorLabel>Подзадачи · {children.length}</InspectorLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {children.map((c: any) => (
+              <button key={c.id} onClick={() => onJump(c.id)} style={{ textAlign: "left", background: "none", border: "none",
+                cursor: "pointer", padding: 0, fontSize: 12.5, color: c.status === "done" ? "var(--muted)" : "var(--text-dim)",
+                textDecoration: c.status === "done" ? "line-through" : "none" }}>{c.title}</button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
 }
 
-const ARTIFACT_PREVIEW_LEN = 220
-
-// Карточка результата — иконка в бейдже + жирный заголовок + серая метка
-// роль/время, отдельно от контента (был плоский текстовый ряд без "слоя",
-// сливался в простыню — реальная жалоба на скриншоте: "выглядит отвратительно").
-function ArtifactRow({ d }: { d: any }) {
-  const [open, setOpen] = useState(false)
-  const content = (d.content || "").trim()
-  const isLong = content.length > ARTIFACT_PREVIEW_LEN
-  return (
-    <div style={{ display: "flex", gap: 10 }}>
-      <div style={{ width: 26, height: 26, borderRadius: "var(--radius-sm)", background: "var(--surface-strong)",
-        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>📝</div>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", lineHeight: 1.4 }}>
-        {/* line-clamp вместо slice(0,100) — раньше резало строку по символам
-            (реальный баг на скриншоте: "ЗАДАЧА ВЫПОЛНЕНА, КОГД" обрывалось
-            прямо посреди слова). CSS-перенос уважает границы слов сам. */}
-        <div style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", fontWeight: 500 }}>
-          {d.task}
-        </div>
-        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 2 }}>
-          {roleName(d.role)}{d.time ? ` · ${d.time}` : ""}
-        </div>
-        {content && (
-          <>
-            {open && (
-              <div style={{ marginTop: 8, padding: "8px 10px", background: "var(--surface-soft)",
-                borderLeft: "2px solid var(--hairline-strong)", borderRadius: 4, fontSize: 12,
-                whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-dim)" }}>
-                {content}
-              </div>
-            )}
-            {isLong && (
-              <button onClick={() => setOpen(v => !v)}
-                style={{ marginTop: 6, fontSize: 11, color: "var(--mercury-a)", background: "transparent",
-                  border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-                {open ? "Свернуть ↑" : "Показать полный результат →"}
-              </button>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// Группа результатов одной и той же задачи (реассайн после провала приёмки —
-// та же задача выполнялась несколько раз). Раньше каждая попытка была
-// отдельной идентичной строкой в общем списке ("выглядело как дубль/баг" —
-// реальная жалоба). Последняя попытка — карточка сразу, более старые — за
-// тогглом: это не дубль данных, а честная история, просто не на первом плане.
-function ArtifactGroupRow({ group }: { group: any[] }) {
+// Карточка результата в инспекторе — последняя попытка сразу, более ранние
+// (реассайн после провала приёмки — та же задача, несколько исходов) за
+// тогглом, не отдельными одинаковыми строками в общем списке.
+function ArtifactGroupInspector({ group }: { group: any[] }) {
   const [showAll, setShowAll] = useState(false)
+  const latest = group[0]
   const extra = group.length - 1
+  const content = (latest.content || "").trim()
   return (
-    <div style={{ padding: "10px 12px", borderRadius: "var(--radius-sm)",
-      background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
-      <ArtifactRow d={group[0]} />
+    <div>
+      <div style={{ fontSize: 12.5, color: "var(--faint)", marginTop: 8 }}>
+        {roleName(latest.role)}{latest.time ? ` · ${latest.time}` : ""}
+      </div>
+      {content && (
+        <div style={{ marginTop: 16, padding: "14px 16px", background: "var(--surface-soft)",
+          borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)", fontSize: 12.5,
+          whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-dim)", lineHeight: 1.65, maxWidth: "68ch" }}>
+          {content}
+        </div>
+      )}
       {extra > 0 && (
         <>
-          <button onClick={() => setShowAll(v => !v)}
-            style={{ marginTop: 8, marginLeft: 36, fontSize: 10.5, color: "var(--faint)",
-              background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+          <button onClick={() => setShowAll(v => !v)} style={{ marginTop: 14, fontSize: 11, color: "var(--faint)",
+            background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
             {showAll ? "Скрыть предыдущие попытки ↑" : `+ ещё ${extra} ${extra === 1 ? "попытка" : "попытки"} до этого ↓`}
           </button>
           {showAll && (
-            <div style={{ marginTop: 8, marginLeft: 36, paddingTop: 8, borderTop: "1px solid var(--hairline)",
-              display: "flex", flexDirection: "column", gap: 10 }}>
-              {group.slice(1).map((d, i) => <ArtifactRow key={i} d={d} />)}
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+              {group.slice(1).map((d, i) => (
+                <div key={i}>
+                  <div style={{ fontSize: 11, color: "var(--faint)" }}>{d.time}</div>
+                  {(d.content || "").trim() && (
+                    <div style={{ marginTop: 6, padding: "10px 12px", background: "var(--surface-soft)",
+                      borderRadius: "var(--radius-sm)", fontSize: 12, color: "var(--text-dim)",
+                      whiteSpace: "pre-wrap", wordBreak: "break-word", maxWidth: "68ch" }}>{d.content}</div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </>
       )}
-    </div>
-  )
-}
-
-// ── Сценарий-граф: план-граф зависимостей задач, составленный ДО начала
-// работы (orchestrator.plan_tasks/generate_initiative) — пользователь видит,
-// что будет происходить, а не только что уже случилось; офис исполняет по
-// нему же (plan.py уважает deps), не придумывает порядок на лету. Колонки —
-// топологические уровни (шаг зависит только от предыдущих шагов). ──────────
-function TaskGraph({ tasks }: { tasks: any[] }) {
-  const byId = new Map(tasks.map((t: any) => [t.id, t]))
-  const levelCache = new Map<string, number>()
-  function levelOf(t: any): number {
-    if (levelCache.has(t.id)) return levelCache.get(t.id)!
-    levelCache.set(t.id, 0) // защита от циклов в данных — не должно быть, но не вешаем UI
-    const deps = (t.deps || []).filter((d: string) => byId.has(d) && d !== t.id)
-    const lvl = deps.length === 0 ? 0 : 1 + Math.max(...deps.map((d: string) => levelOf(byId.get(d))))
-    levelCache.set(t.id, lvl)
-    return lvl
-  }
-  const columns: Record<number, any[]> = {}
-  tasks.forEach((t: any) => { const l = levelOf(t); (columns[l] = columns[l] || []).push(t) })
-  const maxLevel = Math.max(0, ...Object.keys(columns).map(Number))
-  const dotColor = (t: any) => t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
-    : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"
-
-  return (
-    <div style={{ display: "flex", gap: 18, overflowX: "auto", paddingBottom: 6, marginBottom: 14 }}>
-      {Array.from({ length: maxLevel + 1 }, (_, lvl) => (
-        <div key={lvl} style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 170, flexShrink: 0 }}>
-          <div className="mono" style={{ fontSize: 9, color: "var(--faint)", textAlign: "center", textTransform: "uppercase" }}>Шаг {lvl + 1}</div>
-          {(columns[lvl] || []).map((t: any) => (
-            <div key={t.id} style={{
-              padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--hairline)",
-              background: "var(--surface)", display: "flex", flexDirection: "column", gap: 4,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor(t), flexShrink: 0 }} />
-                <span style={{ fontSize: 11.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
-                  textDecoration: t.status === "done" ? "line-through" : "none", lineHeight: 1.3 }}>{t.title}</span>
-              </div>
-              <span style={{ fontSize: 9.5, color: "var(--faint)", paddingLeft: 12 }}>{roleName(t.role)}</span>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── Задачи проекта: kanban по статусу + вложенность parent_id (Task→Subtask,
-//    BOS §5 — вложенность вместо отдельной сущности Subtask) ─────────────────
-const COLS = [
-  { key: "pending",     label: "В очереди",  dot: "var(--whisper)" },
-  { key: "in_progress", label: "В работе",   dot: "var(--mercury-a)" },
-  { key: "done",        label: "Готово",      dot: "var(--success)" },
-  { key: "blocked",     label: "Заблокированы", dot: "var(--danger-soft)" },
-  // skipped — задача снята офисом (роль без отдела-исполнителя), НЕ выполнена.
-  { key: "skipped",     label: "Пропущены",  dot: "var(--muted)" },
-]
-
-function ProjectTaskTree({ tasks }: { tasks: any[] }) {
-  const [unblocking, setUnblocking] = useState<string>("")
-  const hasBlocked = tasks.some((t: any) => t.status === "blocked")
-  const hasSkipped = tasks.some((t: any) => t.status === "skipped")
-  const cols = COLS.filter(c =>
-    (c.key !== "blocked" || hasBlocked) && (c.key !== "skipped" || hasSkipped))
-
-  const byId = new Map(tasks.map((t: any) => [t.id, t]))
-  const childrenOf = (id: string) => tasks.filter((t: any) => t.parent && t.parent === id)
-  // Корень дерева: без parent, ИЛИ parent указывает на задачу другого проекта/
-  // несуществующую — тогда она тоже верхнего уровня, а не теряется молча.
-  const isRoot = (t: any) => !t.parent || !byId.has(t.parent)
-
-  const unblock = async (id: string) => {
-    setUnblocking(id)
-    await api.unblockTask(id)
-    await refreshData(["plan"])
-    setUnblocking("")
-  }
-
-  if (tasks.length === 0) return (
-    <div style={{ fontSize: 12.5, color: "var(--faint)" }}>У этого проекта пока нет своих задач.</div>
-  )
-
-  function renderTask(t: any, depth: number) {
-    const children = childrenOf(t.id)
-    return (
-      <div key={t.id} style={{ marginLeft: depth * 16 }}>
-        <div style={{ background: "var(--surface)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)",
-          padding: "10px 12px", marginBottom: children.length > 0 ? 6 : 0 }}>
-          <div style={{ fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text)", lineHeight: 1.35,
-            textDecoration: t.status === "done" ? "line-through" : "none", marginBottom: 8 }}>
-            {t.title}
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <Pill accent={t.status === "in_progress"}>{roleName(t.role)}</Pill>
-            {(t.attempts || 0) > 0 && t.status !== "done" && (
-              <Pill color="var(--warning)">попытка {t.attempts}</Pill>
-            )}
-            {t.done_criterion && t.status !== "done" && t.status !== "blocked" && (
-              <span style={{ fontSize: 10, color: "var(--success-dim)", lineHeight: 1.3 }}>✓ {t.done_criterion}</span>
-            )}
-          </div>
-          {t.status === "blocked" && (
-            <div style={{ marginTop: 8 }}>
-              {t.blocked_reason && (
-                <div style={{ fontSize: 10.5, color: "var(--danger-soft)", lineHeight: 1.4, marginBottom: 8 }}>
-                  ⛔ {t.blocked_reason}
-                </div>
-              )}
-              <button onClick={() => unblock(t.id)} disabled={unblocking === t.id}
-                style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, cursor: "pointer",
-                  background: "var(--surface-soft)", border: "1px solid var(--hairline-strong)",
-                  color: "var(--text-dim)" }}>
-                {unblocking === t.id ? "…" : "↩ Вернуть в работу"}
-              </button>
-            </div>
-          )}
-        </div>
-        {children.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10 }}>
-            {children.map((c: any) => renderTask(c, 0))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-      gap: 14, alignItems: "start" }}>
-      {cols.map(col => {
-        const items = tasks.filter((t: any) => t.status === col.key && isRoot(t))
-        return (
-          <div key={col.key} style={{ background: "var(--surface-soft)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)", padding: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: col.dot, display: "inline-block" }} />
-                <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-dim)" }}>{col.label}</span>
-              </div>
-              <span style={{ fontSize: 10, color: "var(--muted)" }}>{items.length}</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {items.map((t: any) => renderTask(t, 0))}
-              {items.length === 0 && <div style={{ fontSize: 11, color: "var(--faint)", textAlign: "center", padding: "16px 0" }}>—</div>}
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
