@@ -54,6 +54,14 @@ class Integration:
     actions: dict[str, Action] = field(default_factory=dict)
     oauth_url: str = ""   # если задан — подключение через кнопку «Войти», а не ввод ключа
     category: str = "other"  # для группировки каталога в UI: communication/publishing/productivity/dev
+    # Способность закреплена за отделом ('' = общая, доступна любой роли —
+    # прежнее поведение, инвариант "общие доступы" из CLAUDE.md никуда не делся
+    # по умолчанию). Заполнено — вызвать может только роль из этого отдела или
+    # portfolio-роль (CEO/лидер/штаб, org.is_portfolio_role) — see
+    # integration_tool_handlers._execute_integration. Не про креды (те и так
+    # общие), а про то, КОМУ ИМЕЕТ СМЫСЛ дёргать это действие — 1С/бухгалтерия
+    # не должна вызываться salesman'ом просто потому что ключ технически есть.
+    department: str = ""
 
     def cred_keys(self) -> list[str]:
         return [c.key for c in self.cred_fields]
@@ -68,6 +76,7 @@ class Integration:
             "how_to": self.how_to,
             "oauth_url": self.oauth_url,
             "category": self.category,
+            "department": self.department,
             "cred_fields": [
                 {"key": c.key, "label": c.label, "secret": c.secret}
                 for c in self.cred_fields

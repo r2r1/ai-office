@@ -3,12 +3,14 @@ export const ROLE_NAMES: Record<string, string> = {
   orchestrator: "CEO", researcher: "Ресёрчер", strategist: "Стратег", architect: "Архитектор", hr: "HR",
   salesman: "Продажник", developer: "Разработчик", marketer: "Маркетолог", analyst: "Аналитик", integrator: "Интегратор",
   cto: "CTO", cmo: "CMO", sales_lead: "Head of Sales", designer: "Дизайнер", onboarding: "Онбординг",
+  cfo: "CFO", accountant: "Бухгалтер",
 }
 
 export const ROLE_ICONS: Record<string, string> = {
   orchestrator: "🧭", researcher: "🔍", strategist: "📋", architect: "🏗️", hr: "👔",
   salesman: "💰", developer: "💻", marketer: "📢", analyst: "📊", integrator: "🔌",
   cto: "🛠️", cmo: "📣", sales_lead: "💼", designer: "🎨", onboarding: "✨",
+  cfo: "🧾", accountant: "📒",
 }
 
 export const ROLE_DESC: Record<string, string> = {
@@ -27,6 +29,8 @@ export const ROLE_DESC: Record<string, string> = {
   integrator:   "Подключает внешние сервисы через API, настраивает интеграции и автоматизации.",
   designer:     "Создаёт визуальные материалы: UI, иллюстрации, брендинг.",
   onboarding:   "Помогает настроить офис и провести клиента через первые шаги.",
+  cfo:          "Руководит финансовым отделом: учёт, ERP/1С, юнит-экономика, отчётность.",
+  accountant:   "Ведёт учёт в ERP/1С: контрагенты, документы, сверка данных.",
 }
 
 export const ROLE_SKILLS: Record<string, string[]> = {
@@ -45,6 +49,8 @@ export const ROLE_SKILLS: Record<string, string[]> = {
   integrator:   ["REST API", "Webhook", "Telegram", "GitHub"],
   designer:     ["UI/UX", "Figma", "Иллюстрации", "Брендинг"],
   onboarding:   ["Настройка", "Гайды", "Бриф", "Поддержка"],
+  cfo:          ["Учёт", "ERP/1С", "Юнит-экономика", "Отчётность"],
+  accountant:   ["1С/ERP", "Документы", "Сверка", "Контрагенты"],
 }
 
 export function roleName(role: string): string { return ROLE_NAMES[role] || role }

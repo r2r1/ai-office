@@ -92,6 +92,22 @@ ROLE_META: dict[str, dict] = {
         "constraints": [],
         "success_metrics": ["ответы и встречи"],
     },
+    "cfo": {
+        "department": "finance", "title": "CFO", "capability": "reasoning",
+        "mission": "Вести финансовый учёт офиса и юнит-экономику бизнеса клиента.",
+        "responsibilities": ["учёт", "ERP/1С", "юнит-экономика", "финансовая отчётность"],
+        "tools": ["delegate_task", "hire", "ask_colleague"],
+        "constraints": ["не делать работу руками — управлять подчинёнными"],
+        "success_metrics": ["точный учёт", "закрытые задачи отдела"],
+    },
+    "accountant": {
+        "department": "finance", "title": "Бухгалтер", "capability": "text",
+        "mission": "Вести учёт в ERP/1С и готовить финансовые документы.",
+        "responsibilities": ["контрагенты и документы в учётной системе", "сверка данных", "отчёты"],
+        "tools": ["use_capability", "use_integration", "write_file"],
+        "constraints": ["не менять финансовые данные без явного запроса владельца"],
+        "success_metrics": ["корректно созданные документы/контрагенты в учётной системе"],
+    },
 }
 
 

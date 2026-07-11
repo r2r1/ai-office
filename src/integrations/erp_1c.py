@@ -114,6 +114,7 @@ INTEGRATION = Integration(
     title="1С (ERP)",
     category="other",
     icon="🧾",
+    department="finance",  # учёт — зона cfo/accountant, не любой роли с ключом
     description="Учёт через опубликованный OData-интерфейс 1С (контрагенты/документы). "
                 "Схема полей у каждой конфигурации своя — настраивается field_map при подключении.",
     how_to="1С → Администрирование → Публикация на веб-сервере → включить OData "

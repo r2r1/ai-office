@@ -59,6 +59,21 @@ def build(agent_id: str, role: str,
             acts = ", ".join(integ.actions.keys())
             return f"У '{integ.name}' нет действия '{action_name}'. Доступные действия: {acts}."
 
+        # Department-скоуп (BOS: модуль соответствует своему отделу): способность
+        # без department (по умолчанию, "") — общий доступ, прежнее поведение
+        # (инвариант "общие доступы" из CLAUDE.md не тронут). Способность С
+        # department — только своя роль или portfolio-роль (CEO/лидер/штаб,
+        # у них и так обзор всего бизнеса); иначе, например, salesman мог бы
+        # дёрнуть 1С просто потому что ключ технически доступен всем.
+        if integ.department:
+            from src.office import org as org_module
+            role_dept = org_module.department_of_role(role)
+            if role_dept != integ.department and not org_module.is_portfolio_role(role):
+                dept_name = org_module.catalog().get(integ.department, {}).get("name", integ.department)
+                return (f"«{integ.title}» закреплена за отделом «{dept_name}» — твоя роль к нему не "
+                        f"относится. Поставь задачу через delegate_task нужной роли этого отдела "
+                        f"или попроси лидера («{org_module.lead_title(integ.department)}») выполнить это.")
+
         # Гейт автономии для ВНЕШНЕ-видимых действий: на уровнях ниже требуемого офис
         # не выполняет действие сам, а просит OK клиента. website публикует через свой
         # гейт (loop._publish_site_auto), поэтому его здесь не дублируем.
