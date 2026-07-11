@@ -799,12 +799,49 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
     if (t.department) depts.add(t.department)
   })
 
+  // Живой статус (UX-аудит п.1/2): один ответ на "что сейчас происходит",
+  // а не сборка из бейджа+прогресса+списка этапов по отдельности. Кто
+  // реально в работе — из tasks.assignee (plan.assign уже пишет agent_id
+  // туда), без нового бэкенд-эндпоинта.
+  const current = stages.find((s: any) => s.status === "active") || stages.find((s: any) => s.status !== "done")
+  const doneCount = stages.filter((s: any) => s.status === "done").length
+  const workingNow = tasks.filter((t: any) => t.status === "in_progress")
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {isActive && (
         <div>
           <SectionLabel style={{ marginBottom: 8 }}>Прогресс · {progress.done ?? 0}/{progress.total ?? 0} задач</SectionLabel>
           <MercuryBar percent={progress.percent ?? 0} />
+          {/* Hero-статус: живая точка + одна фраза "что происходит сейчас" —
+              раньше этот ответ надо было собирать из статус-пилюли, бара и
+              списка этапов по отдельности (UX-аудит, "первый экран"). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12.5, color: "var(--text-dim)" }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mercury-a)",
+              boxShadow: "0 0 8px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite", flexShrink: 0 }} />
+            {workingNow.length > 0
+              ? <span>Сейчас: {workingNow.map((t: any) => roleName(t.role)).join(", ")} {workingNow.length === 1 ? "работает" : "работают"} над задачей{current ? ` · этап «${current.title}»` : ""}</span>
+              : current
+                ? <span>Сейчас: этап «{current.title}»</span>
+                : <span>Ждёт следующего шага</span>}
+          </div>
+        </div>
+      )}
+
+      {(sites.length > 0 || deliverables.length > 0) && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Артефакты · {sites.length + deliverables.length}</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {sites.map((s: any) => (
+              <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
+                🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11 }}>↗</span>
+              </a>
+            ))}
+            {deliverables.map((d: any, i: number) => (
+              <ArtifactRow key={i} d={d} />
+            ))}
+          </div>
         </div>
       )}
 
@@ -817,7 +854,7 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <ShowMore items={[...roleCounts.entries()]} initial={5}
               render={([role, count]) => (
-                <Pill key={role}>{roleName(role)}{count > 1 ? ` × ${count}` : ""}</Pill>
+                <Pill key={role} accent={workingNow.some((t: any) => t.role === role)}>{roleName(role)}{count > 1 ? ` × ${count}` : ""}</Pill>
               )}
               moreLabel={n => `+${n}`} />
           </div>
@@ -840,59 +877,46 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
         </div>
       )}
 
-      {stages.length > 0 && (() => {
-        const current = stages.find((s: any) => s.status === "active") || stages.find((s: any) => s.status !== "done")
-        const doneCount = stages.filter((s: any) => s.status === "done").length
-        return (
-          <Disclosure count={stages.length}
-            summary={
-              <SectionLabel style={{ marginBottom: 0 }}>
-                Этапы · {doneCount}/{stages.length} завершено{current ? ` · сейчас: ${current.title}` : ""}
-              </SectionLabel>
-            }>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {stages.map((s: any) => (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                  <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
-                    {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
-                  </span>
-                  <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
+      {/* Операционная детализация — план и так уже выполнялся ДО открытия
+          страницы (см. подпись внутри), нужна редко: за одним раскрытием,
+          не тремя отдельными (UX-аудит п.5). */}
+      {(stages.length > 0 || tasks.length > 0) && (
+        <Disclosure summary={<SectionLabel style={{ marginBottom: 0 }}>Подробности плана</SectionLabel>}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {stages.length > 0 && (
+              <div>
+                <SectionLabel style={{ marginBottom: 8 }}>
+                  Этапы · {doneCount}/{stages.length} завершено
+                </SectionLabel>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {stages.map((s: any) => (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                      <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
+                        {s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
+                      </span>
+                      <span style={{ color: "var(--text-dim)" }}>{s.title}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+            )}
+
+            {tasks.some((t: any) => (t.deps || []).length > 0) && (
+              <div>
+                <SectionLabel style={{ marginBottom: 8 }}>Сценарий выполнения (граф зависимостей)</SectionLabel>
+                <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 10 }}>
+                  План составлен ДО начала работы — офис действует по нему, а не придумывает следующий шаг на ходу.
+                </div>
+                <TaskGraph tasks={tasks} />
+              </div>
+            )}
+
+            <div>
+              <SectionLabel style={{ marginBottom: 8 }}>Задачи · {tasks.length}</SectionLabel>
+              <ProjectTaskTree tasks={tasks} />
             </div>
-          </Disclosure>
-        )
-      })()}
-
-      {tasks.some((t: any) => (t.deps || []).length > 0) && (
-        <Disclosure summary={<SectionLabel style={{ marginBottom: 0 }}>Сценарий выполнения (граф зависимостей)</SectionLabel>}>
-          <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 10 }}>
-            План составлен ДО начала работы — офис действует по нему, а не придумывает следующий шаг на ходу.
           </div>
-          <TaskGraph tasks={tasks} />
         </Disclosure>
-      )}
-
-      <div>
-        <SectionLabel style={{ marginBottom: 8 }}>Задачи · {tasks.length}</SectionLabel>
-        <ProjectTaskTree tasks={tasks} />
-      </div>
-
-      {(sites.length > 0 || deliverables.length > 0) && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>Артефакты · {sites.length + deliverables.length}</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {sites.map((s: any) => (
-              <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
-                style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
-                🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11 }}>↗</span>
-              </a>
-            ))}
-            {deliverables.map((d: any, i: number) => (
-              <ArtifactRow key={i} d={d} />
-            ))}
-          </div>
-        </div>
       )}
     </div>
   )
@@ -913,7 +937,7 @@ function ArtifactRow({ d }: { d: any }) {
           (реальный баг на скриншоте: "ЗАДАЧА ВЫПОЛНЕНА, КОГД" обрывалось
           прямо посреди слова). CSS-перенос уважает границы слов сам. */}
       <div style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-        📝 {d.task} <span style={{ color: "var(--faint)" }}>· {roleName(d.role)}</span>
+        📝 {d.task} <span style={{ color: "var(--faint)" }}>· {roleName(d.role)}{d.time ? ` · ${d.time}` : ""}</span>
       </div>
       {content && (
         <>

@@ -125,6 +125,18 @@
 @keyframes ribbon-flow { 0% { stroke-dashoffset: 0; opacity: 0; } 20% { opacity: 0.6; } 80% { opacity: 0.6; } 100% { stroke-dashoffset: -1200; opacity: 0; } }
 @keyframes float-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+/* Уважение к prefers-reduced-motion — раньше не было нигде в проекте.
+   Не убирает анимации совсем (мгновенная смена состояния — тоже сигнал),
+   просто убирает бесконечные декоративные циклы (пульс/дрейф/зерно). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 *:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px rgba(255,172,46,0.55);
