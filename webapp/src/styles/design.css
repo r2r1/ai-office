@@ -40,8 +40,15 @@
   --bg-grad: radial-gradient(140% 110% at 50% -10%, #1a1a1a 0%, #101010 38%, #050505 75%);
   --text: #ffffff;
   --text-dim: #9a9a9a;
-  --muted: #6d6d6d;
-  --faint: #4a4a4a;
+  /* muted/faint подняты с #6d6d6d (3.73:1) и #4a4a4a (2.18:1) — оба реально
+     используются как читаемый текст (лейблы, подписи, пустые состояния,
+     121+83 места по кодовой базе), не декоративно, и не проходили WCAG AA
+     (4.5:1 для обычного текста — свой же принцип из PRODUCT.md, п.
+     "Accessibility & Inclusion"). #808080/#7a7a7a — 5.16:1 / 4.75:1 на фоне
+     #050505, посчитано по формуле относительной яркости WCAG. whisper/ghost
+     не трогали — используются как декоративные (разделители/hairline), не текст.*/
+  --muted: #808080;
+  --faint: #7a7a7a;
   --whisper: #3a3a3a;
   --ghost: #2a2a2a;
   /* Ахроматичное стекло: чёрные поверхности разной непрозрачности под
@@ -53,11 +60,14 @@
   --surface-card: #242424;
   --surface-head: #1f1f1f;
   --hairline: rgba(255,255,255,0.06);
-  --hairline-strong: rgba(255,255,255,0.12);
+  --hairline-strong: rgba(255,255,255,0.16);
   --hairline-soft: rgba(255,255,255,0.04);
   --inset-hi: rgba(255,255,255,0.05);
   /* глянцевый блик сверху стекла */
   --glass-sheen: rgba(255,255,255,0.09);
+  /* нижняя внутренняя тень стекла — вместе с --glass-sheen даёт эффект
+     выпуклой поверхности (блик сверху, тень снизу), а не плоской заливки */
+  --inset-lo: rgba(0,0,0,0.22);
   /* тени почти убраны — стекло держится на blur + hairline, а не на тенях */
   --shadow: 0 1px 3px rgba(0,0,0,0.16);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.12);
@@ -87,10 +97,11 @@
   --surface-card: #ffffff;
   --surface-head: #ffffff;
   --hairline: rgba(0,0,0,0.10);
-  --hairline-strong: rgba(0,0,0,0.16);
+  --hairline-strong: rgba(0,0,0,0.20);
   --hairline-soft: rgba(0,0,0,0.05);
   --inset-hi: rgba(255,255,255,0.85);
   --glass-sheen: rgba(255,255,255,0.5);
+  --inset-lo: rgba(0,0,0,0.05);
   /* тени почти убраны — чистое светлое стекло */
   --shadow: 0 1px 3px rgba(0,0,0,0.04);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.03);
@@ -148,14 +159,18 @@ body {
   background: var(--surface);
   -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
   border: 1px solid var(--hairline-strong);
-  box-shadow: var(--shadow-lg), 0 1px 0 var(--inset-hi) inset;
+  /* Блик сверху (--glass-sheen, ярче --inset-hi) + тень снизу (--inset-lo) —
+     выпуклая стеклянная поверхность, а не плоская заливка с цветом. Раньше
+     --glass-sheen был объявлен в токенах, но нигде не подключён — блика не
+     было вообще, отсюда ощущение "плоского" интерфейса на скриншотах. */
+  box-shadow: var(--shadow-lg), 0 1px 0 var(--glass-sheen) inset, 0 -1px 0 var(--inset-lo) inset;
 }
 /* Карточки — тоже стеклянные (liquid glass), полегче по blur ради FPS. Без градиента. */
 .card {
   background: var(--surface);
   -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%);
   border: 1px solid var(--hairline-strong);
-  box-shadow: var(--shadow), 0 1px 0 var(--inset-hi) inset;
+  box-shadow: var(--shadow), 0 1px 0 var(--glass-sheen) inset, 0 -1px 0 var(--inset-lo) inset;
 }
 .display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; }
 .mono { font-family: var(--font-mono); }
