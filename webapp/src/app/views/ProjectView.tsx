@@ -828,22 +828,37 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
         </div>
       )}
 
-      {(sites.length > 0 || deliverables.length > 0) && (
-        <div>
-          <SectionLabel style={{ marginBottom: 8 }}>Артефакты · {sites.length + deliverables.length}</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {sites.map((s: any) => (
-              <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
-                style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
-                🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11 }}>↗</span>
-              </a>
-            ))}
-            {deliverables.map((d: any, i: number) => (
-              <ArtifactRow key={i} d={d} />
-            ))}
+      {/* "Слой" результатов — раньше это была голая простыня текста, все записи
+          одного веса, дубли (реассайн после провала приёмки — та же задача,
+          два результата) выглядели как случайный повтор, не как история попыток.
+          Группируем по задаче: последняя попытка — карточка, старые — под тогглом,
+          не second копия той же строки. */}
+      {(sites.length > 0 || deliverables.length > 0) && (() => {
+        const groups: any[][] = []
+        const byTask = new Map<string, any[]>()
+        deliverables.forEach((d: any) => {
+          const key = d.task || ""
+          let g = byTask.get(key)
+          if (!g) { g = []; byTask.set(key, g); groups.push(g) }
+          g.push(d)
+        })
+        return (
+          <div>
+            <SectionLabel style={{ marginBottom: 8 }}>Результаты · {sites.length + groups.length}</SectionLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {sites.map((s: any) => (
+                <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 12.5, color: "var(--mercury-a)", textDecoration: "none", display: "flex",
+                    alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: "var(--radius-sm)",
+                    background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
+                  🌐 {s.title || s.slug} <span style={{ color: "var(--faint)", fontSize: 11, marginLeft: "auto" }}>Открыть ↗</span>
+                </a>
+              ))}
+              {groups.map((g, i) => <ArtifactGroupRow key={i} group={g} />)}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {roleCounts.size > 0 && (
         <div>
@@ -924,36 +939,74 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
 
 const ARTIFACT_PREVIEW_LEN = 220
 
-// Короткая строка «что сделано» + опциональная кнопка «Показать полностью»
-// вместо полного содержимого артефакта инлайн (реальный баг: сюда попадал
-// весь контекст задачи целиком — брифом, ТЗ, памятью — на весь экран).
+// Карточка результата — иконка в бейдже + жирный заголовок + серая метка
+// роль/время, отдельно от контента (был плоский текстовый ряд без "слоя",
+// сливался в простыню — реальная жалоба на скриншоте: "выглядит отвратительно").
 function ArtifactRow({ d }: { d: any }) {
   const [open, setOpen] = useState(false)
   const content = (d.content || "").trim()
   const isLong = content.length > ARTIFACT_PREVIEW_LEN
   return (
-    <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.4 }}>
-      {/* line-clamp вместо slice(0,100) — раньше резало строку по символам
-          (реальный баг на скриншоте: "ЗАДАЧА ВЫПОЛНЕНА, КОГД" обрывалось
-          прямо посреди слова). CSS-перенос уважает границы слов сам. */}
-      <div style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-        📝 {d.task} <span style={{ color: "var(--faint)" }}>· {roleName(d.role)}{d.time ? ` · ${d.time}` : ""}</span>
+    <div style={{ display: "flex", gap: 10 }}>
+      <div style={{ width: 26, height: 26, borderRadius: "var(--radius-sm)", background: "var(--surface-strong)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>📝</div>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", lineHeight: 1.4 }}>
+        {/* line-clamp вместо slice(0,100) — раньше резало строку по символам
+            (реальный баг на скриншоте: "ЗАДАЧА ВЫПОЛНЕНА, КОГД" обрывалось
+            прямо посреди слова). CSS-перенос уважает границы слов сам. */}
+        <div style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", fontWeight: 500 }}>
+          {d.task}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 2 }}>
+          {roleName(d.role)}{d.time ? ` · ${d.time}` : ""}
+        </div>
+        {content && (
+          <>
+            {open && (
+              <div style={{ marginTop: 8, padding: "8px 10px", background: "var(--surface-soft)",
+                borderLeft: "2px solid var(--hairline-strong)", borderRadius: 4, fontSize: 12,
+                whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-dim)" }}>
+                {content}
+              </div>
+            )}
+            {isLong && (
+              <button onClick={() => setOpen(v => !v)}
+                style={{ marginTop: 6, fontSize: 11, color: "var(--mercury-a)", background: "transparent",
+                  border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                {open ? "Свернуть ↑" : "Показать полный результат →"}
+              </button>
+            )}
+          </>
+        )}
       </div>
-      {content && (
+    </div>
+  )
+}
+
+// Группа результатов одной и той же задачи (реассайн после провала приёмки —
+// та же задача выполнялась несколько раз). Раньше каждая попытка была
+// отдельной идентичной строкой в общем списке ("выглядело как дубль/баг" —
+// реальная жалоба). Последняя попытка — карточка сразу, более старые — за
+// тогглом: это не дубль данных, а честная история, просто не на первом плане.
+function ArtifactGroupRow({ group }: { group: any[] }) {
+  const [showAll, setShowAll] = useState(false)
+  const extra = group.length - 1
+  return (
+    <div style={{ padding: "10px 12px", borderRadius: "var(--radius-sm)",
+      background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
+      <ArtifactRow d={group[0]} />
+      {extra > 0 && (
         <>
-          {open && (
-            <div style={{ marginTop: 6, padding: "8px 10px", background: "var(--surface-soft)",
-              borderLeft: "2px solid var(--hairline-strong)", borderRadius: 4, fontSize: 12,
-              whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-dim)" }}>
-              {content}
+          <button onClick={() => setShowAll(v => !v)}
+            style={{ marginTop: 8, marginLeft: 36, fontSize: 10.5, color: "var(--faint)",
+              background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+            {showAll ? "Скрыть предыдущие попытки ↑" : `+ ещё ${extra} ${extra === 1 ? "попытка" : "попытки"} до этого ↓`}
+          </button>
+          {showAll && (
+            <div style={{ marginTop: 8, marginLeft: 36, paddingTop: 8, borderTop: "1px solid var(--hairline)",
+              display: "flex", flexDirection: "column", gap: 10 }}>
+              {group.slice(1).map((d, i) => <ArtifactRow key={i} d={d} />)}
             </div>
-          )}
-          {isLong && (
-            <button onClick={() => setOpen(v => !v)}
-              style={{ marginTop: 4, fontSize: 11, color: "var(--mercury-a)", background: "transparent",
-                border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-              {open ? "Свернуть ↑" : "Показать полный результат →"}
-            </button>
           )}
         </>
       )}
