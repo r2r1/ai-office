@@ -26,46 +26,12 @@ const INDENT_HEIGHT = 48
  */
 function buildPath(H: number, by: number): string {
   if (H < 1) return ""
-  
+
   // Ограничиваем центр, чтобы не вылезать за пределы контейнера
-  // Добавляем небольшой отступ (padding), чтобы кривая не ломалась о скругления углов
   const safeTop = -10
-  const safeBot = H - R 
-  
-  const by_c = Math.max(safeTop, Math.min(safeBot, by))
-  
-  // Проверяем, насколько близко активный элемент к краям
-  const distToTop = by_c - safeTop
-  const distToBot = safeBot - by_c
-  
-  // Если элемент очень близко к краю (< INDENT_HEIGHT), используем упрощенную геометрию
-  // чтобы "вытянуть" выпуклость до самого края без артефактов
-  const isNearEdge = distToTop < INDENT_HEIGHT || distToBot < INDENT_HEIGHT
-  
-  function buildPath(H: number, by: number): string {
-  if (H < 1) return ""
-
-  const pad = R + 4
-  const safeTop = pad
-  const safeBot = H - pad
+  const safeBot = H - R
   const by_c = Math.max(safeTop, Math.min(safeBot, by))
 
-  const halfH = INDENT_HEIGHT
-  const topY = Math.max(safeTop, by_c - halfH)
-  const botY = Math.min(safeBot, by_c + halfH)
-  const cpFactor = (botY - topY) * 0.55
-
-  return [
-    `M ${R} 0 L ${W_VIS - R} 0 Q ${W_VIS} 0 ${W_VIS} ${R}`,
-    `L ${W_VIS} ${topY}`,
-    `C ${W_VIS} ${topY + cpFactor} ${W_VIS - INDENT_DEPTH} ${by_c - cpFactor * 0.6} ${W_VIS - INDENT_DEPTH} ${by_c}`,
-    `C ${W_VIS - INDENT_DEPTH} ${by_c + cpFactor * 0.6} ${W_VIS} ${botY - cpFactor} ${W_VIS} ${botY}`,
-    `L ${W_VIS} ${H - R} Q ${W_VIS} ${H} ${W_VIS - R} ${H}`,
-    `L ${R} ${H} Q 0 ${H} 0 ${H - R} L 0 ${R} Q 0 0 ${R} 0 Z`,
-  ].join(" ")
-}
-
-  // СТАНДАРТНАЯ ГЕОМЕТРИЯ (для средних элементов)
   // Плавные кубические кривые Безье
   const topY = by_c - INDENT_HEIGHT
   const botY = by_c + INDENT_HEIGHT
@@ -329,6 +295,7 @@ function NavItem({ item, active, onChange, badge = 0 }: {
 
   return (
     <button
+      className={`nav-item${isActive ? " is-active" : ""}`}
       onClick={() => onChange(item.id)}
       data-bridge-active={isActive ? "true" : undefined}
       aria-label={badge > 0 ? `${item.label}, непрочитанных: ${badge}` : item.label}
@@ -345,8 +312,6 @@ function NavItem({ item, active, onChange, badge = 0 }: {
         transition: "color 0.2s var(--ease-out)",
         color: isActive ? AMBER : "var(--muted)",
       }}
-      onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.color = "var(--text-dim)" }}
-      onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.color = "var(--muted)" }}
     >
       {/* Анимированная иконка */}
       <motion.span

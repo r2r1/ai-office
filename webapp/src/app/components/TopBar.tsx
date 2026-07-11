@@ -1,4 +1,3 @@
-import { useState } from "react"
 import type { Theme } from "../types"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
@@ -89,23 +88,10 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
         )}
         <OfficeToggle paused={!!officePaused} onClick={onToggleOffice} isMobile={isMobile} />
         <button
+          className="btn btn-icon btn-ghost"
           onClick={onToggleTheme}
           title={theme === "dark" ? "Светлая тема" : "Темная тема"}
-          style={{
-            width: 32, height: 32, borderRadius: "var(--radius-md)", cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", 
-            color: "var(--text-dim)", fontSize: 16,
-            display: "flex", alignItems: "center", justifyContent: "center", 
-            transition: "all 0.2s ease",
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = "var(--surface-soft)"
-            e.currentTarget.style.color = "var(--text)"
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = "transparent"
-            e.currentTarget.style.color = "var(--text-dim)"
-          }}
+          style={{ fontSize: 16 }}
         >
           {theme === "dark" ? "☀" : "☾"}
         </button>
@@ -116,28 +102,14 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
 
 /** Кнопка Пауза / Возобновить офис. */
 function OfficeToggle({ paused, onClick, isMobile }: { paused: boolean; onClick?: () => void; isMobile: boolean }) {
-  const [hover, setHover] = useState(false)
   return (
     <button
+      className={`btn btn-toggle${paused ? " is-on" : ""}`}
       onClick={onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       title={paused ? "Возобновить работу офиса" : "Поставить офис на паузу"}
-      style={{
-        display: "flex", alignItems: "center", gap: isMobile ? 0 : 5,
-        padding: isMobile ? "6px 8px" : "5px 11px",
-        borderRadius: "var(--radius-pill)",
-        border: `1px solid ${paused ? "rgba(255,172,46,0.5)" : "var(--hairline)"}`,
-        background: paused
-          ? (hover ? "rgba(255,172,46,0.18)" : "rgba(255,172,46,0.08)")
-          : (hover ? "var(--surface-soft)" : "transparent"),
-        cursor: "pointer", transition: "all 0.2s ease", flexShrink: 0,
-      }}>
+      style={{ padding: isMobile ? "6px 8px" : "5px 11px", gap: isMobile ? 0 : 5, height: "auto" }}>
       <span style={{ fontSize: 13 }}>{paused ? "▶" : "⏸"}</span>
-      {!isMobile && (
-        <span className="mono" style={{ fontSize: 11, color: paused ? "#ffac2e" : "var(--text-dim)" }}>
-          {paused ? "Пауза" : "Стоп"}
-        </span>
-      )}
+      {!isMobile && <span className="mono" style={{ fontSize: 11 }}>{paused ? "Пауза" : "Стоп"}</span>}
     </button>
   )
 }
@@ -156,19 +128,13 @@ function StatusBadge({ understanding, health, trust, autonomyLevel, qualityMode,
   qualityMode?: { icon: string; label: string } | null
   onClick?: () => void
 }) {
-  const [hover, setHover] = useState(false)
   const healthColor = health ? (health.company >= 75 ? "#a0e0ab" : health.company >= 45 ? "#ffac2e" : "#e05a5a") : "var(--text-dim)"
   return (
     <button
+      className="btn btn-ghost btn-pill"
       onClick={onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       title="Статус офиса: понимание бизнеса, здоровье, доверие, автономность, качество"
-      style={{
-        display: "flex", alignItems: "center", gap: 8, padding: "5px 12px",
-        borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-        background: hover ? "var(--surface-soft)" : "transparent",
-        cursor: "pointer", transition: "all 0.2s ease",
-      }}>
+      style={{ gap: 8, borderColor: "var(--hairline)" }}>
       {health && (
         <span style={{ width: 7, height: 7, borderRadius: "50%", background: healthColor, flexShrink: 0 }} />
       )}
