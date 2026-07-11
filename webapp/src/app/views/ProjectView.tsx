@@ -6,6 +6,7 @@ import { roleName } from "../../data/roles"
 import type { ReactNode } from "react"
 import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel, Disclosure, ShowMore } from "./ui"
 import { useThrottled } from "../hooks"
+import { roleIcon } from "../../data/roles"
 
 // Карта сайта (рефакторинг 2026-07-08 — смена паттерна с inline-аккордеона на
 // master-detail): список инициатив/проектов/процессов — компактные строки,
@@ -734,57 +735,61 @@ function SalesProcessDetailScreen({ summary, onBack }: {
 // экране вместо инлайн-раскрытия. ────────────────────────────────────────────
 const DEPT_NAMES: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
 
+// ── Экран проекта: не таск-трекер, а "окно внутрь работы офиса" (явный
+// заказ). Hero (первый экран, живой статус+прогресс+KPI) → закреплённая
+// навигация-якоря (Работа/Результаты/Команда, не вкладки — один непрерывный
+// скролл) → дерево+инспектор для работы, крупные карточки для результатов,
+// полоска для команды. DetailHeader (общий для инициатив/процессов/продаж)
+// здесь НЕ используется — только у проекта есть эта живая, самодостаточная
+// история, только для него оправдан bespoke-хедер.
 function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: {
   project: any; detail: any; onBack: () => void; onPause: () => void; onResume: () => void
 }) {
   const isActive = p.status === "active"
   const isQueued = p.status === "queued"
   const isPaused = p.status === "paused"
-  const isOngoing = isActive || isQueued || isPaused  // разовые Project ставятся на паузу, закрытые (done) — уже история
-  const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
+  const isDone = p.status === "done"
+  const isOngoing = isActive || isQueued || isPaused
   return (
-    <>
-      {/* sub дублирует title, когда goal при создании не задали отдельно —
-          реальный кейс со скриншота: "Привлекать больше клиентов..." дважды,
-          слово в слово. Не показываем подзаголовок, если он идентичен заголовку. */}
-      <DetailHeader badge={typeBadge} title={p.title} onBack={onBack}
-        sub={p.goal && p.goal !== p.title ? p.goal : undefined}
-        statusPill={isActive ? <Pill accent>Активный</Pill>
-          : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
-          : isPaused ? <Pill>⏸ На паузе</Pill>
-          : <Pill color="var(--success)">Закрыт</Pill>}
-        actions={isOngoing && p.type === "project" ? (
-          isPaused ? (
-            <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
-              border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
-          ) : (
-            <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
-              border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
-          )
-        ) : undefined} />
-      <ViewBody>
+    <ViewBody style={{ padding: 0 }}>
+      <div style={{ padding: "20px 28px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <button onClick={onBack} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: "var(--radius-pill)",
+            fontSize: 12, cursor: "pointer", border: "1px solid var(--hairline-strong)",
+            background: "var(--surface-soft)", color: "var(--text-dim)" }}>← Назад к работе</button>
+          {isOngoing && p.type === "project" && (
+            isPaused ? (
+              <button onClick={onResume} style={{ padding: "8px 15px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
+            ) : (
+              <button onClick={onPause} style={{ padding: "8px 15px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+            )
+          )}
+        </div>
         {isPaused && (
-          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, padding: "10px 14px",
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 16, padding: "10px 14px",
             background: "var(--surface-soft)", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)" }}>
             ⏸ Проект на паузе — команда не берёт по нему новых задач. Уже начатое доделывается, слот освобождён для очереди.
           </div>
         )}
-        {!detail ? (
-          <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div>
-        ) : (
-          <ProjectDetailBody project={p} detail={detail} />
-        )}
-      </ViewBody>
-    </>
+      </div>
+      {!detail ? (
+        <div style={{ fontSize: 12, color: "var(--faint)", padding: "20px 28px" }}>Загрузка…</div>
+      ) : (
+        <ProjectDetailBody project={p} detail={detail} isDone={isDone} />
+      )}
+    </ViewBody>
   )
 }
 
-// ── Дерево + инспектор (Figma/Linear/VS Code паттерн) ───────────────────────
-// Раньше — шесть секций одного визуального веса подряд, "полотно" (реальная
-// жалоба на скриншоте). Теперь: слева компактная навигация по всему, что есть
-// у проекта (этапы/задачи/результаты/команда), справа — контент выбранного
-// узла. Ничего не выбрано = обзор проекта (живой статус), а не пустой экран —
-// тот же принцип, что в Figma (нет selection → показаны свойства страницы).
+// ── Hero + якорь-навигация + дерево(по этапам)/инспектор + результаты-карточки
+// + команда-полоска. Явный заказ: "не таск-трекер — окно внутрь работы офиса".
+// Дерево вложено ПО ЭТАПАМ по-настоящему (milestone_id, см. plan.py/milestones.py
+// — раньше Stage и Task были двумя не связанными системами, вложенность была
+// бы обманом). Один общий скролл, якоря вместо вкладок (SubTabs здесь не подходит —
+// вкладки переключают контент, якоря просто прокручивают уже видимую страницу).
 type TreeSel =
   | { kind: "stage"; id: string }
   | { kind: "task"; id: string }
@@ -792,7 +797,13 @@ type TreeSel =
   | { kind: "team"; role: string }
   | null
 
-function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }) {
+const ANCHORS = [
+  { id: "work", label: "Работа" },
+  { id: "results", label: "Результаты" },
+  { id: "team", label: "Команда" },
+]
+
+function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detail: any; isDone: boolean }) {
   const isActive = p.status === "active" || p.status === "paused"
   const tasks: any[] = detail.tasks || []
   const stages = (detail.milestones?.stages || []).filter((s: any) => s.item_count > 0 || s.status !== "pending")
@@ -809,8 +820,6 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
     return () => window.removeEventListener("resize", onResize)
   }, [])
 
-  // Команда проекта: реальная кросс-функциональность (BOS §5), не догадка —
-  // считается из ролей/отделов задач, которые ЭТОТ Work реально породил.
   const roleCounts = new Map<string, number>()
   const depts = new Set<string>()
   tasks.forEach((t: any) => {
@@ -819,12 +828,10 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
   })
 
   const current = stages.find((s: any) => s.status === "active") || stages.find((s: any) => s.status !== "done")
+  const next = current ? stages[stages.findIndex((s: any) => s.id === current.id) + 1] : null
   const doneCount = stages.filter((s: any) => s.status === "done").length
   const workingNow = tasks.filter((t: any) => t.status === "in_progress")
 
-  // Группировка результатов по задаче — реассайн после провала приёмки даёт
-  // несколько попыток с одинаковым заголовком; последняя — узел дерева, старые
-  // видны в инспекторе за тогглом, не отдельными одинаковыми строками.
   const resultGroups: any[][] = []
   const byTaskKey = new Map<string, any[]>()
   deliverables.forEach((d: any) => {
@@ -837,120 +844,381 @@ function ProjectDetailBody({ project: p, detail }: { project: any; detail: any }
   const byId = new Map(tasks.map((t: any) => [t.id, t]))
   const selectedTask = sel?.kind === "task" ? byId.get(sel.id) : null
 
-  return (
-    <div style={{ display: "flex", flexDirection: narrow ? "column" : "row", gap: narrow ? 28 : 0 }}>
-      <div style={{ width: narrow ? "100%" : 272, flexShrink: 0, paddingRight: narrow ? 0 : 28,
-        borderRight: narrow ? "none" : "1px solid var(--hairline)" }}>
-        <TreeGroup label="Этапы" count={stages.length}>
-          {stages.map((s: any) => (
-            <TreeRow key={s.id} active={sel?.kind === "stage" && sel.id === s.id} onClick={() => setSel({ kind: "stage", id: s.id })}
-              icon={s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
-              iconColor={s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)"}
-              label={s.title} />
-          ))}
-        </TreeGroup>
+  // Дерево по этапам — честная вложенность (milestone_id проставляется задаче
+  // В МОМЕНТ создания, см. plan.py). Задачи без него (созданы до этой связи,
+  // или milestone уже не существует) — отдельная ветка "Без этапа", не потеряны.
+  const stageIds = new Set(stages.map((s: any) => s.id))
+  const tasksByStage = new Map<string, any[]>()
+  const tasksNoStage: any[] = []
+  tasks.forEach((t: any) => {
+    if (t.milestone_id && stageIds.has(t.milestone_id)) {
+      const arr = tasksByStage.get(t.milestone_id) || []
+      arr.push(t)
+      tasksByStage.set(t.milestone_id, arr)
+    } else {
+      tasksNoStage.push(t)
+    }
+  })
 
-        <TreeGroup label="Задачи" count={tasks.length}>
-          {tasks.map((t: any) => (
-            <TreeRow key={t.id} active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
-              icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
-                : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
-              label={t.title} strike={t.status === "done"} />
-          ))}
-        </TreeGroup>
+  return (
+    <div>
+      <ProjectHero p={p} progress={progress} isActive={isActive} isDone={isDone}
+        current={current} next={next} workingNow={workingNow} lb={lb}
+        stages={stages} doneCount={doneCount} roleCounts={roleCounts} depts={depts} />
+
+      <AnchorNav />
+
+      <div style={{ padding: "0 28px 64px" }}>
+        <section id="work" style={{ paddingTop: 48 }}>
+          <SectionHeading>Работа</SectionHeading>
+          <div className="glass" style={{ display: "flex", flexDirection: narrow ? "column" : "row",
+            gap: narrow ? 0 : 0, marginTop: 20, borderRadius: "var(--radius-lg)", padding: narrow ? 20 : "24px 0 24px 24px",
+            overflow: "hidden" }}>
+            <div style={{ width: narrow ? "100%" : 280, flexShrink: 0, paddingRight: narrow ? 0 : 24,
+              paddingBottom: narrow ? 20 : 0,
+              borderRight: narrow ? "none" : "1px solid var(--hairline)",
+              borderBottom: narrow ? "1px solid var(--hairline)" : "none" }}>
+              {stages.map((s: any) => (
+                <div key={s.id} style={{ marginBottom: 24 }}>
+                  <TreeRow active={sel?.kind === "stage" && sel.id === s.id} onClick={() => setSel({ kind: "stage", id: s.id })}
+                    icon={s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
+                    iconColor={s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)"}
+                    label={s.title} bold />
+                  <div style={{ paddingLeft: 19, display: "flex", flexDirection: "column", marginTop: 2 }}>
+                    {(tasksByStage.get(s.id) || []).map((t: any) => (
+                      <TreeRow key={t.id} active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
+                        icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
+                          : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
+                        label={t.title} strike={t.status === "done"} small />
+                    ))}
+                    {(tasksByStage.get(s.id) || []).length === 0 && (
+                      <div style={{ fontSize: 12, color: "var(--faint)", padding: "4px 8px" }}>пока нет задач</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {tasksNoStage.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <TreeGroup label="Без этапа" count={tasksNoStage.length}>
+                    {tasksNoStage.map((t: any) => (
+                      <TreeRow key={t.id} active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
+                        icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
+                          : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
+                        label={t.title} strike={t.status === "done"} small />
+                    ))}
+                  </TreeGroup>
+                </div>
+              )}
+            </div>
+
+            {/* Инспектор — "всегда закреплён", справа. sticky, не модалка. */}
+            <div style={{ flex: 1, minWidth: 0, paddingLeft: narrow ? 0 : 32, paddingRight: narrow ? 0 : 24,
+              paddingTop: narrow ? 20 : 0,
+              position: narrow ? "static" : "sticky", top: 20, alignSelf: "flex-start" }}>
+              {sel === null && (
+                <div style={{ fontSize: 13, color: "var(--faint)" }}>Выбери этап или задачу слева, чтобы увидеть подробности.</div>
+              )}
+              {sel?.kind === "stage" && (() => {
+                const s = stages.find((x: any) => x.id === sel.id)
+                if (!s) return null
+                return (
+                  <div>
+                    <InspectorTitle>{s.title}</InspectorTitle>
+                    <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 10 }}>
+                      {s.status === "done" ? "Завершён" : s.status === "active" ? "Сейчас в работе" : "Ещё не начат"}
+                    </div>
+                    {s.summary && <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.65, marginTop: 14, maxWidth: "62ch" }}>{s.summary}</div>}
+                  </div>
+                )
+              })()}
+              {selectedTask && (
+                <TaskInspector task={selectedTask} allTasks={tasks} onJump={(id: string) => setSel({ kind: "task", id })} />
+              )}
+            </div>
+          </div>
+        </section>
 
         {(sites.length > 0 || resultGroups.length > 0) && (
-          <TreeGroup label="Результаты" count={sites.length + resultGroups.length}>
-            {sites.map((s: any, i: number) => (
-              <TreeRow key={`site-${i}`} active={sel?.kind === "result" && sel.type === "site" && sel.idx === i}
-                onClick={() => setSel({ kind: "result", idx: i, type: "site" })} icon="🌐" label={s.title || s.slug} />
-            ))}
-            {resultGroups.map((g, i) => (
-              <TreeRow key={`grp-${i}`} active={sel?.kind === "result" && sel.type === "group" && sel.idx === i}
-                onClick={() => setSel({ kind: "result", idx: i, type: "group" })} icon="📝" label={g[0].task} />
-            ))}
-          </TreeGroup>
+          <section id="results" style={{ paddingTop: 48 }}>
+            <SectionHeading>Результаты</SectionHeading>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14, marginTop: 20 }}>
+              {sites.map((s: any) => (
+                <a key={s.slug} href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer" className="card"
+                  style={{ textDecoration: "none", display: "block", padding: "20px 22px", borderRadius: "var(--radius-lg)",
+                    transition: "transform 0.18s, border-color 0.18s" }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = "var(--hairline-strong)" }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.borderColor = "" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center",
+                    justifyContent: "center", fontSize: 19, background: "rgba(255,172,46,0.12)" }}>🌐</div>
+                  <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text)", marginTop: 14 }}>{s.title || s.slug}</div>
+                  <div style={{ fontSize: 12, color: "var(--mercury-a)", marginTop: 8 }}>Открыть ↗</div>
+                </a>
+              ))}
+              {resultGroups.map((g, i) => {
+                const latest = g[0]
+                const words = (latest.content || "").trim().split(/\s+/).filter(Boolean).length
+                const active = sel?.kind === "result" && sel.type === "group" && sel.idx === i
+                return (
+                  <button key={i} onClick={() => setSel({ kind: "result", idx: i, type: "group" })} className="card"
+                    style={{ textAlign: "left", cursor: "pointer", display: "block", padding: "20px 22px", borderRadius: "var(--radius-lg)",
+                      font: "inherit", color: "inherit", transition: "transform 0.18s, border-color 0.18s",
+                      borderColor: active ? "var(--mercury-a)" : undefined }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; if (!active) e.currentTarget.style.borderColor = "var(--hairline-strong)" }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = ""; if (!active) e.currentTarget.style.borderColor = "" }}>
+                    <div style={{ width: 40, height: 40, borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center",
+                      justifyContent: "center", fontSize: 19, background: "var(--surface-soft)" }}>📄</div>
+                    <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text)", marginTop: 14,
+                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{latest.task}</div>
+                    <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 8 }}>
+                      {words > 0 ? `${words} слов` : roleName(latest.role)}{g.length > 1 ? ` · ${g.length} попытки` : ""}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            {sel?.kind === "result" && (() => {
+              if (sel.type === "site") {
+                const s = sites[sel.idx]
+                if (!s) return null
+                return (
+                  <div className="card" style={{ marginTop: 16, padding: 20, borderRadius: "var(--radius-lg)" }}>
+                    <InspectorTitle>{s.title || s.slug}</InspectorTitle>
+                    <a href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
+                      style={{ fontSize: 13, color: "var(--mercury-a)", textDecoration: "none", display: "inline-flex",
+                        alignItems: "center", gap: 6, marginTop: 14 }}>Открыть сайт ↗</a>
+                  </div>
+                )
+              }
+              const g = resultGroups[sel.idx]
+              if (!g) return null
+              return (
+                <div className="card" style={{ marginTop: 16, padding: 20, borderRadius: "var(--radius-lg)" }}>
+                  <InspectorTitle>{g[0].task}</InspectorTitle>
+                  <ArtifactGroupInspector group={g} />
+                </div>
+              )
+            })()}
+          </section>
         )}
 
         {roleCounts.size > 0 && (
-          <TreeGroup label="Команда" count={roleCounts.size}>
-            {[...roleCounts.entries()].map(([role, count]) => (
-              <TreeRow key={role} active={sel?.kind === "team" && sel.role === role} onClick={() => setSel({ kind: "team", role })}
-                icon={workingNow.some((t: any) => t.role === role) ? "●" : "○"}
-                iconColor={workingNow.some((t: any) => t.role === role) ? "var(--mercury-a)" : "var(--faint)"}
-                label={`${roleName(role)}${count > 1 ? ` × ${count}` : ""}`} />
-            ))}
-          </TreeGroup>
+          <section id="team" style={{ paddingTop: 48 }}>
+            <SectionHeading>Команда</SectionHeading>
+            <div className="glass" style={{ display: "flex", flexDirection: "column", marginTop: 20, borderRadius: "var(--radius-lg)",
+              padding: "6px 20px", overflow: "hidden" }}>
+              {[...roleCounts.entries()].map(([role, count], idx, arr) => {
+                const roleWorking = workingNow.find((t: any) => t.role === role)
+                const active = sel?.kind === "team" && sel.role === role
+                return (
+                  <button key={role} onClick={() => setSel({ kind: "team", role })}
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 8px", background: active ? "var(--surface-soft)" : "none",
+                      border: "none", borderBottom: idx < arr.length - 1 ? "1px solid var(--hairline)" : "none",
+                      borderRadius: "var(--radius-sm)", cursor: "pointer", textAlign: "left", width: "100%",
+                      transition: "background 0.15s" }}
+                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--surface-soft)" }}
+                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = "none" }}>
+                    <span style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, display: "flex",
+                      alignItems: "center", justifyContent: "center", fontSize: 15, background: "var(--surface-soft)",
+                      border: "1px solid var(--hairline)" }}>{roleIcon(role)}</span>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", minWidth: 140 }}>
+                      {roleName(role)}{count > 1 ? ` × ${count}` : ""}
+                    </span>
+                    <span style={{ fontSize: 13, color: roleWorking ? "var(--text-dim)" : "var(--faint)", display: "flex", alignItems: "center", gap: 7 }}>
+                      {roleWorking && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mercury-a)", flexShrink: 0,
+                        boxShadow: "0 0 6px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite" }} />}
+                      {roleWorking ? roleWorking.title : "свободен"}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {sel?.kind === "team" && (() => {
+              const roleTasks = tasks.filter((t: any) => t.role === sel.role)
+              return (
+                <div className="card" style={{ marginTop: 16, padding: 20, borderRadius: "var(--radius-lg)" }}>
+                  <InspectorTitle>{roleName(sel.role)}</InspectorTitle>
+                  <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {roleTasks.map((t: any) => (
+                      <button key={t.id} onClick={() => { setSel({ kind: "task", id: t.id }); document.getElementById("work")?.scrollIntoView({ behavior: "smooth" }) }}
+                        style={{ textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "6px 0",
+                          fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
+                          textDecoration: t.status === "done" ? "line-through" : "none" }}>{t.title}</button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+          </section>
         )}
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0, paddingLeft: narrow ? 0 : 32, paddingTop: 2 }}>
-        {sel === null && (
-          <ProjectOverviewPane p={p} progress={progress} isActive={isActive} current={current}
-            workingNow={workingNow} lb={lb} doneCount={doneCount} stagesLen={stages.length}
-            depts={depts} />
-        )}
-        {sel?.kind === "stage" && (() => {
-          const s = stages.find((x: any) => x.id === sel.id)
-          if (!s) return null
-          return (
-            <div>
-              <InspectorTitle>{s.title}</InspectorTitle>
-              <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 10 }}>
-                {s.status === "done" ? "Завершён" : s.status === "active" ? "Сейчас в работе" : "Ещё не начат"}
-              </div>
-              {s.summary && <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.65, marginTop: 14, maxWidth: "62ch" }}>{s.summary}</div>}
-            </div>
-          )
-        })()}
-        {selectedTask && (
-          <TaskInspector task={selectedTask} allTasks={tasks} onJump={(id: string) => setSel({ kind: "task", id })} />
-        )}
-        {sel?.kind === "result" && sel.type === "site" && (() => {
-          const s = sites[sel.idx]
-          if (!s) return null
-          return (
-            <div>
-              <InspectorTitle>{s.title || s.slug}</InspectorTitle>
-              <a href={s.url || `/site/${s.slug}`} target="_blank" rel="noreferrer"
-                style={{ fontSize: 13, color: "var(--mercury-a)", textDecoration: "none", display: "inline-flex",
-                  alignItems: "center", gap: 6, marginTop: 14 }}>Открыть сайт ↗</a>
-            </div>
-          )
-        })()}
-        {sel?.kind === "result" && sel.type === "group" && (() => {
-          const g = resultGroups[sel.idx]
-          if (!g) return null
-          return (
-            <div>
-              <InspectorTitle>{g[0].task}</InspectorTitle>
-              <ArtifactGroupInspector group={g} />
-            </div>
-          )
-        })()}
-        {sel?.kind === "team" && (() => {
-          const roleTasks = tasks.filter((t: any) => t.role === sel.role)
-          const isWorking = workingNow.some((t: any) => t.role === sel.role)
-          return (
-            <div>
-              <InspectorTitle>{roleName(sel.role)}</InspectorTitle>
-              <div style={{ fontSize: 12.5, color: isWorking ? "var(--mercury-a)" : "var(--faint)", marginTop: 8 }}>
-                {isWorking ? "● сейчас в работе" : "○ свободен"}
-              </div>
-              <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 2 }}>
-                {roleTasks.map((t: any) => (
-                  <button key={t.id} onClick={() => setSel({ kind: "task", id: t.id })}
-                    style={{ textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "7px 0",
-                      fontSize: 12.5, color: t.status === "done" ? "var(--muted)" : "var(--text-dim)",
-                      textDecoration: t.status === "done" ? "line-through" : "none" }}>{t.title}</button>
-                ))}
-              </div>
-            </div>
-          )
-        })()}
       </div>
     </div>
   )
+}
+
+// ── Hero — первый экран (~700-800px). Живой статус вместо набора несвязанных
+// пилюль/баров: заголовок, тонкий прогресс + этапы-точки, "сейчас/после этого",
+// кто работает, KPI-цифры. Для закрытого проекта — другой хиро (итоговый отчёт).
+function ProjectHero({ p, progress, isActive, isDone, current, next, workingNow, lb, stages, doneCount, roleCounts, depts }: {
+  p: any; progress: any; isActive: boolean; isDone: boolean; current: any; next: any
+  workingNow: any[]; lb: any; stages: any[]; doneCount: number
+  roleCounts: Map<string, number>; depts: Set<string>
+}) {
+  if (isDone) {
+    return (
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: "easeOut" }}
+        style={{ margin: "24px 28px 0", padding: "36px 36px 32px", borderRadius: "var(--radius-xl)", position: "relative", overflow: "hidden" }}
+        className="glass">
+        <div style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 100% at 0% 0%, rgba(160,224,171,0.10), transparent 60%)", pointerEvents: "none" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--success)", fontWeight: 600 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} /> Проект завершён
+        </div>
+        <h1 className="display" style={{ fontSize: 34, fontWeight: 700, color: "var(--text)", lineHeight: 1.15,
+          letterSpacing: "-0.01em", margin: "10px 0 0", maxWidth: "26ch" }}>{p.title}</h1>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 28 }}>
+          <KpiStat value={lb.tasks_done ?? 0} label="задач" accent="var(--success)" />
+          <KpiStat value={(lb.sites || []).length} label="сайтов" accent="var(--mercury-a)" />
+          <KpiStat value={lb.leads_count ?? 0} label="лидов" />
+        </div>
+        {roleCounts.size > 0 && (
+          <div style={{ fontSize: 13, color: "var(--faint)", marginTop: 26, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ color: "var(--muted)" }}>Работали:</span>
+            {[...roleCounts.keys()].map(r => (
+              <span key={r} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span>{roleIcon(r)}</span>{roleName(r)}
+              </span>
+            ))}
+          </div>
+        )}
+      </motion.div>
+    )
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: "easeOut" }}
+      style={{ margin: "24px 28px 0", padding: "36px 36px 32px", borderRadius: "var(--radius-xl)", position: "relative", overflow: "hidden" }}
+      className="glass">
+      <div style={{ position: "absolute", inset: 0,
+        background: isActive
+          ? "radial-gradient(120% 100% at 0% 0%, rgba(255,172,46,0.09), transparent 60%)"
+          : "none", pointerEvents: "none" }} />
+      <h1 className="display" style={{ fontSize: 34, fontWeight: 700, color: "var(--text)", lineHeight: 1.15,
+        letterSpacing: "-0.01em", margin: 0, maxWidth: "26ch", position: "relative" }}>{p.title}</h1>
+      {p.goal && p.goal !== p.title && (
+        <div style={{ fontSize: 14, color: "var(--text-dim)", lineHeight: 1.6, marginTop: 10, maxWidth: "62ch", position: "relative" }}>{p.goal}</div>
+      )}
+
+      {isActive && (
+        <>
+          <div style={{ marginTop: 28, position: "relative" }}>
+            <MercuryBar percent={progress.percent ?? 0} style={{ height: 6 }} />
+            {stages.length > 0 && (
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14 }}>
+                {stages.map((s: any) => (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13,
+                    color: s.status === "done" ? "var(--text-dim)" : s.status === "active" ? "var(--text)" : "var(--faint)" }}>
+                    <span style={{ color: s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)" }}>
+                      {s.status === "done" ? "✓" : s.status === "active" ? "●" : "○"}
+                    </span>
+                    {s.title}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 28, position: "relative", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+              <InspectorLabel>Сейчас происходит</InspectorLabel>
+              <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                {workingNow.length > 0 && (
+                  <span style={{ width: 6, height: 6, marginTop: 6, borderRadius: "50%", background: "var(--mercury-a)", flexShrink: 0,
+                    boxShadow: "0 0 6px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite" }} />
+                )}
+                <span>
+                  {workingNow.length > 0
+                    ? workingNow.map((t: any) => `${roleName(t.role)} — ${t.title}`).join("; ")
+                    : current ? `Этап «${current.title}»` : "Ждёт следующего шага"}
+                </span>
+              </div>
+              {next && <div style={{ fontSize: 13, color: "var(--faint)", marginTop: 6 }}>После этого — «{next.title}»</div>}
+            </div>
+
+            {workingNow.length > 0 && (
+              <div style={{ flex: "0 1 auto" }}>
+                <InspectorLabel>Работают</InspectorLabel>
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                  {workingNow.map((t: any, i: number) => (
+                    <div key={i} title={t.title} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "var(--text-dim)",
+                      padding: "5px 11px 5px 8px", borderRadius: "var(--radius-pill)", background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
+                      <span>{roleIcon(t.role)}</span>{roleName(t.role)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 30, position: "relative" }}>
+        <KpiStat value={progress.done ?? doneCount} label="завершено" accent="var(--success)" />
+        <KpiStat value={Math.max(0, (progress.total ?? 0) - (progress.done ?? 0))} label="осталось" />
+      </div>
+      {depts.size > 1 && (
+        <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 22, position: "relative" }}>
+          Совместная работа отделов: {[...depts].map(d => DEPT_NAMES[d] || d).join(" + ")}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+function KpiStat({ value, label, accent }: { value: number; label: string; accent?: string }) {
+  return (
+    <div style={{ padding: "12px 18px", borderRadius: "var(--radius-md)", background: "var(--surface-soft)",
+      border: "1px solid var(--hairline)", minWidth: 92 }}>
+      <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: accent || "var(--text)", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 7 }}>{label}</div>
+    </div>
+  )
+}
+
+// Якоря вместо вкладок — прокручивают уже видимую страницу, не переключают
+// контент. Подсвечивает текущий раздел через IntersectionObserver.
+function AnchorNav() {
+  const [activeId, setActiveId] = useState("work")
+
+  useEffect(() => {
+    const els = ANCHORS.map(a => document.getElementById(a.id)).filter(Boolean) as HTMLElement[]
+    if (els.length === 0) return
+    const io = new IntersectionObserver(entries => {
+      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+      if (visible[0]) setActiveId(visible[0].target.id)
+    }, { rootMargin: "-20% 0px -70% 0px" })
+    els.forEach(el => io.observe(el))
+    return () => io.disconnect()
+  }, [])
+
+  return (
+    <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", gap: 6, padding: "12px 28px",
+      background: "var(--surface-head)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+      borderBottom: "1px solid var(--hairline)", marginTop: 40 }}>
+      {ANCHORS.map(a => (
+        <button key={a.id} onClick={() => document.getElementById(a.id)?.scrollIntoView({ behavior: "smooth" })}
+          style={{ background: activeId === a.id ? "var(--surface-strong)" : "none",
+            border: "1px solid transparent", borderColor: activeId === a.id ? "var(--hairline)" : "transparent",
+            borderRadius: "var(--radius-pill)", cursor: "pointer", padding: "6px 14px", fontSize: 13,
+            fontWeight: activeId === a.id ? 600 : 400, transition: "background 0.15s, color 0.15s",
+            color: activeId === a.id ? "var(--text)" : "var(--faint)" }}>
+          {a.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 24, fontWeight: 600, color: "var(--text)", letterSpacing: "-0.01em" }}>{children}</div>
 }
 
 function TreeGroup({ label, count, children }: { label: string; count: number; children: ReactNode }) {
@@ -964,16 +1232,18 @@ function TreeGroup({ label, count, children }: { label: string; count: number; c
   )
 }
 
-function TreeRow({ active, onClick, icon, iconColor, label, strike }: {
-  active: boolean; onClick: () => void; icon: string; iconColor?: string; label: string; strike?: boolean
+function TreeRow({ active, onClick, icon, iconColor, label, strike, bold, small }: {
+  active: boolean; onClick: () => void; icon: string; iconColor?: string; label: string
+  strike?: boolean; bold?: boolean; small?: boolean
 }) {
   return (
     <button onClick={onClick} style={{
       display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
       background: active ? "var(--surface-strong)" : "transparent", border: "none", cursor: "pointer",
-      padding: "7px 8px", borderRadius: "var(--radius-sm)", fontSize: 12.5,
-      color: active ? "var(--text)" : "var(--text-dim)", textDecoration: strike ? "line-through" : "none",
-      transition: "background 0.12s",
+      padding: small ? "5px 8px" : "7px 8px", borderRadius: "var(--radius-sm)",
+      fontSize: bold ? 15 : small ? 13 : 12.5, fontWeight: bold ? 600 : 400,
+      color: active ? "var(--text)" : bold ? "var(--text)" : "var(--text-dim)",
+      textDecoration: strike ? "line-through" : "none", transition: "background 0.12s",
     }}>
       <span style={{ color: iconColor || "var(--faint)", fontSize: 9, flexShrink: 0, width: 10, textAlign: "center" }}>{icon}</span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
@@ -988,56 +1258,6 @@ function InspectorTitle({ children }: { children: ReactNode }) {
 function InspectorLabel({ children }: { children: ReactNode }) {
   return <div className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase",
     letterSpacing: "1.5px", marginBottom: 8 }}>{children}</div>
-}
-
-// Обзор — состояние по умолчанию (ничего не выбрано в дереве). Живой статус +
-// прогресс + цель проекта, то, что раньше было "первым экраном" целиком.
-function ProjectOverviewPane({ p, progress, isActive, current, workingNow, lb, doneCount, stagesLen, depts }: {
-  p: any; progress: any; isActive: boolean; current: any; workingNow: any[]; lb: any
-  doneCount: number; stagesLen: number; depts: Set<string>
-}) {
-  return (
-    <div>
-      <InspectorTitle>Обзор</InspectorTitle>
-      {p.goal && <div style={{ fontSize: 13.5, color: "var(--text-dim)", lineHeight: 1.65, marginTop: 12, maxWidth: "62ch" }}>{p.goal}</div>}
-      {depts.size > 1 && (
-        <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 10 }}>
-          Совместная работа отделов: {[...depts].map(d => DEPT_NAMES[d] || d).join(" + ")}
-        </div>
-      )}
-
-      {isActive && (
-        <div style={{ marginTop: 32 }}>
-          <InspectorLabel>Прогресс · {progress.done ?? 0}/{progress.total ?? 0} задач</InspectorLabel>
-          <MercuryBar percent={progress.percent ?? 0} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13, color: "var(--text-dim)" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mercury-a)",
-              boxShadow: "0 0 8px rgba(255,172,46,0.5)", animation: "mercury-pulse 2.4s ease infinite", flexShrink: 0 }} />
-            {workingNow.length > 0
-              ? <span>Сейчас: {workingNow.map((t: any) => roleName(t.role)).join(", ")} {workingNow.length === 1 ? "работает" : "работают"} над задачей{current ? ` · этап «${current.title}»` : ""}</span>
-              : current ? <span>Сейчас: этап «{current.title}»</span> : <span>Ждёт следующего шага</span>}
-          </div>
-        </div>
-      )}
-
-      {stagesLen > 0 && (
-        <div style={{ marginTop: 24, fontSize: 12.5, color: "var(--faint)" }}>
-          Этапы: {doneCount}/{stagesLen} завершено — список слева
-        </div>
-      )}
-
-      {p.status === "done" && (
-        <div style={{ marginTop: 32 }}>
-          <InspectorLabel>Что оставил после себя</InspectorLabel>
-          <div style={{ fontSize: 13, color: "var(--text-dim)", display: "flex", gap: 22, flexWrap: "wrap" }}>
-            <span>✓ задач: {lb.tasks_done ?? 0}/{lb.tasks_total ?? 0}</span>
-            <span>🌐 сайтов: {(lb.sites || []).length}</span>
-            <span>👤 лидов: {lb.leads_count ?? 0}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  )
 }
 
 function TaskInspector({ task: t, allTasks, onJump }: { task: any; allTasks: any[]; onJump: (id: string) => void }) {
