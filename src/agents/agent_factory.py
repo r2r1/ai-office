@@ -173,7 +173,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             },
         )
 
-        state.save_deliverable(agent_id, role, (title or task)[:80], result)
+        state.save_deliverable(agent_id, role, title or task, result)
         # Результат задачи НЕ дублируем в личный чат: артефакты лежат в файлах,
         # сводка — во вкладке «Итоги», ход работы — в журнале. Личный чат остаётся
         # местом для диалога и блокирующих вопросов агента, а не свалкой результатов.

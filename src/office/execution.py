@@ -441,7 +441,7 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
     try:
         if role == "researcher":
             result = await researcher.run_async(task, depth="quick", publish=publish, agent_id=agent_id)
-            state.save_deliverable(agent_id, role, task[:80], result)
+            state.save_deliverable(agent_id, role, t_rec_policy.get("title") or task, result)
         elif role == "strategist":
             result = await strategist.run_async(task, publish=publish, agent_id=agent_id, save=False)
         else:
@@ -465,8 +465,15 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 # несогласованно между файлами одной и той же страницы.
                 design_style.ensure_design_tokens(b.get("niche", ""), b.get("audience", ""))
             ctx_task = task_with_context(role, task, skill, department=department, objective=objective)
+            # title — короткая подпись для «Артефактов»/«Готовых результатов», НЕ
+            # весь ctx_task/task: task здесь — уже составленный planning_engine
+            # текст ("заголовок\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: ...\n<фидбек>"), а не
+            # чистое имя задачи. save_deliverable режет title по символам — раньше
+            # резало эту составную строку прямо посреди "КОГДА: ..." (реальный
+            # баг на скриншоте UI). t_rec_policy.get("title") — чистый заголовок
+            # из plan.json, без критерия/фидбека.
             fn = agent_factory.create(role, ctx_task, agent_id, publish, skill=skill,
-                                      model=policy["model"], title=task)
+                                      model=policy["model"], title=t_rec_policy.get("title") or task)
             result = await fn()
             # ---- Приёмка качества (критик) для сайтов: дизайнер/разработчик ----
             if role in ("designer", "developer"):

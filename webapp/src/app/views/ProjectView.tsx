@@ -744,7 +744,11 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: 
   const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
   return (
     <>
-      <DetailHeader badge={typeBadge} title={p.title} onBack={onBack} sub={p.goal}
+      {/* sub дублирует title, когда goal при создании не задали отдельно —
+          реальный кейс со скриншота: "Привлекать больше клиентов..." дважды,
+          слово в слово. Не показываем подзаголовок, если он идентичен заголовку. */}
+      <DetailHeader badge={typeBadge} title={p.title} onBack={onBack}
+        sub={p.goal && p.goal !== p.title ? p.goal : undefined}
         statusPill={isActive ? <Pill accent>Активный</Pill>
           : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
           : isPaused ? <Pill>⏸ На паузе</Pill>

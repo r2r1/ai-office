@@ -3,6 +3,14 @@ import type { ReactNode, CSSProperties } from "react"
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
+// Только для MercuryBar (% выполнения задач) — НЕ общий бренд-акцент (MERCURY
+// на кнопках/аватарах не трогаем). Полный зелёно-жёлто-красный MERCURY на
+// прогресс-баре при 100% всегда показывает красный край — а во всём
+// остальном интерфейсе (Здоровье/Доверие в топбаре) зелёный=хорошо/высоко,
+// красный=плохо/низко. Прогресс к завершению — это всегда "хорошо, когда
+// растёт", а не риск, поэтому красный на 100% читается как "что-то не так",
+// хотя всё сделано (реальная путаница на скриншоте пользователя).
+const PROGRESS_GRADIENT = "linear-gradient(90deg, #6fb87a, #a0e0ab)"
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Collapsing-header механика.
@@ -198,7 +206,7 @@ export function Pill({ children, accent, color }: { children: ReactNode; accent?
 export function MercuryBar({ percent, style }: { percent: number; style?: CSSProperties }) {
   return (
     <div style={{ height: 3, borderRadius: 99, background: "var(--hairline-strong)", overflow: "hidden", ...style }}>
-      <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, percent))}%`, background: MERCURY,
+      <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, percent))}%`, background: PROGRESS_GRADIENT,
         borderRadius: 99, transition: "width 0.6s var(--ease-out)" }} />
     </div>
   )

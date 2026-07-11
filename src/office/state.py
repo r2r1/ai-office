@@ -48,13 +48,32 @@ def history() -> list[dict]:
     return list(_load()["events"])
 
 
+_TASK_LABEL_LIMIT = 80
+
+
+def _truncate_label(text: str, limit: int = _TASK_LABEL_LIMIT) -> str:
+    """Обрезает подпись задачи по границе слова, не по символу — сырой
+    text[:limit] рвал составные строки прямо посреди слова (реальный баг UI:
+    "ЗАДАЧА ВЫПОЛНЕНА, КОГД" — обрыв ровно на 80-м символе внутри "КОГДА").
+    Единая точка обрезки для всех вызовов save_deliverable — раньше каждый
+    call-site резал сам по себе (agent_factory.py, execution.py), несогласованно."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    last_space = cut.rfind(" ")
+    if last_space > limit * 0.6:  # не отрезаем больше ~40%, если пробела рядом нет
+        cut = cut[:last_space]
+    return cut.rstrip() + "…"
+
+
 def save_deliverable(agent_id: str, role: str, task: str, content: str) -> None:
     if not content or not content.strip():
         return
     from src.office import projects
     proj = projects.active()
     d = _load()
-    d["deliverables"].append({"agent_id": agent_id, "role": role, "task": task,
+    d["deliverables"].append({"agent_id": agent_id, "role": role, "task": _truncate_label(task),
                               "content": content.strip(), "ts": time.time(),
                               "time": datetime.now().strftime("%d.%m %H:%M"),
                               "project": proj["id"] if proj else ""})
