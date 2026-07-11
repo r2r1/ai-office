@@ -139,8 +139,13 @@ def is_generated() -> bool:
 def set_tasks(tasks: list[dict]) -> None:
     """Сохраняет сгенерированный граф задач (нормализует поля). Задачи принадлежат
     активному ПРОЕКТУ (BOS: Project — единица работы крупнее задачи)."""
-    from src.office import projects
+    from src.office import projects, milestones
     project_id = projects.ensure_active()["id"]
+    # Этап, актуальный для проекта ПРЯМО СЕЙЧАС — единственная точка простановки
+    # milestone_id (см. milestones.active_stage_id): задача и её этап связаны
+    # ЧЕСТНО (в момент создания), а не подгоняются задним числом. Старые задачи
+    # без milestone_id (созданные до этой связи) UI показывает отдельной веткой.
+    milestone_id = milestones.active_stage_id(project_id)
     norm = []
     for i, t in enumerate(tasks):
         # роль без отдела → исполнимая (A1); бот записи → integrator (детерминированно)
@@ -157,6 +162,7 @@ def set_tasks(tasks: list[dict]) -> None:
             "assignee": "",        # agent_id исполнителя (когда взята в работу)
             "requested_by": "",    # кто поставил (CEO/план или коллега-агент)
             "project": project_id,
+            "milestone_id": milestone_id,
             # Подсказка Execution Policy: routine → дешёвая модель (опционально)
             "tier": (t.get("tier") or "").strip().lower(),
             # Декларация артефактов (BOS §12): явная из LLM-плана или выведенная
@@ -206,15 +212,17 @@ def add_task(title: str, role: str, done_criterion: str = "",
                 and t.get("role") == norm_role
                 and " ".join((t.get("title", "")).lower().split()) == norm_title):
             return t  # уже стоит в очереди/в работе — возвращаем существующую
-    from src.office import projects
+    from src.office import projects, milestones
     tid = f"t{len(tasks) + 1}_{int(time.time()) % 10000}"
+    pid = project_id or projects.ensure_active()["id"]
     task = {
         "id": tid, "title": (title or "").strip()[:200], "role": (role or "").strip(),
         "department": org.department_of_role((role or "").strip()),
         "deps": [x for x in (deps or []) if x],
         "done_criterion": (done_criterion or "").strip()[:200],
         "status": "pending", "assignee": "", "requested_by": requested_by,
-        "project": project_id or projects.ensure_active()["id"],
+        "project": pid,
+        "milestone_id": milestones.active_stage_id(pid),
         "parent": (parent or "").strip(),
         "artifacts": _derive_artifacts(role, title),
         "required_capabilities": _required_caps({"title": title}),

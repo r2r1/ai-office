@@ -214,6 +214,21 @@ def current_index(project_id: str = "") -> int:
     return done[-1] + 1
 
 
+def active_stage_id(project_id: str = "") -> str:
+    """id этапа, актуального для проекта СЕЙЧАС (активный или ближайший
+    ожидающий) — единственная точка, которой plan.py помечает НОВЫЕ задачи
+    (milestone_id), чтобы дерево Этап→Задача в UI было честным, а не
+    выдуманным сопоставлением. Раньше Stage и Task были двумя параллельными,
+    никак не связанными системами (Stage — только текстовый журнал событий)."""
+    st = all_stages(project_id)
+    if not st:
+        return ""
+    idx = current_index(project_id)
+    if 0 <= idx < len(st):
+        return st[idx]["id"]
+    return st[-1]["id"]
+
+
 def progress_payload(project_id: str = "") -> dict:
     st = all_stages(project_id)
     n = len(st)
