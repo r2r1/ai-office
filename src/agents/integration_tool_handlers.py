@@ -249,6 +249,37 @@ def build(agent_id: str, role: str,
         return (f"«{label}» подключён (id {item['id']}). Инструменты появятся у тебя со следующей "
                 f"задачи с префиксом mcp__tenant_{item['id']}__ — list_endpoints/call_endpoint.")
 
+    async def _handle_register_mcp_server(args: dict) -> str:
+        """Подключает РОДНОЙ MCP-сервер стороннего сервиса как есть (npx-пакет
+        и т.п.) — в отличие от register_external_api (который всегда поднимает
+        НАШ обобщённый REST-мост поверх голого API), команда/аргументы здесь
+        произвольные, задаются моделью. Тот же тенантский реестр и то же
+        требование Docker-песочницы, что у register_external_api — просто без
+        хардкода command на mcp_generic_rest_server.py."""
+        label = (args.get("label") or "").strip()
+        command = (args.get("command") or "").strip()
+        if not label or not command:
+            return "Укажи label и command."
+        raw_args = args.get("args") or []
+        if not isinstance(raw_args, list):
+            return "args должен быть списком строк."
+        raw_env = args.get("env") or {}
+        if not isinstance(raw_env, dict):
+            return "env должен быть объектом строка→строка."
+        from src.office import mcp_tenant_servers, exec_sandbox
+        try:
+            item = mcp_tenant_servers.add(
+                label, command, [str(a) for a in raw_args],
+                env={str(k): str(v) for k, v in raw_env.items()},
+                allow_network=bool(args.get("allow_network", False)),
+            )
+        except exec_sandbox.SandboxUnavailable as e:
+            return f"Не удалось подключить «{label}»: {e}"
+        await publish_and_log({"type": "speech", "agent_id": agent_id,
+                               "text": f"🔌 Подключил родной MCP-сервер «{label}»"})
+        return (f"«{label}» подключён (id {item['id']}). Инструменты появятся у тебя со следующей "
+                f"задачи с префиксом mcp__tenant_{item['id']}__ .")
+
     return {
         "list_integrations": _handle_list_integrations,
         "use_integration": _handle_use_integration,
@@ -258,4 +289,5 @@ def build(agent_id: str, role: str,
         "record_metric": _handle_record_metric,
         "discover_resource": _handle_discover_resource,
         "register_external_api": _handle_register_external_api,
+        "register_mcp_server": _handle_register_mcp_server,
     }
