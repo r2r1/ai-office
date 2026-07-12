@@ -132,6 +132,19 @@ def check_site() -> list[dict]:
         problems.append(_p("no_styles", "cosmetic",
             "Нет стилей вообще — добавь css/style.css или хотя бы <style>."))
 
+    # 2b. Осиротевшие Vite-исходники рядом со статикой (живой прогон офиса поймал:
+    # разработчик откатился на статический index.html, но не удалил src/*.jsx —
+    # builtin_skills/vite_react_site.md прямо требует их удалить при откате
+    # ("старые package.json/vite.config.js/src/ удали"), иначе следующий
+    # исполнитель/критик видит недостроенный гибрид и не понимает, какой стек
+    # реально используется).
+    if not is_built_spa:
+        orphan_jsx = [p for p in in_dir if p.endswith((".jsx", ".tsx")) or p.endswith("main.jsx")]
+        if orphan_jsx:
+            problems.append(_p("orphan_vite_sources", "cosmetic",
+                f"Статический сайт, но рядом остались файлы React-заготовки ({', '.join(_basename(p) for p in orphan_jsx[:4])}) "
+                "без package.json/сборки — удали их (delete_file), не оставляй недостроенный гибрид."))
+
     # 3. index: title и объём.
     if "<title" not in low:
         problems.append(_p("no_title", "cosmetic", "Нет <title> у главной — добавь заголовок страницы."))
