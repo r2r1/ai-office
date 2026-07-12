@@ -261,6 +261,54 @@ REGISTER_MCP_SERVER_TOOL = {
     },
 }
 
+# Инструмент: найти готовый рецепт подключения известного open-source MCP-сервиса
+# (office/mcp_connectors.py, каталог office/builtin_mcp_connectors/*.md) — ДО того,
+# как звать register_mcp_server вручную. Решает конкретный найденный кейс: модель
+# без каталога сама придумывала неверный npm-пакет для Postiz вместо реального
+# stdio↔SSE моста mcp-remote. Каталог — по файлу на сервис, растёт без правки кода.
+FIND_MCP_CONNECTORS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "find_mcp_connectors",
+        "description": "Ищет по каталогу ГОТОВЫХ рецептов подключения известных open-source MCP-"
+                       "сервисов (Postiz и т.п. — растёт со временем). Возвращает список кандидатов "
+                       "с id и тем, какие значения (needs) нужно собрать у пользователя. Вызывай "
+                       "ПЕРЕД register_mcp_server, когда сервис по описанию похож на что-то известное "
+                       "(кроспостинг, дизайн-инструмент и т.п.) — если каталог знает точный рецепт, не "
+                       "изобретай command/args сам, возьми через connect_mcp_connector.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Что ищешь, своими словами (можно пусто — покажет весь каталог)"},
+            },
+            "required": [],
+        },
+    },
+}
+
+# Инструмент: подключить сервис из каталога по готовому рецепту (id) + собранным
+# значениям needs — резолвит command/args сам, агенту не нужно ничего собирать руками.
+CONNECT_MCP_CONNECTOR_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "connect_mcp_connector",
+        "description": "Подключает известный сервис из каталога (см. find_mcp_connectors) по его id — "
+                       "command/args уже прописаны в рецепте, нужно только передать values со значениями "
+                       "needs (URL/ключи), которые ты получил у пользователя через ask_user. Не выдумывай "
+                       "значения needs сам. Требует готовую Docker-песочницу на платформе, как и "
+                       "register_mcp_server/register_external_api.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector_id": {"type": "string", "description": "id рецепта из find_mcp_connectors (напр. «postiz»)"},
+                "values": {"type": "object", "additionalProperties": {"type": "string"},
+                           "description": "Значения needs рецепта, ключ→значение (напр. {\"POSTIZ_URL\": \"http://host:4007\", \"POSTIZ_API_KEY\": \"...\"})"},
+            },
+            "required": ["connector_id", "values"],
+        },
+    },
+}
+
 # Инструмент: завести повторяющийся процесс (BOS §5 — Process, не Task с концом)
 CREATE_RECURRING_PROCESS_TOOL = {
     "type": "function",

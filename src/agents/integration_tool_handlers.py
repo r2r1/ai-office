@@ -280,6 +280,49 @@ def build(agent_id: str, role: str,
         return (f"«{label}» подключён (id {item['id']}). Инструменты появятся у тебя со следующей "
                 f"задачи с префиксом mcp__tenant_{item['id']}__ .")
 
+    async def _handle_find_mcp_connectors(args: dict) -> str:
+        """Каталог готовых рецептов подключения известных open-source MCP-сервисов
+        (office/mcp_connectors.py) — чтобы агент не изобретал command/args сам для
+        сервисов, под которые уже есть проверенный рецепт (напр. Postiz)."""
+        from src.office import mcp_connectors
+        query = (args.get("query") or "").strip()
+        items = mcp_connectors.match(query) if query else mcp_connectors.all_connectors()
+        if not items:
+            return "В каталоге нет подходящего рецепта — подключи через register_mcp_server вручную."
+        lines = []
+        for c in items:
+            needs_txt = ", ".join(n["key"] for n in c.needs) or "—"
+            lines.append(f"- {c.id}: {c.title} (нужны значения: {needs_txt})")
+        return "Готовые рецепты:\n" + "\n".join(lines)
+
+    async def _handle_connect_mcp_connector(args: dict) -> str:
+        """Подключает сервис из каталога по id — command/args берутся из рецепта,
+        агент передаёт только собранные значения needs (через ask_user, не выдумывает)."""
+        from src.office import mcp_connectors
+        connector_id = (args.get("connector_id") or "").strip()
+        values = args.get("values") or {}
+        if not connector_id:
+            return "Укажи connector_id (см. find_mcp_connectors)."
+        if not isinstance(values, dict):
+            return "values должен быть объектом строка→строка."
+        c = mcp_connectors.get(connector_id)
+        if not c:
+            return f"В каталоге нет рецепта «{connector_id}» — проверь find_mcp_connectors или используй register_mcp_server."
+        resolved_args, missing = c.resolve({str(k): str(v) for k, v in values.items()})
+        if missing:
+            return f"Не хватает значений: {', '.join(missing)}. Получи их у пользователя через ask_user."
+        from src.office import mcp_tenant_servers, exec_sandbox
+        try:
+            item = mcp_tenant_servers.add(
+                c.title, c.command, resolved_args, env={}, allow_network=c.allow_network,
+            )
+        except exec_sandbox.SandboxUnavailable as e:
+            return f"Не удалось подключить «{c.title}»: {e}"
+        await publish_and_log({"type": "speech", "agent_id": agent_id,
+                               "text": f"🔌 Подключил «{c.title}» по готовому рецепту"})
+        return (f"«{c.title}» подключён (id {item['id']}). Инструменты появятся у тебя со следующей "
+                f"задачи с префиксом mcp__tenant_{item['id']}__ .")
+
     return {
         "list_integrations": _handle_list_integrations,
         "use_integration": _handle_use_integration,
@@ -290,4 +333,6 @@ def build(agent_id: str, role: str,
         "discover_resource": _handle_discover_resource,
         "register_external_api": _handle_register_external_api,
         "register_mcp_server": _handle_register_mcp_server,
+        "find_mcp_connectors": _handle_find_mcp_connectors,
+        "connect_mcp_connector": _handle_connect_mcp_connector,
     }
