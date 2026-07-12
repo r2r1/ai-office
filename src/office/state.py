@@ -51,12 +51,14 @@ def history() -> list[dict]:
 _TASK_LABEL_LIMIT = 80
 
 
-def _truncate_label(text: str, limit: int = _TASK_LABEL_LIMIT) -> str:
-    """Обрезает подпись задачи по границе слова, не по символу — сырой
-    text[:limit] рвал составные строки прямо посреди слова (реальный баг UI:
-    "ЗАДАЧА ВЫПОЛНЕНА, КОГД" — обрыв ровно на 80-м символе внутри "КОГДА").
-    Единая точка обрезки для всех вызовов save_deliverable — раньше каждый
-    call-site резал сам по себе (agent_factory.py, execution.py), несогласованно."""
+def truncate_label(text: str, limit: int = _TASK_LABEL_LIMIT) -> str:
+    """Обрезает подпись по границе слова, не по символу — сырой text[:limit]
+    рвал составные строки прямо посреди слова (реальный баг UI: "ЗАДАЧА
+    ВЫПОЛНЕНА, КОГД" — обрыв ровно на 80-м символе внутри "КОГДА"; тот же
+    паттерн позже нашёлся в projects.py: заголовок проекта, обрезанный goal[:80]
+    напрямую, рвал слово прямо в DetailHeader). Единая точка обрезки —
+    раньше каждый call-site резал сам по себе (agent_factory.py, execution.py,
+    projects.py), несогласованно."""
     text = (text or "").strip()
     if len(text) <= limit:
         return text
@@ -73,7 +75,7 @@ def save_deliverable(agent_id: str, role: str, task: str, content: str) -> None:
     from src.office import projects
     proj = projects.active()
     d = _load()
-    d["deliverables"].append({"agent_id": agent_id, "role": role, "task": _truncate_label(task),
+    d["deliverables"].append({"agent_id": agent_id, "role": role, "task": truncate_label(task),
                               "content": content.strip(), "ts": time.time(),
                               "time": datetime.now().strftime("%d.%m %H:%M"),
                               "project": proj["id"] if proj else ""})

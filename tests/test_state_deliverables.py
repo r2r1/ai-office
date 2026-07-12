@@ -1,5 +1,5 @@
 """
-Тесты state._truncate_label/save_deliverable — реальный баг с UI-скриншота:
+Тесты state.truncate_label/save_deliverable — реальный баг с UI-скриншота:
 подпись артефакта "ЗАДАЧА ВЫПОЛНЕНА, КОГД" обрывалась прямо посреди слова
 "КОГДА", потому что каждый вызывающий (agent_factory.py, execution.py)
 резал составную строку (заголовок + "\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: ...")
@@ -26,13 +26,13 @@ def _fresh(name: str) -> None:
 
 
 def test_truncate_label_short_text_unchanged():
-    assert state._truncate_label("короткий заголовок") == "короткий заголовок"
+    assert state.truncate_label("короткий заголовок") == "короткий заголовок"
 
 
 def test_truncate_label_cuts_at_word_boundary_not_mid_word():
     text = ("Подключить аналитику и проверку приема заявок\n"
             "✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: На сайт подключен счётчик аналитики.")
-    result = state._truncate_label(text, limit=80)
+    result = state.truncate_label(text, limit=80)
     # не обрывается посреди слова "КОГДА" (реальный баг: "...КОГД" без "А")
     assert "КОГД " not in result and not result.rstrip("…").endswith("КОГД")
     assert result.endswith("…")
@@ -43,7 +43,7 @@ def test_truncate_label_no_nearby_space_falls_back_to_hard_cut():
     """Если пробела рядом нет вообще (одно длинное слово) — не режем в ноль,
     падаем на обычную обрезку по символу, лучше так, чем пустая строка."""
     text = "а" * 200
-    result = state._truncate_label(text, limit=80)
+    result = state.truncate_label(text, limit=80)
     assert result == "а" * 80 + "…"
 
 

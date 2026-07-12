@@ -240,9 +240,9 @@ def ensure_active() -> dict:
     cur = active()
     if cur:
         return cur
-    from src.office import brief
+    from src.office import brief, state
     goal = brief.effective_goal()
-    return create(goal[:80] or "Первый проект", goal)
+    return create(state.truncate_label(goal) or "Первый проект", goal)
 
 
 def pause(pid: str) -> dict | None:
