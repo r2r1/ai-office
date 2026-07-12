@@ -889,11 +889,8 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
 
       <Card>
         <SectionLabel>Этапы и задачи</SectionLabel>
-        <div style={{ display: "flex", flexDirection: narrow ? "column" : "row", gap: narrow ? 20 : 28 }}>
-            <div style={{ width: narrow ? "100%" : 260, flexShrink: 0, paddingRight: narrow ? 0 : 20,
-              paddingBottom: narrow ? 16 : 0,
-              borderRight: narrow ? "none" : "1px solid var(--hairline)",
-              borderBottom: narrow ? "1px solid var(--hairline)" : "none" }}>
+        <div style={{ display: "flex", flexDirection: narrow ? "column" : "row", gap: narrow ? 24 : 40 }}>
+            <div style={{ width: narrow ? "100%" : 260, flexShrink: 0 }}>
               {stages.map((s: any) => (
                 <div key={s.id} style={{ marginBottom: 24 }}>
                   <TreeRow active={sel?.kind === "stage" && sel.id === s.id} onClick={() => setSel({ kind: "stage", id: s.id })}
@@ -928,8 +925,7 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
             </div>
 
             {/* Инспектор — "всегда закреплён", справа. sticky, не модалка. */}
-            <div style={{ flex: 1, minWidth: 0, paddingLeft: narrow ? 0 : 32, paddingRight: narrow ? 0 : 24,
-              paddingTop: narrow ? 20 : 0,
+            <div style={{ flex: 1, minWidth: 0, paddingTop: narrow ? 20 : 0,
               position: narrow ? "static" : "sticky", top: 20, alignSelf: "flex-start" }}>
               {sel === null && (
                 <div style={{ fontSize: 13, color: "var(--faint)" }}>Выбери этап или задачу слева, чтобы увидеть подробности.</div>
@@ -1014,17 +1010,20 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
       {roleCounts.size > 0 && (
         <Card>
           <SectionLabel>Команда</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {[...roleCounts.entries()].map(([role, count], idx, arr) => {
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {[...roleCounts.entries()].map(([role, count]) => {
               const roleWorking = workingNow.find((t: any) => t.role === role)
               const active = sel?.kind === "team" && sel.role === role
               return (
                 <button key={role} onClick={() => setSel({ kind: "team", role })}
-                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 4px", background: active ? "var(--surface-soft)" : "none",
-                    border: "none", borderBottom: idx < arr.length - 1 ? "1px solid var(--hairline)" : "none",
-                    cursor: "pointer", textAlign: "left", width: "100%" }}>
-                  <span style={{ fontSize: 14, flexShrink: 0 }}>{roleIcon(role)}</span>
-                  <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)", minWidth: 130 }}>
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderRadius: "var(--radius-sm)",
+                    background: active ? "var(--surface-soft)" : "none", border: "none", cursor: "pointer", textAlign: "left", width: "100%" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                    background: roleWorking ? "var(--mercury-a)" : "var(--whisper)",
+                    boxShadow: roleWorking ? "0 0 6px rgba(255,172,46,0.5)" : "none",
+                    animation: roleWorking ? "mercury-pulse 2.4s ease infinite" : "none" }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)", minWidth: 130, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 12, opacity: 0.7 }}>{roleIcon(role)}</span>
                     {roleName(role)}{count > 1 ? ` × ${count}` : ""}
                   </span>
                   <span style={{ fontSize: 12.5, color: roleWorking ? "var(--text-dim)" : "var(--faint)" }}>
