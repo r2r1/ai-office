@@ -145,6 +145,24 @@ def test_stop_calls_compose_stop():
         _sandbox_off()
 
 
+def test_stop_gracefully_reports_missing_docker_binary():
+    """Живой прогон поймал реальный баг: stop() не гейтит на sandbox-готовность
+    (только add() это делал) — если бинарник docker отсутствует, subprocess.run
+    бросал НЕПЕРЕХВАЧЕННЫЙ FileNotFoundError, роняя эндпоинт 500-й ошибкой вместо
+    понятного статуса «error». _run_compose теперь ловит это сам, единообразно."""
+    _fresh("tapp_no_docker_binary")
+    _sandbox_ready()
+    try:
+        with patch("subprocess.run", side_effect=_fake_run_ok):
+            item = tenant_apps.add("X", _COMPOSE, 4013, 4007)
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            ok = tenant_apps.stop(item["id"])  # не должно бросить исключение
+        assert ok is False
+        assert tenant_apps.get(item["id"])["status"] == "error"
+    finally:
+        _sandbox_off()
+
+
 def test_remove_calls_compose_down_and_deletes_dir():
     _fresh("tapp_remove")
     _sandbox_ready()

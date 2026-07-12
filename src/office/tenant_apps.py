@@ -83,9 +83,19 @@ def _compose_project(app_id: str) -> str:
 
 
 def _run_compose(app_id: str, *extra: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    """Живой прогон поймал реальный баг: stop/start/logs не проверяли готовность
+    Docker вообще (только add() гейтит через _require_ready) — если бинарник
+    docker отсутствует, subprocess.run бросает НЕПЕРЕХВАЧЕННЫЙ FileNotFoundError,
+    роняя эндпоинт 500-й ошибкой вместо понятного статуса. Теперь ЛЮБОЙ вызов
+    docker compose (не только add) ловит отсутствие Docker/таймаут единообразно —
+    один источник правды для всех вызывающих (stop/start/remove/logs/add)."""
     d = _app_dir(app_id)
     cmd = ["docker", "compose", "-p", _compose_project(app_id), "-f", str(d / "docker-compose.yml"), *extra]
-    return subprocess.run(cmd, cwd=str(d), capture_output=True, text=True, timeout=timeout)
+    try:
+        return subprocess.run(cmd, cwd=str(d), capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(cmd, 127, stdout="",
+            stderr="docker не найден — Docker не установлен или недоступен в PATH.")
 
 
 def add(label: str, compose_yaml: str, host_port: int, container_port: int,
@@ -155,6 +165,34 @@ def stop(app_id: str) -> bool:
             _save(items)
             return r.returncode == 0
     return False
+
+
+def start(app_id: str) -> bool:
+    """Возобновляет ранее остановленное (stop) приложение — docker compose
+    start, не up: контейнеры/сеть уже созданы, поднимаем те же, не пересоздаём."""
+    items = _all()
+    for i in items:
+        if i["id"] == app_id:
+            r = _run_compose(app_id, "start", timeout=_COMPOSE_TIMEOUT)
+            i["status"] = "running" if r.returncode == 0 else "error"
+            _save(items)
+            return r.returncode == 0
+    return False
+
+
+def env_values(app_id: str) -> dict[str, str]:
+    """Расшифрованные значения env — только для владельца тенанта (UI «Приложения»),
+    не для агента/API общего назначения (тот же принцип, что connections.py:
+    ключи, которые сам владелец и вводил, показать ему обратно — не утечка)."""
+    for i in _all():
+        if i["id"] == app_id:
+            return {k: crypto.decrypt(v) for k, v in i.get("_env_enc", {}).items()}
+    return {}
+
+
+def compose_yaml(app_id: str) -> str:
+    f = _app_dir(app_id) / "docker-compose.yml"
+    return f.read_text(encoding="utf-8") if f.exists() else ""
 
 
 def remove(app_id: str) -> bool:

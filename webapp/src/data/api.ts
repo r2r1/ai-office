@@ -171,6 +171,13 @@ export const api = {
   logout: () => postJSON<any>("/auth/logout", {}, null),
   get: (url: string) => getJSON<any>(url, null),
   post: (url: string, body: unknown = {}) => postJSON<any>(url, body, null),
+  // ── Приложения тенанта (office/tenant_apps.py) — постоянный self-host сторонних сервисов ──
+  hostedApps: () => getJSON<{ apps: any[] }>("/api/apps", { apps: [] }),
+  hostedAppDetail: (id: string) => getJSON<any>(`/api/apps/${id}`, null),
+  hostedAppLogs: (id: string, tail = 100) => getJSON<{ logs: string }>(`/api/apps/${id}/logs?tail=${tail}`, { logs: "" }),
+  pauseHostedApp: (id: string) => postJSON<any>(`/api/apps/${id}/pause`, {}, null),
+  resumeHostedApp: (id: string) => postJSON<any>(`/api/apps/${id}/resume`, {}, null),
+  removeHostedApp: (id: string) => api.del(`/api/apps/${id}`),
   del: async (url: string) => {
     try {
       const r = await fetch(url, { method: "DELETE", credentials: "same-origin" })

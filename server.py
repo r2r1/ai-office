@@ -873,6 +873,54 @@ async def delete_connection(cid: str):
     return {"ok": ok}
 
 
+@app.get("/api/apps")
+async def get_hosted_apps():
+    """Постоянные приложения тенанта (office/tenant_apps.py) — вкладка «Приложения»."""
+    from src.office import tenant_apps
+    return {"apps": tenant_apps.list_all()}
+
+
+@app.get("/api/apps/{app_id}")
+async def get_hosted_app_detail(app_id: str):
+    """Детали приложения — включая РАСШИФРОВАННЫЕ env (владелец их сам и вводил,
+    показать ему обратно — не утечка, тот же принцип, что connections.py) и
+    docker-compose.yml для просмотра, что реально поднято."""
+    from src.office import tenant_apps
+    item = tenant_apps.get(app_id)
+    if item is None:
+        return JSONResponse({"error": "не найдено"}, status_code=404)
+    return {**item, "env_values": tenant_apps.env_values(app_id), "compose_yaml": tenant_apps.compose_yaml(app_id)}
+
+
+@app.get("/api/apps/{app_id}/logs")
+async def get_hosted_app_logs(app_id: str, tail: int = 100):
+    from src.office import tenant_apps
+    if tenant_apps.get(app_id) is None:
+        return JSONResponse({"error": "не найдено"}, status_code=404)
+    return {"logs": tenant_apps.logs(app_id, tail=tail)}
+
+
+@app.post("/api/apps/{app_id}/pause")
+async def pause_hosted_app(app_id: str):
+    from src.office import tenant_apps
+    ok = tenant_apps.stop(app_id)
+    return {"ok": ok, "app": tenant_apps.get(app_id)}
+
+
+@app.post("/api/apps/{app_id}/resume")
+async def resume_hosted_app(app_id: str):
+    from src.office import tenant_apps
+    ok = tenant_apps.start(app_id)
+    return {"ok": ok, "app": tenant_apps.get(app_id)}
+
+
+@app.delete("/api/apps/{app_id}")
+async def delete_hosted_app(app_id: str):
+    from src.office import tenant_apps
+    ok = tenant_apps.remove(app_id)
+    return {"ok": ok}
+
+
 @app.get("/api/integrations")
 async def get_integrations():
     """Каталог поддерживаемых интеграций со статусом подключения."""
