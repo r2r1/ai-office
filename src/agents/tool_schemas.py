@@ -309,6 +309,71 @@ CONNECT_MCP_CONNECTOR_TOOL = {
     },
 }
 
+# Инструмент: поднять ПОСТОЯННЫЙ сервис тенанта (self-hosted Postiz и т.п.) —
+# office/tenant_apps.py. Другая модель угроз, чем register_mcp_server (там
+# короткоживущий MCP-сервер на время задачи, здесь — стек 24/7 с реальным
+# расходом CPU/RAM хоста и публично проксируемым HTTP). ⚠️ ВСЕГДА только
+# после явного "да" пользователя через ask_user — та же дисциплина, что у
+# git push (agent_factory.py): реальная инфраструктура, не просто токены LLM.
+HOST_APP_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "host_app",
+        "description": "Поднимает ПОСТОЯННЫЙ (24/7) docker-compose стек стороннего open-source "
+                       "сервиса на платформе (например self-hosted Postiz) — в отличие от "
+                       "register_mcp_server/register_external_api (короткоживущий MCP-сервер на "
+                       "время задачи), это реальная инфраструктура: расход CPU/RAM хоста непрерывно, "
+                       "публично доступный адрес /apps/{tenant}/{app_id}/. ⚠️ ВЫЗЫВАЙ ТОЛЬКО ПОСЛЕ "
+                       "ЯВНОГО «да» ПОЛЬЗОВАТЕЛЯ через ask_user — никогда не поднимай инфраструктуру "
+                       "по своей инициативе, даже если задача явно про это просит. Лимит — несколько "
+                       "приложений на тенанта; требует включённой Docker-песочницы на платформе.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Короткое человекочитаемое имя (напр. «Postiz»)"},
+                "compose_yaml": {"type": "string", "description": "Полное содержимое docker-compose.yml сервиса "
+                                   "(из официального репозитория сервиса, не выдумывай) — ОБЯЗАН объявлять маппинг "
+                                   "портов host_port:container_port у главного сервиса"},
+                "host_port": {"type": "integer", "description": "Порт хоста, на который compose пробрасывает "
+                                   "главный сервис (тот же, что в маппинге ports compose_yaml)"},
+                "container_port": {"type": "integer", "description": "Внутренний порт контейнера, на котором слушает сервис"},
+                "env": {"type": "object", "additionalProperties": {"type": "string"},
+                        "description": "Переменные окружения стека (секреты и т.п.) — значения получи через ask_user"},
+            },
+            "required": ["label", "compose_yaml", "host_port", "container_port"],
+        },
+    },
+}
+
+# Инструмент: список постоянных приложений тенанта.
+LIST_HOSTED_APPS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_hosted_apps",
+        "description": "Показывает постоянные приложения тенанта, поднятые через host_app — id, "
+                       "статус, порт. Проверь ПЕРЕД host_app, не поднято ли уже похожее (не дублируй).",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+# Инструмент: остановить/удалить постоянное приложение тенанта.
+STOP_HOSTED_APP_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "stop_hosted_app",
+        "description": "Останавливает постоянное приложение тенанта (host_app). remove=true — полностью "
+                       "удаляет стек и данные (docker compose down -v), не просто ставит на паузу.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "app_id": {"type": "string", "description": "id приложения (см. list_hosted_apps)"},
+                "remove": {"type": "boolean", "description": "true — удалить стек и данные насовсем, false (по умолчанию) — только остановить"},
+            },
+            "required": ["app_id"],
+        },
+    },
+}
+
 # Инструмент: завести повторяющийся процесс (BOS §5 — Process, не Task с концом)
 CREATE_RECURRING_PROCESS_TOOL = {
     "type": "function",

@@ -323,6 +323,56 @@ def build(agent_id: str, role: str,
         return (f"«{c.title}» подключён (id {item['id']}). Инструменты появятся у тебя со следующей "
                 f"задачи с префиксом mcp__tenant_{item['id']}__ .")
 
+    async def _handle_host_app(args: dict) -> str:
+        """Поднимает постоянный docker-compose стек тенанта (office/tenant_apps.py).
+        Инструмент НЕ проверяет сам, спрашивали ли пользователя — дисциплина
+        держится описанием инструмента и промптом роли (тот же приём, что у
+        git push в agent_factory.py), но лишний раз напоминаем в тексте ответа."""
+        label = (args.get("label") or "").strip()
+        compose_yaml = args.get("compose_yaml") or ""
+        try:
+            host_port = int(args.get("host_port"))
+            container_port = int(args.get("container_port"))
+        except (TypeError, ValueError):
+            return "host_port и container_port должны быть числами."
+        if not label or not compose_yaml.strip():
+            return "Укажи label и compose_yaml."
+        raw_env = args.get("env") or {}
+        if not isinstance(raw_env, dict):
+            return "env должен быть объектом строка→строка."
+        from src.office import tenant_apps, exec_sandbox
+        try:
+            item = tenant_apps.add(label, compose_yaml, host_port, container_port,
+                                   env={str(k): str(v) for k, v in raw_env.items()})
+        except (exec_sandbox.SandboxUnavailable, ValueError) as e:
+            return f"Не удалось поднять «{label}»: {e}"
+        await publish_and_log({"type": "speech", "agent_id": agent_id,
+                               "text": f"🚀 Поднял постоянное приложение «{label}» (статус: {item['status']})"})
+        if item["status"] != "running":
+            return (f"«{label}» (id {item['id']}) НЕ поднялся, статус «{item['status']}». "
+                    f"Лог: {item.get('last_log', '')[-500:]}")
+        return (f"«{label}» (id {item['id']}) поднят и работает. Доступен по адресу "
+                f"/apps/{{tenant}}/{item['id']}/ — подставь реальный tenant id.")
+
+    async def _handle_list_hosted_apps(_args: dict) -> str:
+        from src.office import tenant_apps
+        items = tenant_apps.list_all()
+        if not items:
+            return "Постоянных приложений пока не поднято."
+        return "\n".join(f"- {i['id']}: {i['label']} (статус: {i['status']}, порт {i['host_port']})" for i in items)
+
+    async def _handle_stop_hosted_app(args: dict) -> str:
+        from src.office import tenant_apps
+        app_id = (args.get("app_id") or "").strip()
+        if not app_id:
+            return "Укажи app_id (см. list_hosted_apps)."
+        ok = tenant_apps.remove(app_id) if args.get("remove") else tenant_apps.stop(app_id)
+        if not ok:
+            return f"Приложение «{app_id}» не найдено."
+        await publish_and_log({"type": "speech", "agent_id": agent_id,
+                               "text": f"⏹ {'Удалил' if args.get('remove') else 'Остановил'} приложение {app_id}"})
+        return f"«{app_id}» {'удалено насовсем' if args.get('remove') else 'остановлено'}."
+
     return {
         "list_integrations": _handle_list_integrations,
         "use_integration": _handle_use_integration,
@@ -335,4 +385,7 @@ def build(agent_id: str, role: str,
         "register_mcp_server": _handle_register_mcp_server,
         "find_mcp_connectors": _handle_find_mcp_connectors,
         "connect_mcp_connector": _handle_connect_mcp_connector,
+        "host_app": _handle_host_app,
+        "list_hosted_apps": _handle_list_hosted_apps,
+        "stop_hosted_app": _handle_stop_hosted_app,
     }

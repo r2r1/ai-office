@@ -19,7 +19,7 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.requests import Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, bootstrap as office_bootstrap, demo, chat, brief, state, progress, connections
@@ -996,6 +996,34 @@ async def serve_site_asset(tenant: str, slug: str, path: str):
     if site is None or site.get("html") is not None:
         return HTMLResponse("<h1>Не найдено</h1>", status_code=404)
     return _serve_site_file(site, path or "index.html")
+
+
+@app.api_route("/apps/{tenant}/{app_id}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@app.api_route("/apps/{tenant}/{app_id}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def proxy_tenant_app(request: Request, tenant: str, app_id: str, path: str = ""):
+    """Reverse-proxy к постоянному приложению тенанта (office/tenant_apps.py —
+    например self-hosted Postiz). Тенант НЕ получает прямой сетевой доступ к
+    порту хоста — платформа проксирует запрос сама, тот же приём, что уже есть
+    у /site/{tenant}/{slug} для лендингов, только двусторонний (методы+тело)."""
+    saas_context.set_tenant(tenant)
+    from src.office import tenant_apps
+    app_item = tenant_apps.get(app_id)
+    if app_item is None or app_item.get("status") != "running":
+        return HTMLResponse("<h1>Приложение не найдено или не запущено</h1>", status_code=404)
+    import httpx
+    url = f"http://127.0.0.1:{app_item['host_port']}/{path}"
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            upstream = await client.request(request.method, url, params=request.query_params,
+                                             headers=headers, content=body)
+    except httpx.ConnectError:
+        return HTMLResponse("<h1>Приложение не отвечает</h1>", status_code=502)
+    resp_headers = {k: v for k, v in upstream.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding", "connection")}
+    return Response(content=upstream.content, status_code=upstream.status_code,
+                    headers=resp_headers, media_type=upstream.headers.get("content-type"))
 
 
 @app.get("/pay/{tenant}/{payment_id}", response_class=HTMLResponse)
