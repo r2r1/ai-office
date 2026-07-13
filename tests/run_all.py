@@ -9,8 +9,17 @@
 на Windows (UnicodeEncodeError на "✓" в консоли cp1251) молча, если бы кто-то
 попытался его запустить — а без единого раннера/чек-листа шанс, что кто-то
 попытается, невелик.
+
+RUN_ALL_SKIP — необязательный env var с именами файлов через запятую, которые
+пропускаются (не запускаются вовсе, не считаются ни успехом, ни провалом).
+Нужен CI (.github/workflows/tests.yml): test_exec_sandbox.py требует Docker-
+демон, test_knowledge_embeddings.py и test_mcp_tenant_servers.py требуют
+реальный LLM-ключ/сеть — окружение CI-раннера этого не даёт по конструкции,
+это не регрессия кода. Локально (где Docker/сеть есть) переменная не задаётся,
+и раннер по-прежнему прогоняет и репортит все файлы как раньше.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,7 +32,10 @@ TESTS_DIR = Path(__file__).resolve().parent
 
 
 def main() -> int:
-    files = sorted(TESTS_DIR.glob("test_*.py"))
+    skip = {s.strip() for s in os.environ.get("RUN_ALL_SKIP", "").split(",") if s.strip()}
+    files = [f for f in sorted(TESTS_DIR.glob("test_*.py")) if f.name not in skip]
+    if skip:
+        print(f"Пропущено (RUN_ALL_SKIP): {', '.join(sorted(skip))}\n")
     failed = []
     for f in files:
         print(f"=== {f.name} ===")

@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m py_compile $(git ls-files '*.py')
+      - name: Unit tests
+        run: python tests/run_all.py
+        env:
+          DEMO_MODE: "1"
+          DEV_MODE: "1"
+          # Docker-демон и реальный LLM-ключ недоступны на раннере — эти 3 файла
+          # известны и падают по этой причине локально тоже (см. tests/run_all.py).
+          RUN_ALL_SKIP: "test_exec_sandbox.py,test_knowledge_embeddings.py,test_mcp_tenant_servers.py"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: webapp/package-lock.json
+      - name: Install dependencies
+        working-directory: webapp
+        run: npm ci
+      - name: Type check
+        working-directory: webapp
+        run: npx tsc --noEmit
+      - name: Build
+        working-directory: webapp
+        run: npm run build
