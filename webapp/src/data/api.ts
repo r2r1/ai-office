@@ -81,6 +81,13 @@ export const api = {
       { code, password }, { ok: false, error: "Ошибка запроса" }),
   tgLoginCancel: () => postJSON<any>("/api/integrations/telegram_personal/login/cancel", {}, null),
   sites: () => getJSON<{ sites: any[] }>("/api/sites", { sites: [] }),
+  // ── Результаты: реестр типов (results.py) + пер-тенантная персонализация вкладок ──
+  results: () => getJSON<{ kinds: { id: string; label: string; icon: string; order: number; count: number }[] }>(
+    "/api/results", { kinds: [] }),
+  uiPrefs: (section: string) => getJSON<{ order: string[]; hidden: string[] }>(
+    `/api/ui-prefs/${section}`, { order: [], hidden: [] }),
+  setUiPrefs: (section: string, order?: string[], hidden?: string[]) =>
+    postJSON<{ order: string[]; hidden: string[] }>(`/api/ui-prefs/${section}`, { order, hidden }, { order: order || [], hidden: hidden || [] }),
   plan: () => getJSON<any>("/api/plan", { generated: false, tasks: [], progress: { done: 0, total: 0 } }),
   deliverables: () => getJSON<{ deliverables: any[] }>("/api/deliverables", { deliverables: [] }),
   files: () => getJSON<{ files: any[] }>("/api/files", { files: [] }),

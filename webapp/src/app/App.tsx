@@ -25,7 +25,10 @@ const ResourcesView = lazy(() => import("./views/ResourcesView").then(m => ({ de
 const ChatsView     = lazy(() => import("./views/ChatsView").then(m => ({ default: m.ChatsView })))
 const TeamView      = lazy(() => import("./views/TeamView").then(m => ({ default: m.TeamView })))
 const ScenarioView  = lazy(() => import("./views/ScenarioView").then(m => ({ default: m.ScenarioView })))
-const LeadsView     = lazy(() => import("./views/LeadsView").then(m => ({ default: m.LeadsView })))
+// "Лиды" → "Результаты" (product-manager разбор): лиды — один из ИСХОДОВ
+// работы, не процесс наравне с "Работа"/"Команда"; реестр типов результата
+// (results.py), сейчас Лиды+Сайты.
+const ResultsView   = lazy(() => import("./views/ResultsView").then(m => ({ default: m.ResultsView })))
 const OnboardingFlow = lazy(() => import("./onboarding/OnboardingFlow").then(m => ({ default: m.OnboardingFlow })))
 
 /** Маленький чип-счётчик слоя памяти. */
@@ -85,9 +88,10 @@ export default function App() {
   const ready = useOfficeSelector(s => s.ready)
   const unread = useUnread()
   const rowRef = useRef<HTMLDivElement>(null)
+  const newLeads = useOfficeSelector(s => s.leads.filter((l: any) => (l.status || "new") === "new").length)
   // Чаты больше не отдельный пункт NavRail — бейдж непрочитанного переезжает
   // на «Команду» (оттуда теперь открывается инбокс).
-  const navBadges = { team: unread.total }
+  const navBadges = { team: unread.total, results: newLeads }
 
   // Morning Digest
   const [digest, setDigest] = useState<any>(null)
@@ -415,7 +419,7 @@ export default function App() {
                   {view === "dashboard"   && <DashboardView onNavigate={changeView} onOpenProject={goToProject} />}
                   {view === "project"     && <ProjectView focusProjectId={focusProjectId} onFocusHandled={() => setFocusProjectId(undefined)} onOpenStorage={goToStorage} />}
                   {view === "team"        && <TeamView onOpenChat={openChat} onOpenInbox={() => openChat("")} />}
-                  {view === "leads"       && <LeadsView />}
+                  {view === "results"     && <ResultsView />}
                   {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
                   {view === "resources"   && <ResourcesView focusStorageProject={focusStorageProject} onFocusHandled={() => setFocusStorageProject(undefined)} />}
                   {view === "settings"    && <SettingsView />}

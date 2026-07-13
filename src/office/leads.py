@@ -10,6 +10,7 @@ Process, который никогда не завершается сам по �
 """
 
 from src.office import process_instances as pi
+from src.office import results
 
 PROCESS = "sales"
 STATUSES = ("new", "contacted", "qualified", "won", "lost")
@@ -22,6 +23,12 @@ STATUS_LABELS = {
 STALE_AFTER_HOURS = 72
 
 pi.register(PROCESS, file="leads.json", stages=STATUSES, labels=STATUS_LABELS, stage_field="status")
+# Бейдж вкладки "Лиды" в Результатах — число НОВЫХ (недожатых), не общее
+# количество: это то, что реально требует внимания владельца прямо сейчас.
+results.register(results.ResultKind(
+    id="leads", label="Лиды", icon="leads", order=0,
+    counter=lambda: len([l for l in all_leads() if (l.get("status") or "new") == "new"]),
+))
 
 
 def add(slug: str, name: str, contact: str, message: str = "") -> dict:

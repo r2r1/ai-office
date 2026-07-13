@@ -28,6 +28,8 @@ from src.office import threads as threads_module
 from src.office import questions as questions_module
 from src.office import sites as sites_module
 from src.office import leads as leads_module
+from src.office import results as results_module
+from src.office import ui_prefs as ui_prefs_module
 from src.office import costs as costs_module
 from src.office import workspace as workspace_module
 from src.office import milestones
@@ -1585,6 +1587,26 @@ async def add_lead_note(lead_id: str, request: Request):
     if not lead:
         return JSONResponse({"error": "лид не найден"}, status_code=404)
     return {"ok": True, "lead": lead}
+
+
+@app.get("/api/results")
+async def get_results():
+    """Реестр типов результата работы команды (лиды/сайты и в будущем другие) —
+    метаданные вкладок «Результаты» (id/label/count), см. results.py."""
+    return results_module.snapshot()
+
+
+@app.get("/api/ui-prefs/{section}")
+async def get_ui_prefs(section: str):
+    """Персональные предпочтения владельца по видимости/порядку под-вкладок раздела."""
+    return ui_prefs_module.get_section(section)
+
+
+@app.post("/api/ui-prefs/{section}")
+async def set_ui_prefs(section: str, request: Request):
+    """Body: {order?: string[], hidden?: string[]}."""
+    data = await request.json()
+    return ui_prefs_module.set_section(section, data.get("order"), data.get("hidden"))
 
 
 @app.get("/api/office/status")

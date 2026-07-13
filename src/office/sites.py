@@ -9,8 +9,14 @@ import re
 import time
 
 from src.saas import context as ctx
+from src.office import results
 
 _FILE = "sites.json"
+
+results.register(results.ResultKind(
+    id="sites", label="Сайты", icon="results", order=1,
+    counter=lambda: len(_all()),
+))
 
 
 def make_slug(title: str) -> str:

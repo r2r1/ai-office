@@ -1,20 +1,115 @@
 import { useEffect, useState } from "react"
 import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, Card, Empty, SectionLabel } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, Card, Empty, SectionLabel } from "./ui"
 import { Modal, ModalSection } from "../components/Modal"
 
-// Лиды — мини-CRM (канбан по статусам, клик → карточка с историей). Раньше жил
-// под-вкладкой в «Результатах» — вынесен на верхний уровень (карта сайта,
-// рефакторинг сессии 2026-07-05): CRM — корневая зависимость продукта
-// (product-vision.md §4), не второстепенный артефакт наравне с файлами кода.
+// «Результаты» (product-manager разбор, вместо бывшей отдельной «Лиды»):
+// лиды — не процесс наравне с «Работа»/«Команда», а ОДИН из ИСХОДОВ, которые
+// эта работа производит. Вкладки здесь рендерятся по РЕЕСТРУ (results.py) —
+// добавление нового типа результата (приложения, сообщения…) не требует
+// правки этого файла целиком, только: (1) регистрация в модуле-производителе,
+// (2) один рендерер в RESULT_RENDERERS ниже. Порядок/видимость персональные —
+// хранятся per-tenant (ui_prefs.py) и правятся через шестерёнку в шапке.
+interface KindMeta { id: string; label: string; icon: string; order: number; count: number }
+interface Prefs { order: string[]; hidden: string[] }
+
+function orderKinds(kinds: KindMeta[], prefs: Prefs): KindMeta[] {
+  if (!prefs.order.length) return kinds
+  const idx = (id: string) => { const i = prefs.order.indexOf(id); return i === -1 ? 999 : i }
+  return [...kinds].sort((a, b) => idx(a.id) - idx(b.id))
+}
+
+export function ResultsView() {
+  const [kinds, setKinds] = useState<KindMeta[]>([])
+  const [prefs, setPrefs] = useState<Prefs>({ order: [], hidden: [] })
+  const [active, setActive] = useState<string>("leads")
+  const [prefsOpen, setPrefsOpen] = useState(false)
+
+  useEffect(() => {
+    api.results().then(d => setKinds(d.kinds || []))
+    api.uiPrefs("results").then(setPrefs)
+  }, [])
+
+  const ordered = orderKinds(kinds, prefs)
+  const visible = ordered.filter(k => !prefs.hidden.includes(k.id))
+  const tabs = visible.map(k => ({ id: k.id, label: k.label, badge: k.count }))
+
+  useEffect(() => {
+    if (tabs.length && !tabs.find(t => t.id === active)) setActive(tabs[0].id)
+  }, [tabs.map(t => t.id).join(",")]) // eslint-disable-line
+
+  async function savePrefs(next: Prefs) {
+    setPrefs(next)
+    await api.setUiPrefs("results", next.order, next.hidden)
+  }
+
+  function toggleHidden(id: string) {
+    const hidden = prefs.hidden.includes(id) ? prefs.hidden.filter(x => x !== id) : [...prefs.hidden, id]
+    savePrefs({ ...prefs, hidden })
+  }
+
+  function move(id: string, dir: -1 | 1) {
+    const order = ordered.map(k => k.id)
+    const i = order.indexOf(id)
+    const j = i + dir
+    if (j < 0 || j >= order.length) return
+    ;[order[i], order[j]] = [order[j], order[i]]
+    savePrefs({ ...prefs, order })
+  }
+
+  return (
+    <ViewShell>
+      <ViewHead title="Результаты" sub="Что команда произвела для бизнеса — лиды, сайты и другие исходы работы"
+        right={
+          <button onClick={() => setPrefsOpen(v => !v)} title="Настроить вкладки"
+            style={{ width: 30, height: 30, borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
+              background: prefsOpen ? "var(--surface-soft)" : "transparent", color: "var(--muted)", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
+            ⚙
+          </button>
+        } />
+      {tabs.length > 0 && <SubTabs tabs={tabs} active={active} onChange={setActive} />}
+      {prefsOpen && (
+        <div style={{ padding: "14px 28px", borderBottom: "1px solid var(--hairline)", background: "var(--surface-soft)" }}>
+          <SectionLabel style={{ marginBottom: 10 }}>Порядок и видимость вкладок (только у вас)</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {ordered.map((k, i) => (
+              <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
+                <button onClick={() => move(k.id, -1)} disabled={i === 0}
+                  style={{ border: "none", background: "none", color: "var(--muted)", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, fontSize: 12 }}>▲</button>
+                <button onClick={() => move(k.id, 1)} disabled={i === ordered.length - 1}
+                  style={{ border: "none", background: "none", color: "var(--muted)", cursor: i === ordered.length - 1 ? "default" : "pointer", opacity: i === ordered.length - 1 ? 0.3 : 1, fontSize: 12 }}>▼</button>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, cursor: "pointer", color: prefs.hidden.includes(k.id) ? "var(--faint)" : "var(--text)" }}>
+                  <input type="checkbox" checked={!prefs.hidden.includes(k.id)} onChange={() => toggleHidden(k.id)} />
+                  {k.label}
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {tabs.length === 0 ? (
+        <ViewBody><Empty icon="◈" text="Результатов пока нет" hint="Появятся, когда офис опубликует лендинг или соберёт первую заявку" /></ViewBody>
+      ) : (
+        <>
+          {active === "leads" && <LeadsTab />}
+          {active === "sites" && <SitesTab />}
+        </>
+      )}
+    </ViewShell>
+  )
+}
+
+// ── Лиды: канбан по статусам + карточка с историей (перенесено из бывшей
+// отдельной вкладки «Лиды» без изменения логики) ───────────────────────────
 const LEAD_COLUMNS = ["new", "contacted", "qualified", "won", "lost"] as const
 const STATUS_COLOR: Record<string, string> = {
   new: "#ffac2e", contacted: "#4fc3f7", qualified: "#81c784", won: "#a0e0ab", lost: "var(--faint)",
 }
 const STALE_MS = 72 * 3600 * 1000
 
-export function LeadsView() {
+function LeadsTab() {
   const { state } = useOffice()
   const leads = state.leads
   const [labels, setLabels] = useState<Record<string, string>>({})
@@ -26,11 +121,6 @@ export function LeadsView() {
 
   useEffect(() => { api.leads().then(d => setLabels(d.labels || {})) }, [])
 
-  // Карточка лида раньше закрывалась после КАЖДОГО действия (смена статуса,
-  // заметка) — чтобы сделать два действия подряд, приходилось открывать её
-  // заново (найдено при разборе governance/CRM-виджетов). Теперь модалка
-  // остаётся открытой, а её содержимое само подтягивает свежие данные лида
-  // из общего state после refreshData — карточка "живая", а не одноразовая.
   useEffect(() => {
     if (!selected) return
     const updated = leads.find((l: any) => l.id === selected.id)
@@ -57,8 +147,7 @@ export function LeadsView() {
   const isStale = (l: any) => (l.status || "new") === "new" && l.ts && (Date.now() - l.ts * 1000) > STALE_MS
 
   return (
-    <ViewShell>
-      <ViewHead title="Лиды" sub="Заявки, собранные лендингами и ботами — мини-CRM" />
+    <>
       {leads.length === 0 ? (
         <ViewBody>
           <Empty icon="◈" text="Заявок пока нет"
@@ -190,6 +279,40 @@ export function LeadsView() {
           </>
         )}
       </Modal>
-    </ViewShell>
+    </>
+  )
+}
+
+// ── Сайты: опубликованные лендинги компании (across всех проектов) — тот же
+// /api/sites, что и «Работа» → карточка проекта → «Артефакты», только здесь
+// сводно по всей компании, не по одному проекту. ───────────────────────────
+function SitesTab() {
+  const { state } = useOffice()
+  const sites = state.sites
+
+  if (sites.length === 0) return (
+    <ViewBody>
+      <Empty icon="🌐" text="Сайтов пока нет" hint="Появятся, когда агент опубликует лендинг" />
+    </ViewBody>
+  )
+
+  return (
+    <ViewBody>
+      <SectionLabel>Опубликовано сайтов: {sites.length}</SectionLabel>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+        {sites.map((s: any) => (
+          <Card key={s.slug}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)", marginBottom: 4 }}>{s.title || s.slug}</div>
+            <a href={s.url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: "var(--mercury-a)", wordBreak: "break-all" }}>{s.url}</a>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, display: "flex", justifyContent: "space-between" }}>
+              <span>лидов: {s.leads ?? 0}</span>
+              <span className="mono">
+                {s.updated_ts ? new Date(s.updated_ts * 1000).toLocaleDateString("ru", { day: "2-digit", month: "short" }) : ""}
+              </span>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </ViewBody>
   )
 }
