@@ -5,7 +5,7 @@ import { NavRail } from "./components/NavRail"
 import { TabBridge } from "./components/TabBridge"
 import { OfficeView } from "./components/OfficeView"
 import { RightPanel } from "./components/RightPanel"
-import { useOfficeSelector, useUnread } from "../data/OfficeProvider"
+import { useOfficeSelector, useUnread, markReady } from "../data/OfficeProvider"
 import { api } from "../data/api"
 import type { Section, Theme } from "./types"
 
@@ -195,7 +195,7 @@ export default function App() {
     return (
       <Suspense fallback={null}>
         <OnboardingFlow onStart={() => setOnboardingStarted(true)}
-          onDone={() => { setOnboarded(true); setView("office") }} />
+          onDone={() => { markReady(); setOnboarded(true); setView("office") }} />
       </Suspense>
     )
   }

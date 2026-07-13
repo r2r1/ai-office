@@ -17,7 +17,7 @@ interface TeamViewProps {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  active: "ACTIVE", thinking: "THINKING", done: "DONE", idle: "IDLE",
+  active: "РАБОТАЕТ", thinking: "ДУМАЕТ", done: "ГОТОВО", idle: "ЖДЁТ",
 }
 const STATUS_COLOR: Record<string, string> = {
   active: "#a0e0ab", thinking: "#ffac2e", done: "var(--text-dim)", idle: "var(--whisper)",
@@ -423,7 +423,6 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
             <span style={{ fontSize: 10, color: "var(--faint)" }}>✎</span>
           </button>
 
-          {/* Chat → */}
           <button onClick={() => onOpenChat?.(agent.id)}
             style={{
               border: "none", borderRadius: "var(--radius-pill)", padding: "6px 14px",
@@ -433,7 +432,7 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
             }}
             onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
             onMouseLeave={e => (e.currentTarget.style.opacity = "1")}>
-            Chat →
+            Написать →
           </button>
         </div>
       )}

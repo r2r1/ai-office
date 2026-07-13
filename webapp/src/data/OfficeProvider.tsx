@@ -213,6 +213,16 @@ async function loadThreads() {
 // (например, разблокировка задачи), не дожидаясь SSE-события.
 export async function refreshData(what: RefreshKey[]) { return refresh(what) }
 
+// state.ready читается один раз из /api/brief/status при монтировании
+// OfficeProvider (до онбординга — честно false). OnboardingFlow.onDone()
+// переключает App.tsx на вид "office" локальным флагом, но раньше НИЧЕГО не
+// сообщало общему стору — "Работа"/"Аккаунт" показывали "ожидает брифа"
+// вечно после онбординга, до жёсткой перезагрузки страницы (найдено при
+// живом дизайн-аудите). Вызывается сразу после завершения онбординга.
+export function markReady(): void {
+  dispatch({ t: "seed", partial: { ready: true } })
+}
+
 async function refresh(what: RefreshKey[] = ["progress", "costs", "leads", "sites", "plan"]) {
   const partial: Partial<OfficeState> = {}
   await Promise.all(what.map(async k => {

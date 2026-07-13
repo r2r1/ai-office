@@ -186,27 +186,33 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
       )}
 
       {/* Кнопка подключения (только для OAuth и непривязанных) */}
-      {isOAuth && !connected && (
+      {isOAuth && !connected && (() => {
+        // Раньше кнопка ВСЕГДА показывала цвет/иконку/текст Google, даже для
+        // GitHub (реальный баг со скриншотов) — цвет и подпись теперь берутся
+        // из конкретного провайдера, не только иконка.
+        const oauthColor = isGoogle ? "#4285F4" : "var(--text-dim)"
+        return (
         <button
           onClick={handleConnect}
           style={{
             marginTop: 2,
             padding: "8px 14px",
             borderRadius: "var(--radius-sm)",
-            border: "1px solid rgba(66,133,244,0.45)",
-            background: "rgba(66,133,244,0.10)",
-            color: "#4285F4",
+            border: `1px solid ${isGoogle ? "rgba(66,133,244,0.45)" : "var(--hairline-strong)"}`,
+            background: isGoogle ? "rgba(66,133,244,0.10)" : "var(--surface-soft)",
+            color: oauthColor,
             fontSize: 12, fontWeight: 600, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
             transition: "background 0.15s",
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = "rgba(66,133,244,0.18)")}
-          onMouseLeave={e => (e.currentTarget.style.background = "rgba(66,133,244,0.10)")}
+          onMouseEnter={e => (e.currentTarget.style.background = isGoogle ? "rgba(66,133,244,0.18)" : "var(--surface-strong)")}
+          onMouseLeave={e => (e.currentTarget.style.background = isGoogle ? "rgba(66,133,244,0.10)" : "var(--surface-soft)")}
         >
-          {GOOGLE_ICON}
-          Войти через Google
+          {isGoogle ? GOOGLE_ICON : <span style={{ fontSize: 15, lineHeight: 1 }}>{integ.icon || "🔌"}</span>}
+          {isGoogle ? "Войти через Google" : `Войти через ${integ.title || integ.name}`}
         </button>
-      )}
+        )
+      })()}
 
       {/* Для подключённых Google — кнопка отключить */}
       {isGoogle && connected && (

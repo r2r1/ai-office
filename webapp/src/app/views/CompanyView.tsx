@@ -475,8 +475,14 @@ function RolesTab() {
 // ── Скиллы: каталог + установка из любого источника (как npx skills) ──────────
 const ROLE_RU: Record<string, string> = {
   cto: "CTO", cmo: "CMO", sales_lead: "Head of Sales", developer: "Разработчик",
-  designer: "Дизайнер", integrator: "Интегратор", marketer: "Маркетолог",
+  // designer как отдельная нанимаемая роль слита с developer (roles.py) — но
+  // строка "designer" остаётся в roles: скиллов как алиас поиска (защищено
+  // тестами test_design_skills.py), поэтому в UI просто показываем то же имя,
+  // что у developer, а не сырое "designer" (было найдено при живом аудите).
+  designer: "Разработчик",
+  integrator: "Интегратор", marketer: "Маркетолог",
   analyst: "Аналитик", salesman: "Продажник", researcher: "Ресёрчер",
+  strategist: "Стратег", architect: "Архитектор", hr: "HR",
 }
 const SKILL_FIELD: React.CSSProperties = {
   background: "var(--surface-soft)", border: "1px solid var(--hairline)",
@@ -576,8 +582,8 @@ function SkillsTab() {
       <SectionLabel>Установить скилл (из любого источника)</SectionLabel>
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>
-          Скилл — это готовый «как делать» для агентов. Формат как у Claude Code
-          (frontmatter + тело). Скилл — <b style={{ color: "var(--text-dim)" }}>инструкция,
+          Скилл — это готовый «как делать» для агентов: заголовок с описанием
+          + текст инструкции. Скилл — <b style={{ color: "var(--text-dim)" }}>инструкция,
           которой агенты будут следовать</b>: ставьте из доверенных источников.
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
@@ -604,7 +610,7 @@ function SkillsTab() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Название *"
                 style={SKILL_FIELD} />
-              <input value={roles} onChange={e => setRoles(e.target.value)} placeholder="Роли: developer, designer"
+              <input value={roles} onChange={e => setRoles(e.target.value)} placeholder="Роли: developer, marketer"
                 style={SKILL_FIELD} />
               <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Описание — что делает"
                 style={{ ...SKILL_FIELD, gridColumn: "1 / -1" }} />
@@ -660,7 +666,7 @@ function SkillCard({ s, onRemove }: { s: any; onRemove?: () => void }) {
           {s.description && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{s.description}</div>}
           {(s.roles || []).length > 0 && (
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
-              роли: {(s.roles || []).map((r: string) => ROLE_RU[r] || r).join(", ")}
+              роли: {Array.from(new Set((s.roles || []).map((r: string) => ROLE_RU[r] || r))).join(", ")}
             </div>
           )}
         </div>

@@ -362,8 +362,13 @@ async def review_and_maybe_fix(role: str, agent_id: str, task: str, skill: str,
 async def assign(agent_id: str, role: str, task: str, publish, skill: str = "",
                  department: str = "", objective: str = "", task_id: str = "") -> None:
     """Взять задачу в работу: анонс, статус thinking, привязка живости, старт корутины."""
+    # Человекочитаемая роль в сообщении, не сырой agent_id (marketer_p1_45123
+    # и т.п.) — владелец бизнеса видел внутренний technical id как часть
+    # обычного предложения (найдено при живом дизайн-аудите).
+    from src.office import roles as _roles
+    role_title = _roles.ROLE_META.get(role, {}).get("title", role)
     await publish({"type": "speech", "agent_id": "orchestrator_1",
-                   "text": f"→ Поручаю {agent_id}: {task[:70]}"})
+                   "text": f"→ Поручаю {role_title}: {task[:70]}"})
     from src.office import trace
     trace.log("assign", to=agent_id, role=role, dept=department,
               task_id=task_id, task=task[:160])
@@ -554,8 +559,12 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                     nl = autonomy.next_level()
                     await publish({"type": "autonomy_upgrade_offer", "agent_id": "orchestrator_1",
                                    "next_level": nl, "text": f"🤝 {proposal}"})
-        # Живость: «сделал → отчитался» — короткий итог в ленту.
-        summary = (result or "").strip().replace("\n", " ")[:120]
+        # Живость: «сделал → отчитался» — короткий итог в ленту. Агент часто
+        # сам начинает ответ с «Готово!»/«Готово:» — конкатенация с префиксом
+        # ниже давала видимое «Готово: Готово! ...» (найдено при живом аудите).
+        import re as _re_summary
+        summary = (result or "").strip().replace("\n", " ")
+        summary = _re_summary.sub(r"^готово[!:.\s]*", "", summary, flags=_re_summary.IGNORECASE).strip()[:120]
         if summary:
             await publish({"type": "speech", "agent_id": agent_id, "text": f"✅ Готово: {summary}"})
     except Exception as e:

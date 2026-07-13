@@ -141,6 +141,16 @@ function AnalyzingScreen({ onReady }: { onReady: (r: any) => void }) {
   const feed = useOfficeSelector(s => s.feed)
   const latest = feed[0]?.text || ""
   const pollRef = useRef<number | null>(null)
+  // Раньше не было НИКАКОГО индикатора хода дела, кроме смены текста — на
+  // реальном прогоне это занимает 40+ секунд, и без движения/счётчика
+  // владелец бизнеса не понимает, зависло ли (найдено при живом аудите).
+  // Бэкенд не даёт фиксированных шагов — честная неопределённая полоса
+  // (не выдуманный процент) + секундомер вместо тишины.
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -187,6 +197,16 @@ function AnalyzingScreen({ onReady }: { onReady: (r: any) => void }) {
           {latest || "Собираю команду и провожу первое исследование рынка…"}
         </motion.p>
       </AnimatePresence>
+      <div style={{ width: "60%", maxWidth: 200, height: 3, borderRadius: 999, background: "var(--hairline)",
+        margin: "18px auto 8px", overflow: "hidden" }}>
+        <motion.div
+          animate={{ x: ["-100%", "220%"] }}
+          transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
+          style={{ width: "35%", height: "100%", borderRadius: 999, background: MERCURY }} />
+      </div>
+      <div className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
+        {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} — обычно занимает около минуты
+      </div>
     </motion.div>
   )
 }

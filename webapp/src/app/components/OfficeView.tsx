@@ -6,14 +6,18 @@ import type { Worker } from "../types"
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
 // Комнаты (x,y,w,h в % контейнера) — из Figma-плана офиса.
+// Раньше подписи были на английском (RESEARCH LAB/STRATEGY/...) — единственное
+// место интерфейса, нарушавшее правило проекта "язык продукта — русский"
+// (найдено при живом дизайн-аудите: смешение RU/EN резало глаз именно здесь,
+// на самом заметном экране продукта).
 const ROOMS = [
-  { id: "research", label: "RESEARCH LAB", x: 4, y: 7, w: 30, h: 44 },
-  { id: "strategy", label: "STRATEGY", x: 37, y: 7, w: 22, h: 44 },
+  { id: "research", label: "ИССЛЕДОВАНИЯ", x: 4, y: 7, w: 30, h: 44 },
+  { id: "strategy", label: "СТРАТЕГИЯ", x: 37, y: 7, w: 22, h: 44 },
   { id: "hr", label: "HR", x: 62, y: 7, w: 17, h: 44 },
-  { id: "mgmt", label: "MGMT", x: 82, y: 7, w: 14, h: 44 },
-  { id: "sales", label: "SALES", x: 4, y: 58, w: 22, h: 36 },
-  { id: "dev", label: "DEV STUDIO", x: 29, y: 58, w: 32, h: 36 },
-  { id: "meeting", label: "MEETING ROOM", x: 64, y: 58, w: 32, h: 36 },
+  { id: "mgmt", label: "УПРАВЛЕНИЕ", x: 82, y: 7, w: 14, h: 44 },
+  { id: "sales", label: "ПРОДАЖИ", x: 4, y: 58, w: 22, h: 36 },
+  { id: "dev", label: "РАЗРАБОТКА", x: 29, y: 58, w: 32, h: 36 },
+  { id: "meeting", label: "ПЕРЕГОВОРНАЯ", x: 64, y: 58, w: 32, h: 36 },
 ]
 
 const DESKS: Array<[number, number]> = [

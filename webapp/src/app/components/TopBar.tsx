@@ -58,9 +58,20 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
             background: MERCURY, borderRadius: "var(--radius-pill)", transition: "width 0.5s var(--ease-out)" }} />
         </div>
         {!isMobile && (
-          <div className="topbar-progress-note mono" style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          // Раньше эта строка была обрезана многоточием и НИЧЕГО не делала по
+          // клику — единственное окно в "мысли CEO" прямо сейчас было
+          // нечитаемым (найдено при живом аудите). title даёт нативный тултип
+          // с полным текстом; onClick открывает попап "Статус офиса" (тот же,
+          // что и справа) — полная хронология с этой же мыслью решения есть
+          // в Сводка → Прозрачность, но туда нужна отдельная навигация,
+          // которой TopBar не управляет.
+          <button onClick={onStatusClick} title={progressNote || undefined}
+            className="topbar-progress-note mono"
+            style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden",
+              textOverflow: "ellipsis", background: "none", border: "none", padding: 0, textAlign: "left",
+              cursor: progressNote ? "pointer" : "default", font: "inherit" }}>
             {progressNote || "—"}
-          </div>
+          </button>
         )}
       </div>
 

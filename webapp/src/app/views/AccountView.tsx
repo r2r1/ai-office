@@ -1,9 +1,16 @@
+import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, ViewBody, Card } from "./ui"
 
 export function AccountView() {
   const { state } = useOffice()
+  // Раньше "Название" показывало сырой workspace-слаг (marina.pekarnya) —
+  // владелец бизнеса видел системное имя аккаунта вместо названия своего
+  // дела (найдено при живом дизайн-аудите). Ниша/бриф — источник настоящего
+  // названия, если он уже собран; slug остаётся честным fallback до брифа.
+  const [businessName, setBusinessName] = useState<string>("")
+  useEffect(() => { api.briefStatus().then(d => setBusinessName(d?.brief?.niche || "")) }, [])
 
   return (
     <ViewShell>
@@ -12,7 +19,7 @@ export function AccountView() {
         <Card style={{ marginBottom: 16 }}>
           <div className="mono" style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 12 }}>Рабочее пространство</div>
           <Field label="ID" value={state.workspace?.id || "—"} />
-          <Field label="Название" value={state.workspace?.name || "—"} />
+          <Field label="Название" value={businessName || state.workspace?.name || "—"} />
           <Field label="Статус офиса" value={state.ready ? "работает" : "ожидает бриф"} accent={!!state.ready} />
         </Card>
 
