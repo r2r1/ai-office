@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from src.core.search import web_search
+from src.core import billing_provider
 
 load_dotenv()
 
@@ -29,18 +30,24 @@ load_dotenv()
 # Знание об ошибках LLM-провайдера живёт здесь, а не в бизнес-цикле loop.py:
 # quota/недоступность модели — свойство провайдера, не офиса. loop импортирует эти
 # предикаты и решает, что делать (пауза при quota, смена модели при недоступности).
+#
+# Паттерны конкретного провайдера (issue #5, docs/architecture-improvements.md)
+# переехали в billing_provider.py — эти две функции остаются с прежней сигнатурой
+# (ничего не меняется у execution.py и прочих вызывающих), но делегируют активному
+# провайдеру. Новый LLM-провайдер = billing_provider.register(...), не правка тут.
 def is_model_unavailable_error(err: str) -> bool:
     """Модель/канал недоступен у провайдера (не транзиентная ошибка сети/таймаута) —
     например ручное или expert-назначение указывает на несуществующий на шлюзе id.
     Отличается от quota-ошибки: тут нужно сменить модель, а не остановить офис."""
-    low = (err or "").lower()
-    return "model_not_found" in low or "no available channel" in low
+    return billing_provider.active().is_model_unavailable_error(err)
 
 
 def is_network_error(err: str) -> bool:
     """Транзиентный сетевой сбой до провайдера (таймаут/прокси/обрыв) — не quota и
     не отсутствие модели. Одиночный — норма (ретрай цикла), серия подряд — офис
-    должен встать на паузу с понятным сообщением, а не спамить трейсбеками."""
+    должен встать на паузу с понятным сообщением, а не спамить трейсбеками.
+    Не провайдер-специфично (это форма сетевой ошибки Python/httpx, не текст от
+    шлюза) — остаётся здесь, не в billing_provider.py."""
     low = (err or "").lower()
     return ("timed out" in low or "timeout" in low or "connection error" in low
             or "connect error" in low or "connection refused" in low
@@ -49,13 +56,7 @@ def is_network_error(err: str) -> bool:
 
 def is_quota_error(err: str) -> bool:
     """Ошибка нехватки баланса/квоты у LLM-провайдера."""
-    err = err or ""
-    low = err.lower()
-    return (
-        "insufficient" in low or "额度不足" in err or "余额不足" in err
-        or ("403" in err and ("quota" in low or "balance" in low or "额度" in err or "余额" in err))
-        or "预扣费" in err
-    )
+    return billing_provider.active().is_quota_error(err)
 
 
 def _mask_old_observations(messages: list, keep_last: int = 3) -> None:
