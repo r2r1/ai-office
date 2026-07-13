@@ -131,7 +131,7 @@ function GoalsTab() {
                 {world.metrics.map((m: any, i: number) => (
                   <Card key={m.metric_id || i} style={{ padding: "12px 14px" }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
-                      {m.title || m.metric_id}
+                      {m.label || m.metric_id}
                     </div>
                     <div className="mono" style={{ fontSize: 18, color: "var(--text)", marginBottom: 2 }}>{String(m.value ?? "—")}</div>
                     <Pill color={m.source === "fact" ? "var(--success)" : "var(--warning)"}>
