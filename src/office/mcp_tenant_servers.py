@@ -99,6 +99,16 @@ def list_for_use() -> list[dict]:
             for i in _all()]
 
 
+def env_values(server_id: str) -> dict[str, str]:
+    """Расшифрованные значения env — только для владельца тенанта (UI), не для
+    общего API/агента (тот же принцип, что tenant_apps.env_values/connections.py:
+    ключи, которые сам владелец и вводил, показать ему обратно — не утечка)."""
+    for i in _all():
+        if i["id"] == server_id:
+            return {k: crypto.decrypt(v) for k, v in i.get("env", {}).items()}
+    return {}
+
+
 def remove(server_id: str) -> bool:
     items = _all()
     new = [i for i in items if i["id"] != server_id]

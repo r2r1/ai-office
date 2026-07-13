@@ -921,6 +921,32 @@ async def delete_hosted_app(app_id: str):
     return {"ok": ok}
 
 
+@app.get("/api/mcp-servers")
+async def get_mcp_servers():
+    """Тенантские MCP-серверы (office/mcp_tenant_servers.py) — подключает их
+    агент (register_external_api/discover_resource), владелец здесь только
+    просматривает и может отключить, симметрично /api/apps."""
+    from src.office import mcp_tenant_servers
+    return {"servers": mcp_tenant_servers.list_all()}
+
+
+@app.get("/api/mcp-servers/{server_id}")
+async def get_mcp_server_detail(server_id: str):
+    from src.office import mcp_tenant_servers
+    servers = mcp_tenant_servers.list_all()
+    item = next((s for s in servers if s["id"] == server_id), None)
+    if item is None:
+        return JSONResponse({"error": "не найдено"}, status_code=404)
+    return {**item, "env_values": mcp_tenant_servers.env_values(server_id)}
+
+
+@app.delete("/api/mcp-servers/{server_id}")
+async def delete_mcp_server(server_id: str):
+    from src.office import mcp_tenant_servers
+    ok = mcp_tenant_servers.remove(server_id)
+    return {"ok": ok}
+
+
 @app.get("/api/integrations")
 async def get_integrations():
     """Каталог поддерживаемых интеграций со статусом подключения."""

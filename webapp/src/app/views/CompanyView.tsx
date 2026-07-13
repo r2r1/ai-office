@@ -32,6 +32,7 @@ const TABS = [
   { id: "storage", label: "Хранилище" },
   { id: "access", label: "Доступы" },
   { id: "apps", label: "Приложения" },
+  { id: "mcp", label: "MCP-серверы" },
 ]
 
 const DEPT_RU: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
@@ -51,6 +52,7 @@ export function CompanyView() {
       {active === "storage" && <StorageTab />}
       {active === "access" && <AccessTab />}
       {active === "apps" && <AppsTab />}
+      {active === "mcp" && <McpServersTab />}
     </ViewShell>
   )
 }
@@ -903,6 +905,113 @@ function AppDetail({ app, onChanged }: { app: any; onChanged: () => void }) {
           background: "var(--surface-soft)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)",
           padding: 12, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap" }}>{detail.compose_yaml}</pre>
       )}
+    </div>
+  )
+}
+
+function McpServersTab() {
+  const [servers, setServers] = useState<any[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = () => api.mcpServers().then(d => { setServers(d.servers || []); setLoading(false) })
+  useEffect(() => { load() }, [])
+
+  if (loading) return <ViewBody><div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div></ViewBody>
+
+  if (servers.length === 0) return (
+    <ViewBody>
+      <Empty icon="🔌" text="Тенантских MCP-серверов пока нет"
+        hint="Подключается агентом (register_external_api/discover_resource), когда офис находит внешний сервис по вашей задаче — исполняется в изолированной Docker-песочнице, не на хосте напрямую" />
+    </ViewBody>
+  )
+
+  return (
+    <ViewBody>
+      <SectionLabel>Подключённые MCP-серверы · {servers.length}</SectionLabel>
+      <div style={{ display: "grid", gap: 10 }}>
+        {servers.map((s: any) => (
+          <Card key={s.id} onClick={() => setSelectedId(s.id === selectedId ? null : s.id)}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{s.label}</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
+                  {s.command}{s.args?.length ? " " + s.args.join(" ") : ""}
+                </div>
+              </div>
+              <Pill color={s.allow_network ? "var(--warning)" : undefined}>
+                {s.allow_network ? "сеть разрешена" : "без сети"}
+              </Pill>
+            </div>
+            {selectedId === s.id && <McpServerDetail server={s} onChanged={load} />}
+          </Card>
+        ))}
+      </div>
+    </ViewBody>
+  )
+}
+
+function McpServerDetail({ server, onChanged }: { server: any; onChanged: () => void }) {
+  const [detail, setDetail] = useState<any>(null)
+  const [busy, setBusy] = useState(false)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  useEffect(() => { api.mcpServerDetail(server.id).then(setDetail) }, [server.id])
+
+  const copy = (key: string, value: string) => {
+    navigator.clipboard?.writeText(value).catch(() => {})
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(k => (k === key ? null : k)), 1500)
+  }
+
+  const remove = async () => {
+    if (!confirm(`Отключить «${server.label}» насовсем? Агенты потеряют доступ к его инструментам.`)) return
+    setBusy(true)
+    await api.removeMcpServer(server.id)
+    setBusy(false)
+    onChanged()
+  }
+
+  const inputStyle = {
+    width: "100%", padding: "8px 10px", borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--hairline)", background: "var(--surface-soft)",
+    color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)",
+  } as const
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--hairline)",
+      display: "flex", flexDirection: "column", gap: 14 }} onClick={e => e.stopPropagation()}>
+      {detail?.env_values && Object.keys(detail.env_values).length > 0 && (
+        <div>
+          <SectionLabel style={{ marginBottom: 8 }}>Переменные окружения</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {Object.entries(detail.env_values).map(([k, v]) => (
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", minWidth: 140, flexShrink: 0 }}>{k}</div>
+                <input style={inputStyle} readOnly value={String(v)} onClick={e => (e.target as HTMLInputElement).select()} />
+                <button onClick={() => copy(k, String(v))}
+                  style={{ fontSize: 11, padding: "6px 10px", borderRadius: "var(--radius-sm)", cursor: "pointer",
+                    border: "1px solid var(--hairline)", background: "var(--surface-soft)", color: "var(--text-dim)", flexShrink: 0 }}>
+                  {copiedKey === k ? "✓" : "Копировать"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+        Подключён {detail?.created_ts ? new Date(detail.created_ts * 1000).toLocaleString("ru-RU") : "—"} ·
+        исполняется в Docker-песочнице (без доступа к файлам хоста)
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={remove} disabled={busy}
+          style={{ fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+            border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)", marginLeft: "auto" }}>
+          Отключить насовсем
+        </button>
+      </div>
     </div>
   )
 }

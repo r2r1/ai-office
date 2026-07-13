@@ -178,6 +178,10 @@ export const api = {
   pauseHostedApp: (id: string) => postJSON<any>(`/api/apps/${id}/pause`, {}, null),
   resumeHostedApp: (id: string) => postJSON<any>(`/api/apps/${id}/resume`, {}, null),
   removeHostedApp: (id: string) => api.del(`/api/apps/${id}`),
+  // ── Тенантские MCP-серверы (office/mcp_tenant_servers.py) — подключает агент, владелец просматривает/отключает ──
+  mcpServers: () => getJSON<{ servers: any[] }>("/api/mcp-servers", { servers: [] }),
+  mcpServerDetail: (id: string) => getJSON<any>(`/api/mcp-servers/${id}`, null),
+  removeMcpServer: (id: string) => api.del(`/api/mcp-servers/${id}`),
   del: async (url: string) => {
     try {
       const r = await fetch(url, { method: "DELETE", credentials: "same-origin" })
