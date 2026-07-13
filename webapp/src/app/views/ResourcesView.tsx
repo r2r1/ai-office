@@ -23,12 +23,74 @@ interface ResourcesViewProps {
   onFocusHandled?: () => void
 }
 
+// Персонализация порядка/видимости под-вкладок (issue #6, docs/architecture-
+// improvements.md) — тот же паттерн, что уже выдержал живую проверку в
+// ResultsView.tsx (порядок пережил reload через ui_prefs.json), перенесён
+// сюда: «Ресурсы» — второй раздел с 4 под-вкладками, где несогласованность
+// («тут можно скрыть вкладку, а тут нет») была бы реальным UX-багом.
+interface Prefs { order: string[]; hidden: string[] }
+
+function orderTabs<T extends { id: string }>(tabs: T[], prefs: Prefs): T[] {
+  if (!prefs.order.length) return tabs
+  const idx = (id: string) => { const i = prefs.order.indexOf(id); return i === -1 ? 999 : i }
+  return [...tabs].sort((a, b) => idx(a.id) - idx(b.id))
+}
+
 export function ResourcesView({ focusStorageProject, onFocusHandled }: ResourcesViewProps = {}) {
-  const { active, setActive } = useSubTab(TABS, focusStorageProject ? "storage" : undefined)
+  const [prefs, setPrefs] = useState<Prefs>({ order: [], hidden: [] })
+  const [prefsOpen, setPrefsOpen] = useState(false)
+  useEffect(() => { api.uiPrefs("resources").then(setPrefs) }, [])
+
+  const ordered = orderTabs(TABS, prefs)
+  const visible = ordered.filter(t => !prefs.hidden.includes(t.id))
+  const { active, setActive } = useSubTab(visible.length ? visible : TABS, focusStorageProject ? "storage" : undefined)
+
+  async function savePrefs(next: Prefs) {
+    setPrefs(next)
+    await api.setUiPrefs("resources", next.order, next.hidden)
+  }
+  function toggleHidden(id: string) {
+    const hidden = prefs.hidden.includes(id) ? prefs.hidden.filter(x => x !== id) : [...prefs.hidden, id]
+    savePrefs({ ...prefs, hidden })
+  }
+  function move(id: string, dir: -1 | 1) {
+    const order = ordered.map(t => t.id)
+    const i = order.indexOf(id)
+    const j = i + dir
+    if (j < 0 || j >= order.length) return
+    ;[order[i], order[j]] = [order[j], order[i]]
+    savePrefs({ ...prefs, order })
+  }
+
   return (
     <ViewShell>
-      <ViewHead title="Ресурсы" sub="Хранилище, доступы, приложения и MCP-серверы офиса" />
-      <SubTabs tabs={TABS} active={active} onChange={setActive} />
+      <ViewHead title="Ресурсы" sub="Хранилище, доступы, приложения и MCP-серверы офиса"
+        right={
+          <Button variant="ghost" size="icon-sm" active={prefsOpen} onClick={() => setPrefsOpen(v => !v)}
+            title="Настроить вкладки" style={{ borderRadius: "var(--radius-pill)", fontSize: 14 }}>
+            ⚙
+          </Button>
+        } />
+      <SubTabs tabs={visible} active={active} onChange={setActive} />
+      {prefsOpen && (
+        <div style={{ padding: "14px 28px", borderBottom: "1px solid var(--hairline)", background: "var(--surface-soft)" }}>
+          <SectionLabel style={{ marginBottom: 10 }}>Порядок и видимость вкладок (только у вас)</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {ordered.map((t, i) => (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
+                <button onClick={() => move(t.id, -1)} disabled={i === 0}
+                  style={{ border: "none", background: "none", color: "var(--muted)", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, fontSize: 12 }}>▲</button>
+                <button onClick={() => move(t.id, 1)} disabled={i === ordered.length - 1}
+                  style={{ border: "none", background: "none", color: "var(--muted)", cursor: i === ordered.length - 1 ? "default" : "pointer", opacity: i === ordered.length - 1 ? 0.3 : 1, fontSize: 12 }}>▼</button>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, cursor: "pointer", color: prefs.hidden.includes(t.id) ? "var(--faint)" : "var(--text)" }}>
+                  <input type="checkbox" checked={!prefs.hidden.includes(t.id)} onChange={() => toggleHidden(t.id)} />
+                  {t.label}
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {active === "storage" && <StorageTab focusProject={active === "storage" ? focusStorageProject : undefined} onFocusHandled={onFocusHandled} />}
       {active === "access" && <AccessTab />}
       {active === "apps" && <AppsTab />}
