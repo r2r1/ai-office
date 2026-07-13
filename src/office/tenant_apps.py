@@ -34,10 +34,23 @@ import uuid
 from pathlib import Path
 
 from src.office import exec_sandbox
+from src.office import artifact
 from src.saas import context as ctx
 from src.saas import crypto
 
 _FILE = "apps.json"
+
+# Приложения — тенант-wide (не привязаны к конкретному проекту, в отличие от
+# сайтов), поэтому project_id всегда "" — for_project() их не увидит, а
+# all_artifacts() покажет наравне с остальными.
+artifact.register(artifact.ArtifactKind(
+    id="app", label="Приложение", lister=lambda: list_all(),
+    normalize=lambda a: {
+        "title": a.get("label") or a.get("id", ""), "ref": a.get("id", ""),
+        "project_id": "",
+        "created_ts": a.get("created_ts"), "updated_ts": a.get("created_ts"),
+    },
+))
 _MAX_APPS_PER_TENANT = 3
 _COMPOSE_TIMEOUT = 300  # npm install/docker pull первого поднятия — тяжёлое
 

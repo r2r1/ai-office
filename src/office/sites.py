@@ -10,12 +10,22 @@ import time
 
 from src.saas import context as ctx
 from src.office import results
+from src.office import artifact
 
 _FILE = "sites.json"
 
 results.register(results.ResultKind(
     id="sites", label="Сайты", icon="results", order=1,
     counter=lambda: len(_all()),
+))
+
+artifact.register(artifact.ArtifactKind(
+    id="site", label="Сайт", lister=lambda: all_sites(),
+    normalize=lambda s: {
+        "title": s.get("title") or s.get("slug", ""), "ref": s.get("slug", ""),
+        "project_id": s.get("project") or "",
+        "created_ts": s.get("created_ts"), "updated_ts": s.get("updated_ts"),
+    },
 ))
 
 

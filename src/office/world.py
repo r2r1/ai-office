@@ -64,7 +64,7 @@ def snapshot() -> dict:
 
     from src.office import (brief, objectives, philosophy, constitution, plan,
                             costs, sites, leads, events, autonomy, trust, org,
-                            registry, questions, projects, metrics, gap)
+                            registry, questions, projects, metrics, gap, artifact)
 
     b = brief.get()
     phil = philosophy.load()
@@ -128,6 +128,11 @@ def snapshot() -> dict:
             "sites": [{"slug": s.get("slug", ""), "revision": s.get("revision", 1)}
                       for s in sites.all_sites()],
             "leads_count": leads.count(),
+            # Единый реестр артефактов (issue #2, docs/architecture-improvements.md) —
+            # sites/leads выше НЕ убраны (не ломаем существующих потребителей формы
+            # снапшота), artifacts_count — аддитивное поле поверх того же реестра,
+            # что теперь используют новые типы результата без правки world.py.
+            "artifacts_count": len(artifact.all_artifacts()),
             "spend_usd": totals.get("cost", 0.0),
             "budget_limit_usd": lim.get("total_usd", 0.0),
             "autonomy_level": autonomy.get_level(),
