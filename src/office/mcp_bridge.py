@@ -104,7 +104,8 @@ def _docker_wrap(conf: dict) -> dict:
     docker_args.append(sbx.IMAGE_NAME)
     docker_args.append(conf["command"])
     docker_args += list(conf.get("args") or [])
-    return {"command": "docker", "args": docker_args, "env": None}
+    cmd, *prefix_args = sbx.DOCKER_CMD
+    return {"command": cmd, "args": [*prefix_args, *docker_args], "env": None}
 
 
 _TENANT_PREFIX = "tenant_"

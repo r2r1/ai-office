@@ -90,9 +90,11 @@ def _run_compose(app_id: str, *extra: str, timeout: int = 60) -> subprocess.Comp
     docker compose (не только add) ловит отсутствие Docker/таймаут единообразно —
     один источник правды для всех вызывающих (stop/start/remove/logs/add)."""
     d = _app_dir(app_id)
-    cmd = ["docker", "compose", "-p", _compose_project(app_id), "-f", str(d / "docker-compose.yml"), *extra]
+    cmd = [*exec_sandbox.DOCKER_CMD, "compose", "-p", _compose_project(app_id),
+           "-f", exec_sandbox.wsl_path(d / "docker-compose.yml"), *extra]
     try:
-        return subprocess.run(cmd, cwd=str(d), capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, cwd=str(d), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=timeout)
     except FileNotFoundError:
         return subprocess.CompletedProcess(cmd, 127, stdout="",
             stderr="docker не найден — Docker не установлен или недоступен в PATH.")

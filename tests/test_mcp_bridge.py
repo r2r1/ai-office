@@ -142,7 +142,10 @@ def test_cache_avoids_second_process_spawn_within_ttl():
 def test_docker_wrap_has_isolation_flags_and_no_workspace_mount():
     conf = {"command": "npx", "args": ["my-server"], "env": {}, "allow_network": False}
     wrapped = mcp_bridge._docker_wrap(conf)
-    assert wrapped["command"] == "docker"
+    # На Windows без Docker Desktop docker CLI зовётся через `wsl ... docker`
+    # (см. exec_sandbox.DOCKER_CMD) — проверяем не буквальную команду "docker",
+    # а что итоговый argv совпадает с DOCKER_CMD + docker-флаги.
+    assert wrapped["command"] == sbx.DOCKER_CMD[0]
     args = wrapped["args"]
     assert "--read-only" in args
     assert "--cap-drop=ALL" in args

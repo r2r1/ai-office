@@ -48,6 +48,17 @@ _MEMORY_LIMIT = os.getenv("SANDBOX_MEMORY", "512m")
 _CPU_LIMIT = os.getenv("SANDBOX_CPUS", "1")
 _PIDS_LIMIT = os.getenv("SANDBOX_PIDS", "128")
 
+# Docker Engine без Desktop (WSL2 + `curl -fsSL https://get.docker.com`, см.
+# handoff.md) не даёт Windows-хосту готового `docker.exe`, подключённого к
+# демону (это делает проприетарная прослойка Desktop через named pipe) — сам
+# демон живёт ТОЛЬКО внутри дистрибутива WSL. На Windows поэтому вызываем
+# docker CLI не напрямую, а через `wsl -d <SANDBOX_WSL_DISTRO> -u root docker`.
+# На Linux/macOS-хосте (реальный docker в PATH) префикс пустой.
+_WSL_DISTRO = os.getenv("SANDBOX_WSL_DISTRO", "Ubuntu")
+DOCKER_CMD: list[str] = (
+    ["wsl", "-d", _WSL_DISTRO, "-u", "root", "docker"] if os.name == "nt" else ["docker"]
+)
+
 # Интерпретатор в контейнере (docker/sandbox.Dockerfile) — фиксированные имена
 # бинарников образа. На хосте (direct-режим) — sys.executable/node/bash как раньше.
 _CONTAINER_INTERPRETER = {"python": "python3", "node": "node", "bash": "bash"}
@@ -61,6 +72,13 @@ def mode() -> str:
     return m if m in ("direct", "docker") else "direct"
 
 
+# Через `wsl.exe` (DOCKER_CMD без Desktop) первый вызов после простоя будит
+# остановленную WSL2-VM — это реально занимает больше 5с (замер: ~5.0с давал
+# ложный SandboxUnavailable); при уже тёплой VM ответ приходит за доли секунды,
+# так что больший таймаут не замедляет частый путь, только страхует холодный.
+_DOCKER_CHECK_TIMEOUT = 5 if os.name != "nt" else 20
+
+
 def docker_available() -> bool:
     """Кэшируется на успехе (Docker не исчезает посреди работы процесса), но
     перепроверяется при неудаче — оператор мог поднять Docker уже после старта."""
@@ -68,8 +86,8 @@ def docker_available() -> bool:
     if _docker_checked and _docker_ok:
         return True
     try:
-        r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
-                           capture_output=True, text=True, timeout=5)
+        r = subprocess.run([*DOCKER_CMD, "version", "--format", "{{.Server.Version}}"],
+                           capture_output=True, text=True, timeout=_DOCKER_CHECK_TIMEOUT)
         _docker_ok = r.returncode == 0
     except Exception:
         _docker_ok = False
@@ -133,11 +151,34 @@ def _run_direct(cmd, *, workdir: Path, timeout: int, stdin_input: str,
     )
 
 
+def wsl_path(p: Path | str) -> str:
+    """Любой Windows-путь (том `-v`, файл `-f docker-compose.yml`...), который
+    передаётся docker CLI, выполняющемуся ВНУТРИ WSL (см. DOCKER_CMD) — нужно
+    перевести в путь ЕГО файловой системы. `C:\\Users\\x` → `/mnt/c/Users/x`
+    (стандартный маппинг WSL2 дисков), иначе путь молча указывает в никуда.
+
+    Живой баг: вызывающие часто передают ОТНОСИТЕЛЬНЫЙ путь (например,
+    `ctx.tenant_dir()` — относительно рабочей директории процесса) — без
+    приведения к абсолютному условие `s[1] == ":"` не срабатывает, путь
+    уходит В WSL как есть (`data\\tenants\\...`, обратные слэши), а `wsl.exe`
+    сам по себе домешивает его к переведённому cwd — куски слипаются в одну
+    строку без разделителей. `os.path.abspath` — тот же приём, что уже
+    защищает от этого в `workspace.py`."""
+    s = os.path.abspath(str(p))
+    if os.name == "nt" and len(s) >= 2 and s[1] == ":":
+        drive = s[0].lower()
+        rest = s[2:].replace("\\", "/")
+        return f"/mnt/{drive}{rest}"
+    return s.replace("\\", "/")
+
+
+
+
 def _run_docker(cmd, *, workdir: Path, timeout: int, stdin_input: str,
                 shell_cmd: bool = False) -> subprocess.CompletedProcess:
     name = f"ai-office-sbx-{uuid.uuid4().hex[:12]}"
     docker_args = [
-        "docker", "run", "--rm", "--name", name,
+        *DOCKER_CMD, "run", "--rm", "--name", name,
         "--network", "none",              # без сети: агенту не нужно ничего скачивать
         "--read-only",                    # корневая ФС только для чтения
         "--tmpfs", "/tmp:rw,size=64m,noexec",  # писать можно только в /tmp и /workspace
@@ -146,7 +187,7 @@ def _run_docker(cmd, *, workdir: Path, timeout: int, stdin_input: str,
         f"--pids-limit={_PIDS_LIMIT}",
         "--security-opt=no-new-privileges",
         "--cap-drop=ALL",
-        "-v", f"{str(workdir)}:/workspace:rw",
+        "-v", f"{wsl_path(workdir)}:/workspace:rw",
         "-w", "/workspace",
         "-i",                             # держим stdin открытым (для stdin_input)
         IMAGE_NAME,
@@ -167,7 +208,7 @@ def _run_docker(cmd, *, workdir: Path, timeout: int, stdin_input: str,
         # раньше, чем сам процесс внутри завершился — явно убираем, чтобы
         # зависшие/тяжёлые скрипты агентов не копили контейнеры на хосте.
         try:
-            subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)
+            subprocess.run([*DOCKER_CMD, "rm", "-f", name], capture_output=True, timeout=10)
         except Exception:
             pass
         raise
