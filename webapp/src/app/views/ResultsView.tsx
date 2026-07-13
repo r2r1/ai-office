@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, SubTabs, Card, Empty, SectionLabel } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, Card, Empty, SectionLabel, Button, TextInput, TextArea } from "./ui"
 import { Modal, ModalSection } from "../components/Modal"
 
 // «Результаты» (product-manager разбор, вместо бывшей отдельной «Лиды»):
@@ -62,12 +62,10 @@ export function ResultsView() {
     <ViewShell>
       <ViewHead title="Результаты" sub="Что команда произвела для бизнеса — лиды, сайты и другие исходы работы"
         right={
-          <button onClick={() => setPrefsOpen(v => !v)} title="Настроить вкладки"
-            style={{ width: 30, height: 30, borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline)",
-              background: prefsOpen ? "var(--surface-soft)" : "transparent", color: "var(--muted)", cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
+          <Button variant="ghost" size="icon-sm" active={prefsOpen} onClick={() => setPrefsOpen(v => !v)}
+            title="Настроить вкладки" style={{ borderRadius: "var(--radius-pill)", fontSize: 14 }}>
             ⚙
-          </button>
+          </Button>
         } />
       {tabs.length > 0 && <SubTabs tabs={tabs} active={active} onChange={setActive} />}
       {prefsOpen && (
@@ -238,21 +236,15 @@ function LeadsTab() {
             </ModalSection>
             <ModalSection label="Написать в Telegram (личный аккаунт)">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <textarea value={followup} onChange={e => setFollowup(e.target.value)} rows={3}
-                  placeholder="Например: Добрый день! Уточняю, актуален ли ещё вопрос по замеру?"
-                  style={{ padding: "8px 10px", borderRadius: "var(--radius-md)", resize: "vertical",
-                    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
-                    color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-sans)" }} />
+                <TextArea value={followup} onChange={e => setFollowup(e.target.value)} rows={3}
+                  placeholder="Например: Добрый день! Уточняю, актуален ли ещё вопрос по замеру?" />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 11, color: "var(--faint)" }}>
                     Уйдёт как личное сообщение с вашего Telegram-аккаунта (не от бота)
                   </span>
-                  <button disabled={busy || !followup.trim()} onClick={sendFollowup}
-                    style={{ padding: "8px 14px", borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline-strong)",
-                      background: "transparent", color: "var(--text)", cursor: busy ? "default" : "pointer",
-                      fontSize: 12.5, opacity: busy || !followup.trim() ? 0.5 : 1, flexShrink: 0 }}>
+                  <Button variant="ghost" disabled={busy || !followup.trim()} onClick={sendFollowup} style={{ flexShrink: 0 }}>
                     Отправить
-                  </button>
+                  </Button>
                 </div>
                 {followupResult && (
                   <div style={{ fontSize: 11.5, color: followupResult.startsWith("✅") ? "#a0e0ab" : "#ffac2e" }}>
@@ -263,17 +255,13 @@ function LeadsTab() {
             </ModalSection>
             <ModalSection label="Добавить заметку">
               <div style={{ display: "flex", gap: 8 }}>
-                <input value={note} onChange={e => setNote(e.target.value)}
+                <TextInput value={note} onChange={e => setNote(e.target.value)}
                   placeholder="Например: договорились созвониться завтра"
                   onKeyDown={e => { if (e.key === "Enter" && note.trim()) act(() => api.addLeadNote(selected.id, note)) }}
-                  style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius-md)",
-                    border: "1px solid var(--hairline-strong)", background: "var(--surface)", color: "var(--text)", fontSize: 12.5 }} />
-                <button disabled={busy || !note.trim()} onClick={() => act(() => api.addLeadNote(selected.id, note))}
-                  style={{ padding: "8px 14px", borderRadius: "var(--radius-pill)", border: "1px solid var(--hairline-strong)",
-                    background: "transparent", color: "var(--text)", cursor: busy ? "default" : "pointer",
-                    fontSize: 12.5, opacity: busy || !note.trim() ? 0.5 : 1 }}>
+                  style={{ flex: 1 }} />
+                <Button variant="ghost" disabled={busy || !note.trim()} onClick={() => act(() => api.addLeadNote(selected.id, note))}>
                   Добавить
-                </button>
+                </Button>
               </div>
             </ModalSection>
           </>

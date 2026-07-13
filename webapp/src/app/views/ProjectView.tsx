@@ -4,7 +4,7 @@ import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
 import type { ReactNode } from "react"
-import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel, Disclosure, ShowMore } from "./ui"
+import { ViewShell, ViewHead, SubTabs, ViewBody, Card, Empty, Pill, MercuryBar, SectionLabel, Disclosure, ShowMore, Button, TextInput, TextArea } from "./ui"
 import { useThrottled } from "../hooks"
 import { roleIcon } from "../../data/roles"
 
@@ -318,31 +318,18 @@ function NewInitiativeForm({ onPropose }: { onPropose: (title: string, idea: str
     setBusy(false); setOpen(false); setTitle(""); setIdea("")
   }
 
-  const inputStyle = {
-    width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)",
-    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
-    color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-sans)",
-  } as const
-
   return (
     <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <SectionLabel>Своя идея</SectionLabel>
-      <input style={inputStyle} placeholder="Название идеи" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
-      <textarea style={{ ...inputStyle, resize: "vertical" }} rows={2}
+      <TextInput placeholder="Название идеи" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+      <TextArea rows={2}
         placeholder="Опиши мысль в двух словах — глубокий анализ офис сделает сам"
         value={idea} onChange={e => setIdea(e.target.value)} />
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={submit} disabled={busy || !title.trim()}
-          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-            border: "none", background: "var(--mercury-a)", color: "var(--on-accent)", fontWeight: 600,
-            opacity: busy || !title.trim() ? 0.6 : 1 }}>
+        <Button variant="primary" onClick={submit} disabled={busy || !title.trim()}>
           {busy ? "…" : "Отправить на анализ"}
-        </button>
-        <button onClick={() => setOpen(false)}
-          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
-          Отмена
-        </button>
+        </Button>
+        <Button variant="ghost" onClick={() => setOpen(false)}>Отмена</Button>
       </div>
     </Card>
   )
@@ -570,37 +557,24 @@ function NewProcessForm({ onCreate }: { onCreate: (title: string, role: string, 
     setBusy(false); setOpen(false); setTitle(""); setInstruction("")
   }
 
-  const inputStyle = {
-    width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)",
-    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
-    color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-sans)",
-  } as const
-
   return (
     <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <SectionLabel>Новый процесс</SectionLabel>
-      <input style={inputStyle} placeholder="Название (например: Контент-завод)" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
-      <select style={inputStyle} value={role} onChange={e => setRole(e.target.value)}>
+      <TextInput placeholder="Название (например: Контент-завод)" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+      <select className="input" value={role} onChange={e => setRole(e.target.value)}>
         {RECURRING_ROLES.map(r => <option key={r} value={r}>{roleName(r)}</option>)}
       </select>
-      <textarea style={{ ...inputStyle, resize: "vertical" }} rows={2}
+      <TextArea rows={2}
         placeholder="Что делать каждый цикл (например: написать и опубликовать пост дня по нише клиента)"
         value={instruction} onChange={e => setInstruction(e.target.value)} />
       <div style={{ fontSize: 11, color: "var(--faint)" }}>
         Каданс v1: каждый цикл офиса, как только предыдущая задача процесса закрыта.
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={submit} disabled={busy || !title.trim() || !instruction.trim()}
-          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-            border: "none", background: "var(--mercury-a)", color: "var(--on-accent)", fontWeight: 600,
-            opacity: busy || !title.trim() || !instruction.trim() ? 0.6 : 1 }}>
+        <Button variant="primary" onClick={submit} disabled={busy || !title.trim() || !instruction.trim()}>
           {busy ? "…" : "Создать процесс"}
-        </button>
-        <button onClick={() => setOpen(false)}
-          style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
-          Отмена
-        </button>
+        </Button>
+        <Button variant="ghost" onClick={() => setOpen(false)}>Отмена</Button>
       </div>
     </Card>
   )

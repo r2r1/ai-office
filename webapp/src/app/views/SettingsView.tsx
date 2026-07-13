@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react"
 import { api } from "../../data/api"
 import { useOffice } from "../../data/OfficeProvider"
-import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty, ShowMore, Pill } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty, ShowMore, Pill, Button, TextInput } from "./ui"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
 
 const GROWTH_STYLES = [
@@ -174,9 +174,9 @@ function GoalsTab() {
                   <span>{o.title}</span>
                   {editingId === o.id ? (
                     <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
+                      <TextInput autoFocus compact value={editValue} onChange={e => setEditValue(e.target.value)}
                         onKeyDown={e => { if (e.key === "Enter") saveEdit(o.id); if (e.key === "Escape") setEditingId(null) }}
-                        style={{ ...inputStyle, padding: "3px 8px", fontSize: 12, width: 110 }} />
+                        style={{ padding: "3px 8px", fontSize: 12, width: 110 }} />
                       <button onClick={() => saveEdit(o.id)} title="Сохранить"
                         style={{ background: "none", border: "none", color: "var(--success)", cursor: "pointer", fontSize: 13 }}>✓</button>
                     </span>
@@ -209,19 +209,15 @@ function GoalsTab() {
           )
         }} />
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-          <input value={title} onChange={e => setTitle(e.target.value)}
-            placeholder="Цель — например: заявки с сайта каждую неделю"
-            style={inputStyle} />
+          <TextInput value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="Цель — например: заявки с сайта каждую неделю" />
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <input value={desired} onChange={e => setDesired(e.target.value)}
-              placeholder="Целевое значение (10/нед)" style={{ ...inputStyle, flex: "1 1 160px", minWidth: 0 }} />
-            <input value={measuredBy} onChange={e => setMeasuredBy(e.target.value)}
+            <TextInput value={desired} onChange={e => setDesired(e.target.value)}
+              placeholder="Целевое значение (10/нед)" style={{ flex: "1 1 160px", minWidth: 0 }} />
+            <TextInput value={measuredBy} onChange={e => setMeasuredBy(e.target.value)}
               onKeyDown={e => e.key === "Enter" && addObjective()}
-              placeholder="Как измеряем (лиды за 7 дней)" style={{ ...inputStyle, flex: "1 1 160px", minWidth: 0 }} />
-            <button onClick={addObjective}
-              style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "0 16px",
-                background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13, flex: "1 1 auto",
-                minHeight: 36 }}>Добавить</button>
+              placeholder="Как измеряем (лиды за 7 дней)" style={{ flex: "1 1 160px", minWidth: 0 }} />
+            <Button variant="secondary" onClick={addObjective} style={{ flex: "1 1 auto" }}>Добавить</Button>
           </div>
         </div>
       </Card>
@@ -232,12 +228,6 @@ function GoalsTab() {
     </ViewBody>
   )
 }
-
-const inputStyle = {
-  background: "var(--surface-soft)", border: "1px solid var(--hairline)",
-  borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)",
-  fontSize: 12, outline: "none",
-} as const
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -607,10 +597,8 @@ function TextField({ label, value, onSave, placeholder }: { label: string; value
   return (
     <div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 5 }}>{label}</div>
-      <input value={v} onChange={e => setV(e.target.value)} onBlur={() => v !== value && onSave(v)}
-        onKeyDown={e => e.key === "Enter" && v !== value && onSave(v)} placeholder={placeholder}
-        style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
-          borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
+      <TextInput value={v} onChange={e => setV(e.target.value)} onBlur={() => v !== value && onSave(v)}
+        onKeyDown={e => e.key === "Enter" && v !== value && onSave(v)} placeholder={placeholder} style={{ fontSize: 13 }} />
     </div>
   )
 }
@@ -619,9 +607,7 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   return (
     <div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 5 }}>{label}</div>
-      <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
-          borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none", cursor: "pointer" }}>
+      <select value={value} onChange={e => onChange(e.target.value)} className="input" style={{ fontSize: 13, cursor: "pointer" }}>
         {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
       </select>
     </div>

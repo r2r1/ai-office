@@ -4,7 +4,7 @@
 // разбросанный по трём вкладкам без общего дома. Теперь это один раздел.
 import { useEffect, useState } from "react"
 import { api } from "../../data/api"
-import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty, Pill } from "./ui"
+import { ViewShell, ViewHead, ViewBody, SubTabs, useSubTab, Card, SectionLabel, Empty, Pill, Button, TextInput } from "./ui"
 import { FileExplorer } from "./FileExplorer"
 import { ConnectionsBody } from "./ConnectionsView"
 
@@ -240,12 +240,6 @@ function AppDetail({ app, onChanged }: { app: any; onChanged: () => void }) {
     if (!showLogs) { const d = await api.hostedAppLogs(app.id); setLogs(d.logs || "") }
   }
 
-  const inputStyle = {
-    width: "100%", padding: "8px 10px", borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--hairline)", background: "var(--surface-soft)",
-    color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)",
-  } as const
-
   return (
     <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--hairline)",
       display: "flex", flexDirection: "column", gap: 14 }} onClick={e => e.stopPropagation()}>
@@ -256,12 +250,10 @@ function AppDetail({ app, onChanged }: { app: any; onChanged: () => void }) {
             {Object.entries(detail.env_values).map(([k, v]) => (
               <div key={k} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ fontSize: 11, color: "var(--muted)", minWidth: 140, flexShrink: 0 }}>{k}</div>
-                <input style={inputStyle} readOnly value={String(v)} onClick={e => (e.target as HTMLInputElement).select()} />
-                <button onClick={() => copy(k, String(v))}
-                  style={{ fontSize: 11, padding: "6px 10px", borderRadius: "var(--radius-sm)", cursor: "pointer",
-                    border: "1px solid var(--hairline)", background: "var(--surface-soft)", color: "var(--text-dim)", flexShrink: 0 }}>
+                <TextInput compact mono readOnly value={String(v)} onClick={e => (e.target as HTMLInputElement).select()} />
+                <Button variant="secondary" size="sm" style={{ flexShrink: 0 }} onClick={() => copy(k, String(v))}>
                   {copiedKey === k ? "✓" : "Копировать"}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -269,27 +261,18 @@ function AppDetail({ app, onChanged }: { app: any; onChanged: () => void }) {
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={pauseOrResume} disabled={busy || app.status === "starting"}
-          style={{ fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
-            border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)",
-            opacity: busy ? 0.6 : 1 }}>
+        <Button variant="secondary" size="sm" onClick={pauseOrResume} disabled={busy || app.status === "starting"}>
           {app.status === "running" ? "⏸ Пауза" : "▶ Возобновить"}
-        </button>
-        <button onClick={loadLogs}
-          style={{ fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={loadLogs}>
           {showLogs ? "Скрыть логи" : "Показать логи"}
-        </button>
-        <button onClick={() => setShowCompose(v => !v)}
-          style={{ fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setShowCompose(v => !v)}>
           {showCompose ? "Скрыть docker-compose.yml" : "Показать docker-compose.yml"}
-        </button>
-        <button onClick={remove} disabled={busy}
-          style={{ fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)", marginLeft: "auto" }}>
+        </Button>
+        <Button variant="danger" size="sm" style={{ marginLeft: "auto" }} onClick={remove} disabled={busy}>
           Удалить насовсем
-        </button>
+        </Button>
       </div>
 
       {showLogs && (
@@ -369,12 +352,6 @@ function McpServerDetail({ server, onChanged }: { server: any; onChanged: () => 
     onChanged()
   }
 
-  const inputStyle = {
-    width: "100%", padding: "8px 10px", borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--hairline)", background: "var(--surface-soft)",
-    color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)",
-  } as const
-
   return (
     <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--hairline)",
       display: "flex", flexDirection: "column", gap: 14 }} onClick={e => e.stopPropagation()}>
@@ -385,12 +362,10 @@ function McpServerDetail({ server, onChanged }: { server: any; onChanged: () => 
             {Object.entries(detail.env_values).map(([k, v]) => (
               <div key={k} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ fontSize: 11, color: "var(--muted)", minWidth: 140, flexShrink: 0 }}>{k}</div>
-                <input style={inputStyle} readOnly value={String(v)} onClick={e => (e.target as HTMLInputElement).select()} />
-                <button onClick={() => copy(k, String(v))}
-                  style={{ fontSize: 11, padding: "6px 10px", borderRadius: "var(--radius-sm)", cursor: "pointer",
-                    border: "1px solid var(--hairline)", background: "var(--surface-soft)", color: "var(--text-dim)", flexShrink: 0 }}>
+                <TextInput compact mono readOnly value={String(v)} onClick={e => (e.target as HTMLInputElement).select()} />
+                <Button variant="secondary" size="sm" style={{ flexShrink: 0 }} onClick={() => copy(k, String(v))}>
                   {copiedKey === k ? "✓" : "Копировать"}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -403,11 +378,9 @@ function McpServerDetail({ server, onChanged }: { server: any; onChanged: () => 
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={remove} disabled={busy}
-          style={{ fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
-            border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)", marginLeft: "auto" }}>
+        <Button variant="danger" size="sm" style={{ marginLeft: "auto" }} onClick={remove} disabled={busy}>
           Отключить насовсем
-        </button>
+        </Button>
       </div>
     </div>
   )

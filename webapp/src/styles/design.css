@@ -237,6 +237,27 @@ body {
 /* Пилюля-статус (StatusBadge) — тот же ghost-словарь, форма pill */
 .btn-pill { border-radius: var(--radius-pill); padding: 5px 12px; height: auto; }
 
+/* ═══════ Поля ввода — единый словарь, тот же принцип, что у .btn.
+   Раньше каждый файл (ConnectionsView/ResourcesView/ProjectView/SettingsView)
+   объявлял свой ЛОКАЛЬНЫЙ `const inputStyle = {...}` с почти одинаковыми, но
+   постепенно разъехавшимися значениями (radius-sm vs radius-md, surface vs
+   surface-soft, font-sans vs font-mono) — 6 копий на 4 файла, найдено при
+   аудите дизайн-системы. Один источник правды + модификаторы под контекст. ═══════ */
+.input {
+  width: 100%; font-family: var(--font-sans); font-size: 13px; color: var(--text);
+  background: var(--surface-soft); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md); padding: 9px 12px; outline: none;
+  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+.input::placeholder { color: var(--faint); }
+.input:focus { border-color: var(--hairline-strong); background: var(--surface); }
+.input:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Компактнее (модалки/детали интеграций) */
+.input-sm { padding: 8px 10px; font-size: 12px; border-radius: var(--radius-sm); border-color: var(--hairline); }
+/* Моноширинный — ключи/токены/URL, где важно видеть точные символы */
+.input-mono { font-family: var(--font-mono); }
+textarea.input { resize: vertical; line-height: 1.5; }
+
 /* NavRail: hover неактивного пункта — было JS onMouseEnter/onMouseLeave,
    меняющие inline style напрямую (лишний ре-рендер на каждое движение мыши
    ради простой смены цвета). */

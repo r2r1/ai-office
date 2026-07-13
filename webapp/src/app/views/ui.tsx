@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext } from "react"
-import type { ReactNode, CSSProperties } from "react"
+import type { ReactNode, CSSProperties, ButtonHTMLAttributes, InputHTMLAttributes, TextareaHTMLAttributes } from "react"
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
@@ -218,6 +218,37 @@ export function Pill({ children, accent, color }: { children: ReactNode; accent?
       {children}
     </span>
   )
+}
+
+/* ── Button / TextInput / TextArea — единый словарь поверх .btn/.input из
+   design.css (аудит дизайн-системы: платформа уже объявляла CSS-классы
+   .btn-primary/.btn-secondary/.btn-ghost/.btn-danger/.btn-toggle, но ни один
+   React-компонент их не использовал — каждый файл заново писал inline-стиль
+   кнопки/поля, отсюда мелкий разъезд padding/radius/цвета между вкладками.
+   Новый код — через эти компоненты, не через свой style={{...}}. */
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "toggle"
+export type ButtonSize = "md" | "sm" | "icon" | "icon-sm" | "pill"
+
+export function Button({ variant = "secondary", size = "md", active, className = "", style, children, ...rest }:
+  { variant?: ButtonVariant; size?: ButtonSize; active?: boolean; className?: string; style?: CSSProperties; children?: ReactNode }
+  & ButtonHTMLAttributes<HTMLButtonElement>) {
+  const sizeClass = size === "pill" ? "btn-md btn-pill" : `btn-${size}`
+  const cls = `btn btn-${variant} ${sizeClass}${active ? " is-on" : ""} ${className}`.trim()
+  return <button className={cls} style={style} {...rest}>{children}</button>
+}
+
+type InputExtra = { mono?: boolean; compact?: boolean; className?: string }
+
+export function TextInput({ mono, compact, className = "", style, ...rest }:
+  InputExtra & { style?: CSSProperties } & InputHTMLAttributes<HTMLInputElement>) {
+  const cls = `input${compact ? " input-sm" : ""}${mono ? " input-mono" : ""} ${className}`.trim()
+  return <input className={cls} style={style} {...rest} />
+}
+
+export function TextArea({ mono, compact, className = "", style, ...rest }:
+  InputExtra & { style?: CSSProperties } & TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const cls = `input${compact ? " input-sm" : ""}${mono ? " input-mono" : ""} ${className}`.trim()
+  return <textarea className={cls} style={style} {...rest} />
 }
 
 export function MercuryBar({ percent, style }: { percent: number; style?: CSSProperties }) {

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
-import type { CSSProperties } from "react"
 import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
-import { ViewBody, Card, Empty, SectionLabel } from "./ui"
+import { ViewBody, Card, Empty, SectionLabel, Button, TextInput } from "./ui"
 import { Modal, ModalSection } from "../components/Modal"
 import { useThrottled } from "../hooks"
 
@@ -77,17 +76,6 @@ function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; 
     reset(); onClose()
   }
 
-  const inputStyle: CSSProperties = {
-    width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)",
-    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
-    color: "var(--text)", fontSize: 13,
-  }
-  const btnStyle: CSSProperties = {
-    padding: "9px 16px", borderRadius: "var(--radius-pill)", border: "none",
-    background: "var(--mercury-a, #ffac2e)", color: "#0a0a0a", fontWeight: 600,
-    fontSize: 12.5, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
-  }
-
   return (
     <Modal open={open} onClose={close} title="Вход в личный Telegram"
       subtitle="Нужен, чтобы писать в ЛС первым — бот так не умеет">
@@ -100,34 +88,33 @@ function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; 
                 (обычно это делает один раз оператор сервиса, не каждый пользователь).
               </div>
               <div style={{ display: "grid", gap: 8 }}>
-                <input style={inputStyle} placeholder="api_id" value={apiId} onChange={e => setApiId(e.target.value)} />
-                <input style={inputStyle} placeholder="api_hash" value={apiHash} onChange={e => setApiHash(e.target.value)} />
+                <TextInput placeholder="api_id" value={apiId} onChange={e => setApiId(e.target.value)} />
+                <TextInput placeholder="api_hash" value={apiHash} onChange={e => setApiHash(e.target.value)} />
               </div>
             </ModalSection>
           )}
           <ModalSection label="Номер телефона">
-            <input style={inputStyle} placeholder="+79991234567" value={phone} onChange={e => setPhone(e.target.value)}
+            <TextInput placeholder="+79991234567" value={phone} onChange={e => setPhone(e.target.value)}
               disabled={hasDefaultCreds === null} autoFocus />
           </ModalSection>
         </>
       )}
       {step === "code" && (
         <ModalSection label={`Код из Telegram (отправлен на ${phone})`}>
-          <input style={inputStyle} placeholder="12345" value={code} onChange={e => setCode(e.target.value)} autoFocus />
+          <TextInput placeholder="12345" value={code} onChange={e => setCode(e.target.value)} autoFocus />
         </ModalSection>
       )}
       {step === "password" && (
         <ModalSection label="Пароль двухфакторной защиты">
-          <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus />
+          <TextInput type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus />
         </ModalSection>
       )}
       {error && <div style={{ fontSize: 12, color: "#ff6b6b", marginTop: -8, marginBottom: 14 }}>{error}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button disabled={busy}
-          onClick={step === "phone" ? submitPhone : step === "code" ? submitCode : submitPassword}
-          style={btnStyle}>
+        <Button variant="primary" disabled={busy}
+          onClick={step === "phone" ? submitPhone : step === "code" ? submitCode : submitPassword}>
           {step === "phone" ? "Получить код" : step === "code" ? "Подтвердить" : "Войти"}
-        </button>
+        </Button>
       </div>
     </Modal>
   )
@@ -138,11 +125,6 @@ function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; 
  * домен перед редиректом на /auth/bitrix24/login, а не сразу window.location. */
 function Bitrix24PortalModal({ open, onClose, portal, setPortal }:
   { open: boolean; onClose: () => void; portal: string; setPortal: (v: string) => void }) {
-  const inputStyle = {
-    width: "100%", padding: "9px 11px", borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
-    color: "var(--text)", fontSize: 13, fontFamily: "var(--font-sans)",
-  } as const
   const go = () => {
     if (!portal.trim()) return
     window.location.href = `/auth/bitrix24/login?portal=${encodeURIComponent(portal.trim())}`
@@ -150,7 +132,7 @@ function Bitrix24PortalModal({ open, onClose, portal, setPortal }:
   return (
     <Modal open={open} onClose={onClose} title="Подключить Bitrix24">
       <ModalSection label="Домен вашего портала">
-        <input style={inputStyle} placeholder="my-company.bitrix24.ru" value={portal}
+        <TextInput placeholder="my-company.bitrix24.ru" value={portal}
           onChange={e => setPortal(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter") go() }} autoFocus />
         <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 6, lineHeight: 1.5 }}>
@@ -158,12 +140,7 @@ function Bitrix24PortalModal({ open, onClose, portal, setPortal }:
         </div>
       </ModalSection>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button disabled={!portal.trim()} onClick={go}
-          style={{ padding: "8px 16px", borderRadius: "var(--radius-sm)", border: "1px solid var(--hairline-strong)",
-            background: "var(--surface-soft)", color: "var(--text)", fontSize: 12.5, fontWeight: 600,
-            cursor: portal.trim() ? "pointer" : "default", opacity: portal.trim() ? 1 : 0.5 }}>
-          Продолжить
-        </button>
+        <Button variant="primary" disabled={!portal.trim()} onClick={go}>Продолжить</Button>
       </div>
     </Modal>
   )
@@ -262,35 +239,20 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
           Google (раньше было захардкожено на google, Figma/Bitrix24 не могли
           отключиться из UI вообще). */}
       {isOAuth && connected && (
-        <button
+        <Button variant="ghost" size="sm" style={{ marginTop: 2, alignSelf: "flex-start" }}
           onClick={async () => {
             await fetch(`/auth/${isGoogle ? "google" : integ.name}/disconnect`, { method: "POST" })
             onRefresh()
-          }}
-          style={{
-            marginTop: 2, padding: "6px 12px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--hairline)", background: "transparent",
-            color: "var(--muted)", fontSize: 11, cursor: "pointer",
-            transition: "color 0.15s",
-          }}
-          onMouseEnter={e => (e.currentTarget.style.color = "var(--text)")}
-          onMouseLeave={e => (e.currentTarget.style.color = "var(--muted)")}
-        >
+          }}>
           Отключить
-        </button>
+        </Button>
       )}
 
       {/* Личный Telegram — интерактивный вход, не форма ключа */}
       {isTgPersonal && !connected && (
-        <button onClick={handleConnect}
-          style={{
-            marginTop: 2, padding: "8px 14px", borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)",
-            color: "var(--text)", fontSize: 12, fontWeight: 600, cursor: "pointer",
-          }}>
+        <Button variant="secondary" style={{ marginTop: 2, alignSelf: "flex-start" }} onClick={handleConnect}>
           Войти в Telegram
-        </button>
+        </Button>
       )}
 
       {/* Инструкция для обычных ключей */}
