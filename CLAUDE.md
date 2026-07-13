@@ -322,6 +322,8 @@ vanilla HTML, React/esm.sh без сборки) — консолидирован
 | `office/connections.py` | Хранилище учётных данных интеграций (Fernet at-rest) |
 | `office/workspace.py` | Рабочая папка тенанта; `write_file/read_file/list_files/run_command/execute_code`; `verify()` компилирует `.py` И проверяет синтаксис `.js`/`.mjs`/инлайн `<script type="module">` (ESM-aware `node --check`) — раньше проверялся только `.py`, для чисто-JS сайтов (3D-скилл) это был ложный «✅ всё ок» без единой реальной проверки (UTF-8 env для Windows) |
 | `office/sites.py`, `leads.py` | Опубликованные лендинги и собранные с них лиды |
+| `office/results.py` | Реестр типов результата работы (лиды/сайты и т.д.) для вкладки «Результаты» — тот же приём развязки, что у Tool Router/Skills: модуль-производитель (`leads.py`, `sites.py`) регистрирует себя один раз, фронт рендерит вкладки ПО РЕЕСТРУ; новый тип результата не требует правки NavRail/App.tsx |
+| `office/ui_prefs.py` | Пер-тенантные предпочтения UI (сейчас — видимость/порядок под-вкладок «Результатов»): владелец выбирает поверх того, что доступно в реестре |
 | `office/costs.py` | Учёт токенов и стоимости (инкрементальный); прайс apinet |
 | `office/models.py` | Выбор LLM-модели (глобально / на агента) |
 | `office/llm_settings.py` | Per-tenant LLM-креды (свой ключ клиента); `provision_tenant_key` через apinet |
@@ -365,6 +367,23 @@ fallback — общий `LLM_*` из `.env`. Лендинги тенанта п�
   Интеграции с пустым `cred_fields` считаются всегда подключёнными.
 - `gmail.py`, `google_calendar.py`, `google_sheets.py`, `google_oauth.py` —
   Google-стек через OAuth.
+- `figma.py` + `figma_oauth.py` — чтение макетов Figma (scope `file_content:read` —
+  Figma использует гранулярные имена `<resource>:<action>`, не старое `file_read`;
+  redirect_uri сверяется с настройками OAuth-приложения посимвольно).
+- `bitrix24.py` + `bitrix24_oauth.py` — экспорт лида через OAuth-приложение портала
+  (полный REST API, не только вебхук). Отдельный provider от `crm_bitrix24.py`
+  (входящий вебхук) — обе закрывают способность `crm`, `tool_router` решает какая
+  отвечает на конкретный вызов.
+
+**OAuth-интеграции** (`Integration.oauth_url` не пусто) следуют одному паттерну —
+по образцу `google_oauth.py`: отдельный модуль `<name>_oauth.py` (`authorize_url`/
+`exchange_code`/`_do_refresh`/`revoke`/`connected`), токены в `connections.py`
+(Fernet at-rest), маршруты `/auth/<name>/{login,callback,disconnect}` в `server.py`.
+⚠️ Агент **никогда** не должен просить у пользователя API-ключ для OAuth-интеграции —
+`list_integrations`/`use_integration` сами подсказывают «нажми «Войти через X» в
+Доступы» (реальный баг: агент останавливался на `list_integrations`, видел
+generic «не подключено» без уточнения OAuth/ключ, и просил ключ по памяти —
+см. `office/policies/autonomy.md`, `agents/integration_tool_handlers.py`).
 
 Агенты ходят сюда через `use_capability` (роутер) или `use_integration(name, action, params)`.
 Креды подтягиваются автоматически; нет кредов → агенту возвращается инструкция, он
@@ -393,9 +412,18 @@ React + Vite + TypeScript + motion/react. Старый ванильный canvas
   с прогресс-баром, визуальное «рождение офиса».
 - `app/components/OfficeView.tsx` — изометрические комнаты и агенты.
 - `app/components/TopBar.tsx` — кнопка ⏸/▶ (`OfficeToggle`), индикатор расхода 💸.
-- `app/views/*` — вкладки: Проект, Чаты, Команда, Результаты, Лиды, Код
-  (`FileExplorer.tsx` с деревом папок, iframe-превью HTML, терминалом),
-  Доступы, События, Дашборд, Аккаунт.
+- `app/components/NavRail.tsx` — 7 вкладок верхнего уровня, сгруппированные по
+  логическому смыслу, а не по историческому наслоению (IA-пересборка, вариант C):
+  **Офис** (изо-сцена/органиграмма) · **Обзор** (`DashboardView.tsx`, здоровье/
+  инициативы/прозрачность — дефолтная вкладка) · **Работа** (`ProjectView.tsx`,
+  план-граф/проекты/артефакты) · **Команда** (`TeamView.tsx`, живые агенты +
+  под-вкладки Роли/Скиллы) · **Результаты** (`ResultsView.tsx`, реестр
+  `results.py` — сейчас Лиды/Сайты, дальше что зарегистрируется, + пер-тенантная
+  персонализация видимости/порядка вкладок через `ui_prefs.py`) · **Ресурсы**
+  (`ResourcesView.tsx`, под-вкладки Хранилище/Доступы/Приложения/MCP-серверы) ·
+  **Настройки** (`SettingsView.tsx`, Профиль/Цели/Интеллект/Лимиты/Аккаунт).
+  «Лиды» и «Итоги» как отдельные пункты не существуют — CRM переехала в
+  Результаты, файлы/сайты стали артефактами конкретного проекта.
 
 ### 3.11 Основные HTTP-эндпоинты (`server.py`)
 
@@ -408,8 +436,15 @@ React + Vite + TypeScript + motion/react. Старый ванильный canvas
   (разблокирует задачу), иначе обычная беседа. `/api/answer` — низкоуровневый.
 - `GET/POST /api/connections` — доступы.
 - `GET /api/integrations`, `POST /api/integrations/{name}/test` — каталог + проверка.
+- `GET /auth/google/{start,callback}`, `POST /auth/google/disconnect` — и аналогично
+  `/auth/figma/*`, `/auth/bitrix24/*` (у Bitrix24 доп. параметр `?portal=` — портал
+  клиента, multi-tenant SaaS сам по себе, нет единой страницы согласия).
 - `GET /site/{tenant}/{slug}` — лендинг; `POST /api/lead/{tenant}/{slug}` — лид.
-- `GET /api/sites`, `/api/leads` — вкладка «Лиды».
+- `GET /api/sites`, `/api/leads` — данные для вкладки «Результаты».
+- `GET /api/results` — реестр типов результата (метаданные вкладок); `GET/POST
+  /api/ui-prefs/{section}` — персонализация видимости/порядка (сейчас `section=results`).
+- `GET /api/storage/usage` — разбивка занятого места по тенанту (папки проектов,
+  системные данные, Docker-контейнеры) для вкладки «Ресурсы → Хранилище».
 - `GET /api/costs` — расход (топбар 💸).
 - `GET /api/files`, `/api/file?path=`, `/api/raw?path=` — код проекта; `/api/terminal` — выполнение команд.
 - `GET /api/knowledge` — 3-слойная память (диагностика).
@@ -425,7 +460,8 @@ React + Vite + TypeScript + motion/react. Старый ванильный canvas
 ## 4. Инварианты (НЕ ломать)
 
 - **Автономность.** Агент не просит ручной работы. Нужен сервис → `get_connection`
-  → если нет, `ask_user` с инструкцией. Правила в `office/policies/autonomy.md`.
+  → если нет: OAuth-интеграция → `ask_user` «нажми Войти через X» (НЕ ключ),
+  обычная → `ask_user` за ключом с инструкцией. Правила в `office/policies/autonomy.md`.
 - **Артефакты — только через инструменты.** Код / HTML / содержимое файлов
   создаются **только** вызовом `write_file`. Текст ответа агента — короткий
   (2–4 предложения): что сделал и где смотреть. Никаких ```-блоков с кодом
