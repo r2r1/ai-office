@@ -56,7 +56,9 @@ ROLE_META: dict[str, dict] = {
         "department": "tech", "title": "Разработчик", "capability": "coding",
         "mission": "Писать и запускать реальный рабочий код: от премиального визуала сайта до логики и ботов.",
         "responsibilities": ["UI/UX и вёрстка сайтов", "боты", "скрипты/API", "анимации"],
-        "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file"],
+        # web_search — для референсов приёмов (см. builtin_skills/three_js_3d_site.md),
+        # не для замены готовым сайтом целиком: искать ПРИЁМ, не копировать чужой сайт.
+        "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file", "web_search"],
         "constraints": ["не использовать платные конструкторы (Tilda/Webflow)", "артефакты только через write_file"],
         "success_metrics": ["код компилируется и работает", "красивый рабочий сайт"],
     },
