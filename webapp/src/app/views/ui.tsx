@@ -179,10 +179,18 @@ export function SectionLabel({ children, style }: { children: ReactNode; style?:
 
 export function Card({ children, style, onClick }: { children: ReactNode; style?: CSSProperties; onClick?: () => void }) {
   const hover = !!onClick
+  // Раньше клик обрабатывался на <div> — карточка была активируема только
+  // мышью, без Tab/Enter/Space и видимого фокус-кольца (найдено при живом
+  // дизайн-аудите; Card используется как кликабельная почти везде — MCP-
+  // серверы, Приложения, инициативы). role="button" + tabIndex + onKeyDown
+  // делают её доступной централизованно, в одном месте на всё приложение.
   return (
     <div className="card" onClick={onClick}
+      role={hover ? "button" : undefined} tabIndex={hover ? 0 : undefined}
+      onKeyDown={hover ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick!() } } : undefined}
       style={{ borderRadius: "var(--radius-md)", padding: 16, cursor: hover ? "pointer" : "default",
-        transition: "border-color 0.18s, transform 0.18s, box-shadow 0.18s", ...style }}
+        transition: "border-color 0.18s, transform 0.18s, box-shadow 0.18s",
+        outlineOffset: 2, ...style }}
       onMouseEnter={hover ? e => { const el = e.currentTarget as HTMLElement; el.style.transform = "translateY(-1px)"; el.style.borderColor = "var(--hairline-strong)" } : undefined}
       onMouseLeave={hover ? e => { const el = e.currentTarget as HTMLElement; el.style.transform = ""; el.style.borderColor = "" } : undefined}>
       {children}

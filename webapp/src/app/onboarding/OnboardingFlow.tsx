@@ -239,7 +239,7 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
       {result.analysis?.length > 0 && (
         <Section title="Аналитика">
           {result.analysis.map((a: string, i: number) => (
-            <Bullet key={i} icon="📊" text={a} delay={i * 0.06} />
+            <Bullet key={i} color="var(--mercury-a)" text={a} delay={i * 0.06} />
           ))}
         </Section>
       )}
@@ -247,7 +247,7 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
       {result.growth_points?.length > 0 && (
         <Section title="Точки роста">
           {result.growth_points.map((g: string, i: number) => (
-            <Bullet key={i} icon="🌱" text={g} delay={i * 0.06} />
+            <Bullet key={i} color="#a0e0ab" text={g} delay={i * 0.06} />
           ))}
         </Section>
       )}
@@ -350,11 +350,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Bullet({ icon, text, delay }: { icon: string; text: string; delay: number }) {
+// Раньше маркер был эмодзи (📊/🌱) — рендерится с разным визуальным весом на
+// разных ОС/шрифтах, расходится с дисциплиной остального интерфейса, где
+// акценты — это токены-цвета, не картинки (найдено при живом дизайн-аудите).
+// color задаёт смысл маркера (аналитика/точка роста) через тот же язык,
+// что и остальной UI — точку, не эмодзи.
+function Bullet({ color, text, delay }: { color?: string; text: string; delay: number }) {
   return (
     <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay }}
       style={{ display: "flex", gap: 10, fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, padding: "5px 0" }}>
-      <span style={{ flexShrink: 0 }}>{icon}</span>
+      <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", marginTop: 6,
+        background: color || "var(--mercury-a)" }} />
       <span>{text}</span>
     </motion.div>
   )

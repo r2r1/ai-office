@@ -327,8 +327,13 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
         boxShadow: "var(--shadow), 0 1px 0 var(--inset-hi) inset",
       }}>
 
-      {/* Верхняя строка: аватар + имя + статус (клик → подробности) */}
+      {/* Верхняя строка: аватар + имя + статус (клик → подробности).
+          role/tabIndex/onKeyDown — раньше открывалось только мышью, без
+          Tab/Enter (найдено при живом аудите: Card уже почини́ли централизованно,
+          эта карточка — bespoke motion.div, тот же класс бага отдельно). */}
       <div onClick={onOpenDetail} title="Подробнее об агенте"
+        role={onOpenDetail ? "button" : undefined} tabIndex={onOpenDetail ? 0 : undefined}
+        onKeyDown={onOpenDetail ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDetail() } } : undefined}
         style={{ display: "flex", alignItems: "center", gap: 10, cursor: onOpenDetail ? "pointer" : "default" }}>
         {/* Аватар с анимацией — вынесен в memo(), чтобы обновление lastMessage
             (родитель AgentCard всё равно перерисовывается) не перезапускало
@@ -349,7 +354,7 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
           border: `1px solid ${STATUS_COLOR[agent.status] || "var(--hairline)"}22`,
           flexShrink: 0,
         }}>
-          {STATUS_LABEL[agent.status] || "IDLE"}
+          {STATUS_LABEL[agent.status] || "ЖДЁТ"}
         </div>
       </div>
 

@@ -794,9 +794,29 @@ function LimitsTab() {
 }
 
 // ── Хранилище: дерево файлов workspace ────────────────────────────────────────
+// Раньше сырые исходники (research.md, транслитерированные имена папок вроде
+// mini_lending_dlya_zayavo_1) и терминал открывались сразу — нетехническому
+// владельцу бизнеса нужен результат ("вот ваш сайт"), а не файловый браузер
+// (найдено при живом дизайн-аудите). Готовые артефакты и так видны во
+// вкладке «Работа → Проект → Результаты» — здесь теперь explicit toggle.
 function StorageTab() {
   const [files, setFiles] = useState<any[]>([])
+  const [devMode, setDevMode] = useState(false)
   useEffect(() => { api.files().then(d => setFiles(d.files || [])) }, [])
+
+  if (!devMode) return (
+    <ViewBody>
+      <Empty icon="🗂" text="Технические файлы проекта"
+        hint="Исходники, документы и терминал рабочей папки — для разработчика. Готовые результаты (сайт, тексты) смотрите в «Работа → Проект»." />
+      <div style={{ textAlign: "center", marginTop: 14 }}>
+        <button onClick={() => setDevMode(true)}
+          style={{ fontSize: 12, padding: "8px 16px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+            border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>
+          Показать файлы и терминал
+        </button>
+      </div>
+    </ViewBody>
+  )
   return <FileExplorer files={files} />
 }
 
