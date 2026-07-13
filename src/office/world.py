@@ -62,13 +62,11 @@ def snapshot() -> dict:
     if tid in _cache:
         return copy.deepcopy(_cache[tid])
 
-    from src.office import (brief, objectives, philosophy, constitution, plan,
+    from src.office import (brief, objectives, plan,
                             costs, sites, leads, events, autonomy, trust, org,
-                            registry, questions, projects, metrics, gap, artifact)
+                            registry, questions, projects, metrics, gap, artifact, dna)
 
     b = brief.get()
-    phil = philosophy.load()
-    const = constitution.payload()
 
     # Business State: измеримое «сейчас» (BOS §4)
     plan_prog = plan.progress() if plan.is_generated() else {"total": 0, "done": 0, "percent": 0}
@@ -81,15 +79,10 @@ def snapshot() -> dict:
     snap = {
         "ts": round(time.time(), 3),
         "tenant": ctx.get_tenant(),
-        # Identity (DNA v1 = философия + конституция; отдельная сущность DNA — след. шаг)
-        "identity": {
-            "mission": phil.get("mission", ""),
-            "success_means": phil.get("success_means", ""),
-            "never_sacrifice": phil.get("never_sacrifice", ""),
-            "growth_style": phil.get("growth_style", ""),
-            "risk_appetite": phil.get("risk_appetite", ""),
-            "custom_rules": const.get("custom_rules", []),
-        },
+        # Identity — единый снимок DNA (issue #4): философия+конституция читаются
+        # ОДНИМ вызовом dna.snapshot() вместо ручной сборки построчно здесь.
+        # dna_version — хеш содержимого, меняется сам при любой правке DNA.
+        "identity": dna.snapshot(),
         # Brief: что за бизнес и чего хочет от офиса
         "brief": {
             "niche": b.get("niche", ""),

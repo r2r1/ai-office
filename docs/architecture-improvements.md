@@ -36,7 +36,7 @@
 ### #4 — Единый DNA-класс вместо `philosophy.py` + `constitution.py`
 **Эффект:** сейчас `world.py` читает оба файла «как DNA-часть снапшота» без версионирования — риск того же рассинхрона, что уже был между Milestones и Plan.
 **Файлы:** `src/office/philosophy.py`, `src/office/constitution.py`, `src/office/world.py`.
-**Статус:** open
+**Статус:** done (2026-07-14) — новый `src/office/dna.py` (`snapshot()`+`version()` как хеш содержимого); `world.py.identity` теперь один вызов `dna.snapshot()`. Хранение (`philosophy.json`/`constitution.json`) и их API/потребители (`server.py`, фронт `ProfileTab`, `loop.py.requires_ok`) сознательно НЕ тронуты — миграция хранения без функциональной причины была бы риском ради косметики, см. докстринг `dna.py`.
 
 ### #5 — Billing-provider абстракция поверх apinet
 **Эффект:** смена/добавление LLM-провайдера — конфиг, а не правка кода в нескольких местах. Сейчас только обработка «403 quota» внутри `execution.py`.
