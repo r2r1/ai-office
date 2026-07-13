@@ -10,8 +10,15 @@ OAuth 2.0 для Figma (по образцу google_oauth.py — тот же пр
 
 Как создать OAuth-приложение в Figma:
   1. figma.com/developers/apps → Create new app
-  2. Callback URL: {APP_BASE_URL}/auth/figma/callback
-  3. Скопируй Client ID и Client Secret в .env
+  2. Redirect URLs: ТОЧНО {APP_BASE_URL}/auth/figma/callback (не голый
+     "http://localhost" — Figma сверяет redirect_uri из запроса С ТЕМ, что
+     сохранено здесь посимвольно; несовпадение — реальный кейс живого
+     прогона, authorize падал раньше scope-проверки).
+  3. OAuth scopes → включи как минимум file_content:read и current_user:read
+     (Figma использует гранулярные имена scope вида "<resource>:<action>" —
+     ни старое "file_read", ни промежуточное "files:read" не совпадают,
+     оба ловились как 400 "Invalid scopes for app" на живом прогоне).
+  4. Скопируй Client ID и Client Secret в .env
 """
 
 import os
@@ -32,7 +39,13 @@ _REFRESH_URL = "https://api.figma.com/v1/oauth/refresh"
 _ME_URL    = "https://api.figma.com/v1/me"
 
 CONN_NAME = "figma"
-SCOPES = "file_read"
+# Figma переехала на гранулярные scope-имена вида "<resource>:<action>" —
+# ни "file_read" (старое имя), ни "files:read" (мой первый неверный вариант)
+# не совпадают с тем, что реально показывает панель OAuth scopes приложения
+# (реальный кейс: 400 "Invalid scopes for app" на обоих). Верное имя чтения
+# содержимого файла — "file_content:read"; "current_user:read" нужен для
+# get_valid_token()-соседа _ME_URL (узнать email/handle после обмена кода).
+SCOPES = "file_content:read,current_user:read"
 
 
 def is_configured() -> bool:

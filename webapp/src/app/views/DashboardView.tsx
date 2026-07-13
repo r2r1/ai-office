@@ -3,6 +3,7 @@ import { useOffice } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { ViewShell, ViewHead, ViewBody, SubTabs, Card, SectionLabel, Pill, MercuryBar, ShowMore } from "./ui"
 import { BusinessDashboard } from "./BusinessDashboard"
+import { useThrottled } from "../hooks"
 import type { Section } from "../types"
 
 const DEPT_NAMES: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
@@ -30,13 +31,20 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
   // Результат последнего accept — показываем "стало проектом «X»" вместо тишины.
   const [acceptedResult, setAcceptedResult] = useState<{ title: string; projectId: string; projectTitle: string } | null>(null)
 
+  // Раньше зависел от СЫРОГО state.feed.length — при активном офисе SSE
+  // шлёт события постоянно, и этот эффект рефетчил health/autonomy/gap/
+  // milestones/initiatives НА КАЖДОЕ событие (реальный кейс: 5 запросов
+  // /api/gap за 9 секунд на одном клике по вкладке — Обзор открыт по
+  // умолчанию, поэтому шторм шёл с первой секунды сессии). Throttled —
+  // как во всех остальных вкладках (ProjectView/ConnectionsView/ChatsView).
+  const tick = useThrottled(state.feed.length, 2500)
   useEffect(() => {
     api.get("/api/health").then(setHealth).catch(() => {})
     api.get("/api/autonomy").then(setAutonomy).catch(() => {})
     api.get("/api/initiatives").then(d => setInitiatives(d?.pending || [])).catch(() => {})
     api.milestones().then(d => setMilestones(d.stages || []))
     api.gap().then(d => setGaps(d.gaps || [])).catch(() => {})
-  }, [state.feed.length])
+  }, [tick])
 
   const currentStage = milestones.find((m: any) => m.id === state.progress.current)
     || milestones.find((m: any) => m.status === "active")
