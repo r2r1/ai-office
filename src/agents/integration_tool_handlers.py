@@ -31,9 +31,21 @@ def build(agent_id: str, role: str,
                        "text": f"❌ Не могу подключиться к {platform}: {error[:100]}"})
 
     async def _handle_list_integrations(args: dict) -> str:
+        # "⚪ не подключено" без уточнения OAuth/ключ — реальный кейс: агент
+        # проверял подключение ЭТИМ вызовом (не use_integration, где такое
+        # уточнение уже было), не увидел разницы и попросил у пользователя
+        # API-ключ для OAuth-интеграции (Figma), хотя правильно было
+        # попросить нажать «Войти через X» в «Доступы». Подсказка нужна
+        # ЗДЕСЬ ЖЕ, а не только в _execute_integration — агент часто
+        # останавливается на list_integrations, не доходя до реального вызова.
         lines = []
         for integ in integrations_registry.all_integrations():
-            status = "✅ подключено" if integrations_registry.is_connected(integ) else "⚪ не подключено"
+            if integrations_registry.is_connected(integ):
+                status = "✅ подключено"
+            elif getattr(integ, "oauth_url", ""):
+                status = "⚪ не подключено (OAuth — попроси нажать «Войти через X» в Доступы, НЕ API-ключ)"
+            else:
+                status = "⚪ не подключено (нужен ключ/токен через ask_user)"
             acts = ", ".join(
                 f"{a.name}({', '.join(a.required) or '—'})" for a in integ.actions.values()
             )
