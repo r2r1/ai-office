@@ -34,9 +34,11 @@ interface ProjectViewProps {
    * инициативы на Сводке), не заставляя искать его в списке. */
   focusProjectId?: string
   onFocusHandled?: () => void
+  /** Открыть папку ЭТОГО проекта в «Компания → Хранилище» (workspace_dir). */
+  onOpenStorage?: (workspaceDir: string) => void
 }
 
-export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps = {}) {
+export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: ProjectViewProps = {}) {
   const { state } = useOffice()
   const [tab, setTab] = useState("initiatives")
   const [projects, setProjects] = useState<any[]>([])
@@ -152,6 +154,7 @@ export function ProjectView({ focusProjectId, onFocusHandled }: ProjectViewProps
               onAccept={acceptInitiative} onReject={rejectInitiative}
               onPause={pauseProcess} onResume={resumeProcess} onDelete={deleteProcess}
               onPauseProject={pauseProject} onResumeProject={resumeProject}
+              onOpenStorage={onOpenStorage}
             />
           </motion.div>
         ) : (
@@ -225,13 +228,14 @@ function DetailHeader({ badge, statusPill, title, sub, onBack, actions }: {
 // ── Роутер детального экрана: по selected.kind достаёт нужную сущность из уже
 // загруженных списков и рендерит её экран. Сущность могла исчезнуть (принята/
 // отклонена/удалена только что) — тогда мягкий фолбэк вместо пустого экрана. ──
-function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject }: {
+function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject, onOpenStorage }: {
   selected: Selected; onBack: () => void
   initiatives: any[]; processes: any[]; projects: any[]; details: Record<string, any>
   leadsSummary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
   onAccept: (id: string) => void; onReject: (id: string) => void
   onPause: (id: string) => void; onResume: (id: string) => void; onDelete: (id: string) => void
   onPauseProject: (id: string) => void; onResumeProject: (id: string) => void
+  onOpenStorage?: (workspaceDir: string) => void
 }) {
   if (selected.kind === "initiative") {
     const ini = initiatives.find(i => i.id === selected.id)
@@ -251,7 +255,8 @@ function DetailScreen({ selected, onBack, initiatives, processes, projects, deta
   const proj = projects.find(p => p.id === selected.id)
   if (!proj) return <GoneScreen onBack={onBack} text="Проект не найден." />
   return <ProjectDetailScreen project={proj} detail={details[proj.id]} onBack={onBack}
-    onPause={() => onPauseProject(proj.id)} onResume={() => onResumeProject(proj.id)} />
+    onPause={() => onPauseProject(proj.id)} onResume={() => onResumeProject(proj.id)}
+    onOpenStorage={onOpenStorage} />
 }
 
 function GoneScreen({ onBack, text }: { onBack: () => void; text: string }) {
@@ -742,8 +747,9 @@ const DEPT_NAMES: Record<string, string> = { tech: "Технический", mar
 // полоска для команды. DetailHeader (общий для инициатив/процессов/продаж)
 // здесь НЕ используется — только у проекта есть эта живая, самодостаточная
 // история, только для него оправдан bespoke-хедер.
-function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: {
+function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume, onOpenStorage }: {
   project: any; detail: any; onBack: () => void; onPause: () => void; onResume: () => void
+  onOpenStorage?: (workspaceDir: string) => void
 }) {
   const isActive = p.status === "active"
   const isQueued = p.status === "queued"
@@ -758,15 +764,30 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume }: 
           : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
           : isPaused ? <Pill>⏸ На паузе</Pill>
           : <Pill color="var(--success)">Закрыт</Pill>}
-        actions={isOngoing && p.type === "project" ? (
-          isPaused ? (
-            <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
-              border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
-          ) : (
-            <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
-              border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
-          )
-        ) : undefined} />
+        actions={
+          <>
+            {/* Раньше из карточки проекта нельзя было попасть в его же папку
+                в Хранилище иначе, чем вручную искать её в общем дереве файлов
+                (живой дизайн-аудит). */}
+            {onOpenStorage && (
+              <button onClick={() => onOpenStorage(p.workspace_dir || "")}
+                title="Открыть файлы этого проекта в Хранилище"
+                style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                  border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
+                🗂 Хранилище
+              </button>
+            )}
+            {isOngoing && p.type === "project" && (
+              isPaused ? (
+                <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                  border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
+              ) : (
+                <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                  border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+              )
+            )}
+          </>
+        } />
       <ViewBody>
         {isPaused && (
           <Card style={{ marginBottom: 14, fontSize: 12, color: "var(--muted)" }}>

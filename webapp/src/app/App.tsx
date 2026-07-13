@@ -112,6 +112,10 @@ export default function App() {
   // Глубокая ссылка «открыть конкретный проект» — например, после принятия
   // инициативы (Сводка), чтобы не заставлять искать его самому в списке Работы.
   const [focusProjectId, setFocusProjectId] = useState<string | undefined>()
+  // Глубокая ссылка «открыть папку ЭТОГО проекта в Хранилище» — раньше из
+  // страницы проекта нельзя было попасть в его же папку иначе, чем вручную
+  // искать её в общем дереве файлов (живой дизайн-аудит).
+  const [focusStorageProject, setFocusStorageProject] = useState<string | undefined>()
 
   const openAgent = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
   const openChat  = useCallback((id: string) => { setSelectedAgent(id); setView("chats") }, [])
@@ -124,6 +128,11 @@ export default function App() {
   function goToProject(projectId: string) {
     setFocusProjectId(projectId)
     setView("project")
+  }
+
+  function goToStorage(workspaceDir: string) {
+    setFocusStorageProject(workspaceDir || "")
+    setView("company")
   }
 
   // Всплывающие попапы ("Пока тебя не было" / "Понимание компании") — контекст
@@ -400,11 +409,11 @@ export default function App() {
                   {view === "office" && officeMode === "scene" && <OfficeView onOpenAgent={openAgent} />}
                   {view === "office" && officeMode === "graph" && <ScenarioView onOpenChat={openChat} />}
                   {view === "dashboard"   && <DashboardView onNavigate={changeView} onOpenProject={goToProject} />}
-                  {view === "project"     && <ProjectView focusProjectId={focusProjectId} onFocusHandled={() => setFocusProjectId(undefined)} />}
+                  {view === "project"     && <ProjectView focusProjectId={focusProjectId} onFocusHandled={() => setFocusProjectId(undefined)} onOpenStorage={goToStorage} />}
                   {view === "team"        && <TeamView onOpenChat={openChat} onOpenInbox={() => openChat("")} />}
                   {view === "leads"       && <LeadsView />}
                   {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
-                  {view === "company"     && <CompanyView />}
+                  {view === "company"     && <CompanyView focusStorageProject={focusStorageProject} onFocusHandled={() => setFocusStorageProject(undefined)} />}
                   {view === "account"     && <AccountView />}
                 </Suspense>
               </motion.div>

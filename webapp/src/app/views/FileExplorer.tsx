@@ -39,7 +39,7 @@ const isMd = (p: string) => /\.md$/i.test(p)
 
 marked.setOptions({ breaks: true, gfm: true })
 
-export function FileExplorer({ files }: { files: FileItem[] }) {
+export function FileExplorer({ files, initialProjectFilter }: { files: FileItem[]; initialProjectFilter?: string }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [content, setContent] = useState("")
   const [mode, setMode] = useState<"code" | "preview">("code")
@@ -52,7 +52,10 @@ export function FileExplorer({ files }: { files: FileItem[] }) {
   // фильтра дерево мешает файлы ВСЕХ проектов разом — читаемо, только когда
   // проект один; с несколькими параллельными это быстро становится кашей.
   const [projects, setProjects] = useState<{ id: string; title: string; workspace_dir?: string }[]>([])
-  const [projectFilter, setProjectFilter] = useState<string>("")
+  // Раньше сюда нельзя было попасть иначе, чем вручную выбрать проект из
+  // выпадающего списка — переход «Проект → Хранилище» (живой аудит) теперь
+  // сразу открывает нужную папку.
+  const [projectFilter, setProjectFilter] = useState<string>(initialProjectFilter || "")
   useEffect(() => { api.projects().then(d => setProjects(d.projects || [])) }, [])
   const scoped = projects.filter(p => p.workspace_dir)
   const filteredFiles = useMemo(() => {

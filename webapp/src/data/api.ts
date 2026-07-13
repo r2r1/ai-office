@@ -84,6 +84,7 @@ export const api = {
   plan: () => getJSON<any>("/api/plan", { generated: false, tasks: [], progress: { done: 0, total: 0 } }),
   deliverables: () => getJSON<{ deliverables: any[] }>("/api/deliverables", { deliverables: [] }),
   files: () => getJSON<{ files: any[] }>("/api/files", { files: [] }),
+  storageUsage: () => getJSON<any>("/api/storage/usage", null),
   connections: () => getJSON<{ connections: any[] }>("/api/connections", { connections: [] }),
   threads: () => getJSON<{ threads: Record<string, any> }>("/api/threads", { threads: {} }),
   thread: (id: string) => getJSON<{ agent_id: string; worker_id: string; messages: any[] }>(`/api/thread/${id}`, { agent_id: id, worker_id: id, messages: [] }),

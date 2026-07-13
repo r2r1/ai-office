@@ -37,8 +37,16 @@ const TABS = [
 
 const DEPT_RU: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
 
-export function CompanyView() {
-  const { active, setActive } = useSubTab(TABS)
+interface CompanyViewProps {
+  /** Глубокая ссылка «открыть папку проекта в Хранилище» (кнопка на
+   * странице проекта — раньше туда нельзя было попасть иначе, чем вручную
+   * искать папку в общем дереве файлов). */
+  focusStorageProject?: string
+  onFocusHandled?: () => void
+}
+
+export function CompanyView({ focusStorageProject, onFocusHandled }: CompanyViewProps = {}) {
+  const { active, setActive } = useSubTab(TABS, focusStorageProject ? "storage" : undefined)
   return (
     <ViewShell>
       <ViewHead title="Компания" sub="Характер, интеллект, скиллы, лимиты и хранилище офиса" />
@@ -49,7 +57,7 @@ export function CompanyView() {
       {active === "roles" && <RolesTab />}
       {active === "skills" && <SkillsTab />}
       {active === "limits" && <LimitsTab />}
-      {active === "storage" && <StorageTab />}
+      {active === "storage" && <StorageTab focusProject={active === "storage" ? focusStorageProject : undefined} onFocusHandled={onFocusHandled} />}
       {active === "access" && <AccessTab />}
       {active === "apps" && <AppsTab />}
       {active === "mcp" && <McpServersTab />}
@@ -793,31 +801,117 @@ function LimitsTab() {
   )
 }
 
-// ── Хранилище: дерево файлов workspace ────────────────────────────────────────
-// Раньше сырые исходники (research.md, транслитерированные имена папок вроде
-// mini_lending_dlya_zayavo_1) и терминал открывались сразу — нетехническому
-// владельцу бизнеса нужен результат ("вот ваш сайт"), а не файловый браузер
-// (найдено при живом дизайн-аудите). Готовые артефакты и так видны во
-// вкладке «Работа → Проект → Результаты» — здесь теперь explicit toggle.
-function StorageTab() {
-  const [files, setFiles] = useState<any[]>([])
-  const [devMode, setDevMode] = useState(false)
-  useEffect(() => { api.files().then(d => setFiles(d.files || [])) }, [])
+// ── Хранилище: сколько занимает место (как в iPhone/ОС) + дерево файлов ───────
+// Раньше здесь было только сырое дерево файлов без ответа на «а сколько это
+// вообще весит» и без Docker-ресурсов (постоянные приложения, MCP-серверы),
+// физически лежащих ВНЕ data/tenants/<tid>/ и потому невидимых совсем
+// (живой дизайн-аудит). Полоса-разбивка — тот же жанр, что «Настройки →
+// Основные → Хранилище iPhone»: категории с байтами, не только список файлов.
+function bytesFmt(n: number): string {
+  if (!n) return "0 Б"
+  const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+  let i = 0; let v = n
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
 
-  if (!devMode) return (
+function StorageTab({ focusProject, onFocusHandled }: { focusProject?: string; onFocusHandled?: () => void }) {
+  const [files, setFiles] = useState<any[]>([])
+  const [usage, setUsage] = useState<any>(null)
+  useEffect(() => {
+    api.files().then(d => setFiles(d.files || []))
+    api.storageUsage().then(setUsage)
+  }, [])
+  useEffect(() => { if (focusProject) onFocusHandled?.() }, [focusProject]) // eslint-disable-line
+
+  const projects: { name: string; bytes: number; is_project?: boolean }[] = usage?.workspace?.projects || []
+  const sysBytes = usage?.system_data?.bytes || 0
+  const docker = usage?.docker || { available: false, total_bytes: 0, containers: [] }
+  const sandboxImg = usage?.shared_sandbox_image_bytes || 0
+  const total = usage?.total_bytes || 0
+
+  // Сегменты полосы — доля от total, минимум 2% визуально, чтобы мелкие
+  // категории (system_data) не исчезали совсем при доминирующем workspace.
+  const segments = [
+    { label: "Файлы проектов", bytes: projects.reduce((s, p) => s + p.bytes, 0), color: "var(--mercury-a)" },
+    { label: "Системные данные", bytes: sysBytes, color: "#7a8cd6" },
+    { label: "Docker (приложения и MCP)", bytes: docker.total_bytes || 0, color: "#a0e0ab" },
+  ].filter(s => s.bytes > 0)
+
+  return (
     <ViewBody>
-      <Empty icon="🗂" text="Технические файлы проекта"
-        hint="Исходники, документы и терминал рабочей папки — для разработчика. Готовые результаты (сайт, тексты) смотрите в «Работа → Проект»." />
-      <div style={{ textAlign: "center", marginTop: 14 }}>
-        <button onClick={() => setDevMode(true)}
-          style={{ fontSize: 12, padding: "8px 16px", borderRadius: "var(--radius-pill)", cursor: "pointer",
-            border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>
-          Показать файлы и терминал
-        </button>
+      <SectionLabel>Использование памяти</SectionLabel>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
+          <div className="mono" style={{ fontSize: 20, color: "var(--text)" }}>{bytesFmt(total)}</div>
+          <div style={{ fontSize: 11, color: "var(--faint)" }}>всего у тенанта</div>
+        </div>
+        {segments.length > 0 && (
+          <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: "var(--hairline)", marginBottom: 14 }}>
+            {segments.map(s => (
+              <div key={s.label} style={{ width: `${Math.max(2, (s.bytes / total) * 100)}%`, background: s.color }} title={`${s.label}: ${bytesFmt(s.bytes)}`} />
+            ))}
+          </div>
+        )}
+        <div style={{ display: "grid", gap: 8 }}>
+          {segments.map(s => (
+            <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+              <span style={{ color: "var(--text-dim)", flex: 1 }}>{s.label}</span>
+              <span className="mono" style={{ color: "var(--muted)" }}>{bytesFmt(s.bytes)}</span>
+            </div>
+          ))}
+          {sandboxImg > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginTop: 4, paddingTop: 8, borderTop: "1px solid var(--hairline)" }}>
+              <span style={{ color: "var(--faint)", flex: 1 }}>Образ песочницы (общий для всех тенантов, не ваш личный расход)</span>
+              <span className="mono" style={{ color: "var(--faint)" }}>{bytesFmt(sandboxImg)}</span>
+            </div>
+          )}
+          {!docker.available && (
+            <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 4 }}>
+              Docker недоступен или выключен — раздел «Docker» не учтён в подсчёте.
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {projects.length > 0 && (
+        <>
+          <SectionLabel>Папки в Хранилище</SectionLabel>
+          <div style={{ display: "grid", gap: 6, marginBottom: 20 }}>
+            {projects.map((p: any) => (
+              <div key={p.name || "—"} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5,
+                padding: "8px 12px", background: "var(--surface-soft)", borderRadius: "var(--radius-sm)", border: "1px solid var(--hairline)" }}>
+                <span style={{ color: "var(--text-dim)", flex: 1, fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{p.name || "(корень workspace)"}</span>
+                {p.is_project === false && <span style={{ fontSize: 10, color: "var(--faint)" }}>общее</span>}
+                <span className="mono" style={{ color: "var(--muted)" }}>{bytesFmt(p.bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {docker.containers?.length > 0 && (
+        <>
+          <SectionLabel>Docker-контейнеры</SectionLabel>
+          <div style={{ display: "grid", gap: 6, marginBottom: 20 }}>
+            {docker.containers.map((c: any) => (
+              <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5,
+                padding: "8px 12px", background: "var(--surface-soft)", borderRadius: "var(--radius-sm)", border: "1px solid var(--hairline)" }}>
+                <span style={{ color: "var(--text-dim)", flex: 1, fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{c.name}</span>
+                <span className="mono" style={{ color: "var(--muted)" }}>{bytesFmt(c.bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <SectionLabel>Файлы</SectionLabel>
+      <div style={{ flex: 1, minHeight: 400, display: "flex" }}>
+        <FileExplorer files={files} initialProjectFilter={focusProject} />
       </div>
     </ViewBody>
   )
-  return <FileExplorer files={files} />
 }
 
 // ── Доступы: полный каталог интеграций + сохранённые ключи (OAuth) ────────────

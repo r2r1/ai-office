@@ -1374,6 +1374,15 @@ async def get_files():
     return {"files": workspace_module.list_files()}
 
 
+@app.get("/api/storage/usage")
+async def get_storage_usage():
+    """Разбивка использования диска тенантом (вкладка «Хранилище») — сколько
+    занимают файлы проектов (по папке), системные данные и Docker-ресурсы
+    (постоянные приложения/MCP-серверы), не только сырой список файлов."""
+    from src.office import storage_usage
+    return storage_usage.summary()
+
+
 @app.get("/api/plan")
 async def get_plan():
     """Доска задач офиса: todo/doing/done + прогресс. Для вкладки «Задачи»."""
