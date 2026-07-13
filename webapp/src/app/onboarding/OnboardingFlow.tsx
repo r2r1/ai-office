@@ -194,12 +194,16 @@ function AnalyzingScreen({ onReady }: { onReady: (r: any) => void }) {
 // ── Результат: аналитика + точки роста + инициативы на выбор ────────────────
 function ResultScreen({ result, onContinue }: { result: any; onContinue: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
-  const [decided, setDecided] = useState<Set<string>>(new Set())
+  // Map, не Set: раньше принятая и отклонённая инициатива выглядели ОДИНАКОВО
+  // (просто тускнели) — активное согласие читалось как «отключено», тот же
+  // визуальный язык, что и disabled-состояние (найдено при аудите). Теперь
+  // принято/отклонено — два разных состояния, не один и тот же дым.
+  const [decided, setDecided] = useState<Map<string, "accept" | "reject">>(new Map())
 
   async function decide(id: string, action: "accept" | "reject") {
     setBusy(id)
     await api.post(`/api/initiative/${id}/${action}`, {}).catch(() => null)
-    setDecided(prev => new Set(prev).add(id))
+    setDecided(prev => new Map(prev).set(id, action))
     setBusy(null)
   }
 
@@ -231,18 +235,28 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
       {result.initiatives?.length > 0 && (
         <Section title="Предложенные инициативы">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {result.initiatives.map((ini: any) => (
+            {result.initiatives.map((ini: any) => {
+              const verdict = decided.get(ini.id)
+              return (
               <div key={ini.id} style={{
                 padding: "14px 16px", borderRadius: "var(--radius-lg)", background: "var(--surface)",
-                border: "1px solid var(--hairline-strong)", opacity: decided.has(ini.id) ? 0.45 : 1,
-                transition: "opacity 0.2s",
+                border: verdict === "accept" ? "1px solid #a0e0ab" : "1px solid var(--hairline-strong)",
+                opacity: verdict === "reject" ? 0.45 : 1,
+                transition: "opacity 0.2s, border-color 0.2s",
               }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 5 }}>{ini.title}</div>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 5 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{ini.title}</div>
+                  {verdict === "accept" && (
+                    <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: "#a0e0ab",
+                      background: "rgba(160,224,171,0.15)", border: "1px solid #a0e0ab",
+                      borderRadius: "var(--radius-pill)", padding: "2px 10px" }}>✓ Выбрано</span>
+                  )}
+                </div>
                 {ini.rationale && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 8 }}>{ini.rationale}</div>}
                 {ini.expected_outcome && (
                   <div style={{ fontSize: 11, color: "var(--mercury-a)", marginBottom: 10 }}>📈 {ini.expected_outcome}</div>
                 )}
-                {!decided.has(ini.id) && (
+                {!verdict && (
                   <div style={{ display: "flex", gap: 8 }}>
                     <button onClick={() => decide(ini.id, "accept")} disabled={busy === ini.id}
                       style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
@@ -257,7 +271,7 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
                   </div>
                 )}
               </div>
-            ))}
+            )})}
           </div>
         </Section>
       )}

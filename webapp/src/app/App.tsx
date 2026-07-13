@@ -58,14 +58,18 @@ export default function App() {
   // (продуктовый аудит сессии: экран без единой активной задачи не может быть
   // домом продукта). Первый визит после онбординга — отдельная ветка ниже.
   const [view, setView]             = useState<Section>("dashboard")
-  // Режим раздела «Офис»: изо-сцена (флагман) или органиграмма/сценарии графа.
-  const [officeMode, setOfficeMode] = useState<"scene" | "graph">("scene")
-  const [theme, setTheme]           = useState<Theme>("dark")
-  const [selectedAgent, setSelectedAgent] = useState<string | undefined>()
-  const [panelOpen, setPanelOpen]   = useState(true)
   const [isMobile, setIsMobile]     = useState(
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   )
+  // Режим раздела «Офис»: изо-сцена (флагман) или органиграмма/сценарии графа.
+  // На узком viewport фиксированная многоколоночная изо-сцена физически не
+  // помещается (комнаты обрезаются, подписи агентов накладываются друг на
+  // друга — реальный баг со скриншотов) — «Сценарии» уже адаптированы под
+  // мобильный как вертикальный список, поэтому там дефолт другой.
+  const [officeMode, setOfficeMode] = useState<"scene" | "graph">(isMobile ? "graph" : "scene")
+  const [theme, setTheme]           = useState<Theme>("dark")
+  const [selectedAgent, setSelectedAgent] = useState<string | undefined>()
+  const [panelOpen, setPanelOpen]   = useState(true)
   // Только нужные срезы — App.tsx всегда смонтирован, и раньше useOffice() (весь
   // state) заставлял перерисовываться ВСЁ дерево на каждое SSE-событие (аудит
   // фронтенда: подтормаживание ввода при активном офисе). Теперь ре-рендер только
@@ -237,7 +241,7 @@ export default function App() {
               exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}
               style={{
                 position: "absolute", top: isMobile ? 64 : 70, left: isMobile ? 8 : 14, right: isMobile ? 8 : 14,
-                zIndex: 100, background: "var(--surface)",
+                zIndex: 100, background: "var(--surface-card)",
                 border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-lg)",
                 boxShadow: "var(--shadow)", padding: "14px 16px", maxWidth: 520,
               }}>
@@ -281,7 +285,7 @@ export default function App() {
               transition={{ duration: 0.2 }}
               style={{
                 position: "absolute", top: isMobile ? 64 : 70, right: isMobile ? 8 : 14,
-                zIndex: 100, background: "var(--surface)",
+                zIndex: 100, background: "var(--surface-card)",
                 border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-lg)",
                 boxShadow: "var(--shadow)", padding: "16px", width: 300, maxHeight: "70vh", overflowY: "auto",
               }}>

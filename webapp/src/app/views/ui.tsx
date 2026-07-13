@@ -142,17 +142,26 @@ export function SubTabs({ tabs, active, onChange }: { tabs: TabDef[]; active: st
           )
         })}
       </div>
+      {/* Живой аудит показал: одно затухание слишком тонкое, чтобы его заметить
+          (пропущено при собственном тестировании) — явный шеврон поверх делает
+          «тут ещё есть табы» однозначным, не полагаясь на тонкий градиент. */}
       {canScrollLeft && (
         <div style={{
           position: "absolute", top: 0, left: 0, bottom: 1, width: 28, pointerEvents: "none", zIndex: 4,
-          background: "linear-gradient(to left, transparent, var(--surface))",
-        }} />
+          background: "linear-gradient(to left, transparent, var(--surface-card))",
+          display: "flex", alignItems: "center",
+        }}>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>‹</span>
+        </div>
       )}
       {canScrollRight && (
         <div style={{
           position: "absolute", top: 0, right: 0, bottom: 1, width: 32, pointerEvents: "none", zIndex: 4,
-          background: "linear-gradient(to right, transparent, var(--surface))",
-        }} />
+          background: "linear-gradient(to right, transparent, var(--surface-card))",
+          display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 4,
+        }}>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>›</span>
+        </div>
       )}
     </div>
   )
