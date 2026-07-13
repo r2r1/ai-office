@@ -5,7 +5,17 @@ import { api } from "../../data/api"
 import { roleName, roleDesc, roleSkills } from "../../data/roles"
 import { ModelPicker, type Preset } from "../components/ModelPicker"
 import { AgentDetailModal } from "../components/AgentDetailModal"
+import { SubTabs, useSubTab, Card, SectionLabel, Empty, Pill, ViewBody } from "./ui"
 import type { Worker } from "../types"
+
+// IA-пересборка (вариант C, живой дизайн-аудит): Роли и Скиллы раньше жили в
+// «Компании», отдельно от живых карточек агентов той же роли — дублирование
+// "кто работает" в двух не связанных местах меню. Теперь рядом, под-вкладками.
+const TEAM_TABS = [
+  { id: "agents", label: "Агенты" },
+  { id: "roles", label: "Роли" },
+  { id: "skills", label: "Скиллы" },
+]
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
@@ -39,6 +49,7 @@ export function TeamView({ onOpenChat, onOpenInbox }: TeamViewProps) {
   const [detailId, setDetailId] = useState<string | null>(null)
   const detailEmoji = detailId ? agentsMap[detailId]?.emoji : undefined
   const unread = useUnread()
+  const { active: teamTab, setActive: setTeamTab } = useSubTab(TEAM_TABS)
 
   // collapsing header (через MotionValue — без ре-рендеров на скролл)
   const scrollY     = useMotionValue(0)
@@ -113,34 +124,42 @@ export function TeamView({ onOpenChat, onOpenInbox }: TeamViewProps) {
         <motion.div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--hairline)", opacity: lineOpacity }} />
       </motion.div>
 
-      {/* Секции по проектам (штаб + по одной на активный проект) */}
-      <div ref={gridRef}
-        style={{ flex: 1, overflowY: "auto", padding: "16px 28px 32px" }}>
-        {agents.length === 0 ? (
-          <EmptyTeam />
-        ) : (
-          groupedByProject.map(([pid, list], gi) => (
-            <div key={pid || "hq"} style={{ marginBottom: 28 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "1.2px" }}>
-                  {pid ? `📁 ${projectTitles[pid] || "Проект"}` : "Штаб"}
-                </span>
-                <span style={{ fontSize: 10.5, color: "var(--muted)" }}>· {list.length}</span>
-                <div style={{ flex: 1, height: 1, background: "var(--hairline)" }} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
-                <AnimatePresence>
-                  {list.map((agent, i) => (
-                    <AgentCard key={agent.id} agent={agent} index={gi * 4 + i} onOpenChat={onOpenChat}
-                      initialModel={models[agent.id] || ""} presets={presets}
-                      onOpenDetail={() => setDetailId(agent.id)} />
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-          ))
-        )}
+      <div style={{ flexShrink: 0, padding: "0 28px", background: "var(--surface-head)" }}>
+        <SubTabs tabs={TEAM_TABS} active={teamTab} onChange={setTeamTab} />
       </div>
+
+      {teamTab === "agents" && (
+        /* Секции по проектам (штаб + по одной на активный проект) */
+        <div ref={gridRef}
+          style={{ flex: 1, overflowY: "auto", padding: "16px 28px 32px" }}>
+          {agents.length === 0 ? (
+            <EmptyTeam />
+          ) : (
+            groupedByProject.map(([pid, list], gi) => (
+              <div key={pid || "hq"} style={{ marginBottom: 28 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "1.2px" }}>
+                    {pid ? `📁 ${projectTitles[pid] || "Проект"}` : "Штаб"}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>· {list.length}</span>
+                  <div style={{ flex: 1, height: 1, background: "var(--hairline)" }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
+                  <AnimatePresence>
+                    {list.map((agent, i) => (
+                      <AgentCard key={agent.id} agent={agent} index={gi * 4 + i} onOpenChat={onOpenChat}
+                        initialModel={models[agent.id] || ""} presets={presets}
+                        onOpenDetail={() => setDetailId(agent.id)} />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      {teamTab === "roles" && <RolesTab />}
+      {teamTab === "skills" && <SkillsTab />}
 
       <AgentDetailModal agentId={detailId} emoji={detailEmoji} onClose={() => setDetailId(null)} onOpenChat={onOpenChat} />
     </div>
@@ -455,5 +474,252 @@ function EmptyTeam() {
         Агенты появятся после старта офиса. Директор наймёт нужных специалистов автоматически.
       </div>
     </div>
+  )
+}
+
+// ── Роли: Role Definition (read-only) — перенесено из «Компании» (IA-пересборка,
+// вариант C): раньше жило отдельно от живых карточек агентов той же роли. ─────
+const DEPT_RU: Record<string, string> = { tech: "Технический", marketing: "Маркетинг", sales: "Продажи" }
+
+function RolesTab() {
+  const [roles, setRoles] = useState<any[]>([])
+  useEffect(() => { api.get("/api/roles").then(r => r?.roles && setRoles(r.roles)) }, [])
+  return (
+    <ViewBody style={{ maxWidth: 680 }}>
+      <SectionLabel>Роли компании — описание, а не зашитый промпт</SectionLabel>
+      <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 16 }}>
+        У каждой роли есть миссия, зона ответственности, инструменты и ограничения.
+        Итоговый промпт собирается под задачу автоматически.
+      </div>
+      {roles.length === 0 ? <Empty text="Загрузка…" /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {roles.map((r: any) => (
+            <Card key={r.role}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 14, color: "var(--text)" }}>{r.title || r.role}</span>
+                {r.department && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{DEPT_RU[r.department] || r.department}</span>}
+              </div>
+              {r.mission && <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.45, marginBottom: 8 }}>{r.mission}</div>}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {(r.responsibilities || []).map((x: string, i: number) => (
+                  <span key={i} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99,
+                    background: "var(--surface-soft)", border: "1px solid var(--hairline)", color: "var(--text-dim)" }}>{x}</span>
+                ))}
+              </div>
+              {(r.constraints || []).length > 0 && (
+                <div style={{ fontSize: 10.5, color: "var(--mercury-a)", marginTop: 8 }}>🚫 {(r.constraints || []).join(" · ")}</div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </ViewBody>
+  )
+}
+
+// ── Скиллы: каталог + установка из любого источника (как npx skills) ──────────
+const ROLE_RU: Record<string, string> = {
+  cto: "CTO", cmo: "CMO", sales_lead: "Head of Sales", developer: "Разработчик",
+  // designer как отдельная нанимаемая роль слита с developer (roles.py) — но
+  // строка "designer" остаётся в roles: скиллов как алиас поиска (защищено
+  // тестами test_design_skills.py), поэтому в UI просто показываем то же имя,
+  // что у developer, а не сырое "designer" (было найдено при живом аудите).
+  designer: "Разработчик",
+  integrator: "Интегратор", marketer: "Маркетолог",
+  analyst: "Аналитик", salesman: "Продажник", researcher: "Ресёрчер",
+  strategist: "Стратег", architect: "Архитектор", hr: "HR",
+}
+const SKILL_FIELD: React.CSSProperties = {
+  background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+  borderRadius: "var(--radius-md)", padding: "8px 11px", color: "var(--text)",
+  fontSize: 12, outline: "none",
+}
+
+// Разбор вставленного SKILL.md: если есть frontmatter (--- … ---) — вытащить поля,
+// вернуть тело без него. Позволяет вставить готовый скилл и заполнить поля сами.
+function splitFrontmatter(text: string): { fm: Record<string, string> | null; body: string } {
+  const m = text.match(/^﻿?\s*---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+  if (!m) return { fm: null, body: text }
+  const fm: Record<string, string> = {}
+  for (const line of m[1].split("\n")) {
+    const i = line.indexOf(":")
+    if (i > 0) fm[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim()
+  }
+  return { fm, body: m[2].replace(/^\s+/, "") }
+}
+
+function SkillsTab() {
+  const [skills, setSkills] = useState<any[]>([])
+  const [mode, setMode] = useState<"markdown" | "url" | "github">("markdown")
+  // Поля скилла — тело первично, параметры заполняются сами при вставке готового SKILL.md.
+  const [body, setBody] = useState("")
+  const [title, setTitle] = useState("")
+  const [desc, setDesc] = useState("")
+  const [keywords, setKeywords] = useState("")
+  const [roles, setRoles] = useState("")
+  const [ref, setRef] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const load = () => api.get("/api/skills").then(d => d?.skills && setSkills(d.skills))
+  useEffect(() => { load() }, [])
+
+  // Вставили тело — если это готовый SKILL.md с frontmatter, разложим по полям.
+  function onBodyChange(v: string) {
+    const { fm, body: b } = splitFrontmatter(v)
+    if (fm) {
+      if (fm.title || fm.name) setTitle(fm.title || fm.name)
+      if (fm.description) setDesc(fm.description)
+      if (fm.keywords) setKeywords(fm.keywords)
+      if (fm.roles) setRoles(fm.roles)
+      setBody(b)
+    } else {
+      setBody(v)
+    }
+  }
+
+  function assembleMarkdown(): string {
+    const fm = ["---"]
+    fm.push(`title: ${title.trim() || "Новый скилл"}`)
+    if (desc.trim()) fm.push(`description: ${desc.trim()}`)
+    if (keywords.trim()) fm.push(`keywords: ${keywords.trim()}`)
+    if (roles.trim()) fm.push(`roles: ${roles.trim()}`)
+    fm.push("---")
+    return `${fm.join("\n")}\n${body.trim()}`
+  }
+
+  async function install() {
+    setBusy(true); setMsg(null)
+    const payload: any = { source: mode }
+    if (mode === "markdown") payload.content = assembleMarkdown()
+    else if (mode === "url") payload.url = ref
+    else payload.ref = ref
+    // Прямой fetch: install отдаёт 400 с {message} при ошибке, а api.post глотает
+    // тело на non-2xx — нам нужно показать пользователю причину.
+    let res: any = null
+    try {
+      const r = await fetch("/api/skills/install", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      })
+      res = await r.json().catch(() => ({ ok: false }))
+    } catch { res = { ok: false, message: "Сеть недоступна" } }
+    setBusy(false)
+    if (res?.ok) {
+      setMsg({ ok: true, text: `Установлен: ${res.title || res.id}` })
+      setBody(""); setTitle(""); setDesc(""); setKeywords(""); setRoles(""); setRef(""); load()
+    } else {
+      setMsg({ ok: false, text: res?.message || "Не удалось установить" })
+    }
+  }
+
+  async function removeSkill(id: string) {
+    const res = await api.del(`/api/skills/${encodeURIComponent(id)}`)
+    if (res?.ok) load()
+    else setMsg({ ok: false, text: res?.message || "Не удалось удалить" })
+  }
+
+  const installed = skills.filter(s => s.source === "installed")
+  const builtin = skills.filter(s => s.source !== "installed")
+
+  return (
+    <ViewBody style={{ maxWidth: 720 }}>
+      <SectionLabel>Установить скилл (из любого источника)</SectionLabel>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>
+          Скилл — это готовый «как делать» для агентов: заголовок с описанием
+          + текст инструкции. Скилл — <b style={{ color: "var(--text-dim)" }}>инструкция,
+          которой агенты будут следовать</b>: ставьте из доверенных источников.
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          {([["markdown", "Вставить"], ["url", "По ссылке"], ["github", "GitHub"]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setMode(m)}
+              style={{ padding: "5px 12px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
+                border: `1px solid ${mode === m ? "var(--mercury-a)" : "var(--hairline)"}`,
+                background: mode === m ? "rgba(255,172,46,0.08)" : "transparent",
+                color: mode === m ? "var(--mercury-a)" : "var(--text-dim)" }}>{label}</button>
+          ))}
+        </div>
+        {mode === "markdown" ? (
+          <>
+            {/* Тело — первично: вставь сюда готовый скилл ИЛИ опиши, как делать. */}
+            <textarea value={body} onChange={e => onBodyChange(e.target.value)}
+              placeholder={"Вставьте готовый скилл (SKILL.md) — параметры ниже заполнятся сами.\nИли просто опишите, как делать: пошагово, приёмы, чеклист."}
+              rows={8}
+              style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+                borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 12,
+                outline: "none", fontFamily: "var(--font-mono)", resize: "vertical", lineHeight: 1.5 }} />
+            <div style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 4px" }}>
+              Параметры (заполнятся сами, если вставили готовый SKILL.md):
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Название *"
+                style={SKILL_FIELD} />
+              <input value={roles} onChange={e => setRoles(e.target.value)} placeholder="Роли: developer, marketer"
+                style={SKILL_FIELD} />
+              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Описание — что делает"
+                style={{ ...SKILL_FIELD, gridColumn: "1 / -1" }} />
+              <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="Ключевые слова (через запятую)"
+                style={{ ...SKILL_FIELD, gridColumn: "1 / -1" }} />
+            </div>
+          </>
+        ) : (
+          <input value={ref} onChange={e => setRef(e.target.value)}
+            placeholder={mode === "url" ? "https://…/SKILL.md (сырой markdown)" : "owner/repo@skill"}
+            style={{ width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+              borderRadius: "var(--radius-md)", padding: "10px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+          <button onClick={install} disabled={busy || (mode === "markdown" ? !(body.trim() && title.trim()) : !ref.trim())}
+            style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-pill)", padding: "9px 20px",
+              background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13,
+              opacity: busy ? 0.5 : 1 }}>{busy ? "Устанавливаю…" : "Установить"}</button>
+          {msg && <span style={{ fontSize: 12, color: msg.ok ? "var(--success)" : "var(--danger)" }}>{msg.text}</span>}
+        </div>
+      </Card>
+
+      {installed.length > 0 && (
+        <>
+          <SectionLabel>Установленные · {installed.length}</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+            {installed.map(s => <SkillCard key={s.id} s={s} onRemove={() => removeSkill(s.id)} />)}
+          </div>
+        </>
+      )}
+
+      <SectionLabel>Встроенные · {builtin.length}</SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {builtin.map(s => <SkillCard key={s.id} s={s} />)}
+      </div>
+    </ViewBody>
+  )
+}
+
+function SkillCard({ s, onRemove }: { s: any; onRemove?: () => void }) {
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 13.5, color: "var(--text)", fontWeight: 500 }}>{s.title}</span>
+            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 99,
+              background: onRemove ? "rgba(255,172,46,0.12)" : "var(--surface-soft)",
+              color: onRemove ? "var(--mercury-a)" : "var(--faint)", border: "1px solid var(--hairline)" }}>
+              {onRemove ? "установлен" : "встроенный"}
+            </span>
+          </div>
+          {s.description && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{s.description}</div>}
+          {(s.roles || []).length > 0 && (
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
+              роли: {Array.from(new Set((s.roles || []).map((r: string) => ROLE_RU[r] || r))).join(", ")}
+            </div>
+          )}
+        </div>
+        {onRemove && (
+          <button onClick={onRemove} title="Удалить скилл"
+            style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>×</button>
+        )}
+      </div>
+    </Card>
   )
 }

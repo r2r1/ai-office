@@ -62,14 +62,18 @@ function buildPath(H: number, by: number): string {
 // наравне с прочими результатами; "Итоги" убраны полностью — материалы и
 // сайты теперь артефакты КОНКРЕТНОГО проекта (см. «Работа» → карточка
 // проекта → «Артефакты»), а не общий котёл на всю компанию (Work — BOS §5).
+// IA-пересборка (вариант C): "Сводка" → "Обзор" (Прозрачность перестаёт быть
+// спрятанной 3-й под-вкладкой из 3); "Компания"+"Аккаунт" слиты в "Настройки";
+// новый "Ресурсы" — Хранилище/Доступы/Приложения/MCP-серверы (раньше жили
+// вперемешку с Профилем/Целями/Ролями в одном списке из 10 под-вкладок).
 const NAV: Array<{ id: Section; label: string; group: "top" | "bottom" }> = [
-  { id: "office",      label: "Офис",    group: "top" },
-  { id: "dashboard",   label: "Сводка",  group: "top" },
-  { id: "project",     label: "Работа",  group: "top" },
-  { id: "team",        label: "Команда", group: "top" },
-  { id: "leads",       label: "Лиды",    group: "top" },
-  { id: "company",     label: "Компания", group: "bottom" },
-  { id: "account",     label: "Аккаунт", group: "bottom" },
+  { id: "office",      label: "Офис",     group: "top" },
+  { id: "dashboard",   label: "Обзор",    group: "top" },
+  { id: "project",     label: "Работа",   group: "top" },
+  { id: "team",        label: "Команда",  group: "top" },
+  { id: "leads",       label: "Лиды",     group: "top" },
+  { id: "resources",   label: "Ресурсы",  group: "bottom" },
+  { id: "settings",    label: "Настройки", group: "bottom" },
 ]
 
 interface NavRailProps {

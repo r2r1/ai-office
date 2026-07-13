@@ -316,7 +316,7 @@ function DiCard({ src }: { src: any }) {
 }
 
 /** Тело раздела «Доступы» без обёртки ViewShell — переиспользуется во вкладке
- *  «Компания → Доступы». */
+ *  «Ресурсы → Доступы». */
 export function ConnectionsBody() {
   const { state } = useOffice()
   const [connections, setConnections]   = useState<any[]>([])

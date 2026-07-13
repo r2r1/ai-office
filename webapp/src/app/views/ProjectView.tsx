@@ -34,7 +34,7 @@ interface ProjectViewProps {
    * инициативы на Сводке), не заставляя искать его в списке. */
   focusProjectId?: string
   onFocusHandled?: () => void
-  /** Открыть папку ЭТОГО проекта в «Компания → Хранилище» (workspace_dir). */
+  /** Открыть папку ЭТОГО проекта в «Ресурсы → Хранилище» (workspace_dir). */
   onOpenStorage?: (workspaceDir: string) => void
 }
 

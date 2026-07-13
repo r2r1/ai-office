@@ -322,7 +322,7 @@ function IntegrationsScreen({ integrations, onContinue }: { integrations: any[];
       <CeoBadge small />
       <h1 className="display" style={{ fontSize: 22, fontWeight: 600, margin: "14px 0 6px" }}>Подключим сразу?</h1>
       <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 20 }}>
-        По вашему описанию офису пригодятся эти сервисы — можно позже, в «Компания → Доступы»
+        По вашему описанию офису пригодятся эти сервисы — можно позже, в «Ресурсы → Доступы»
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, textAlign: "left", marginBottom: 20 }}>
         {integrations.map(i => (

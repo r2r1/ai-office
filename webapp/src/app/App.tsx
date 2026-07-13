@@ -16,12 +16,16 @@ import type { Section, Theme } from "./types"
 // ровно один раз в жизни тенанта, но раньше грузился всем и всегда.
 const ProjectView   = lazy(() => import("./views/ProjectView").then(m => ({ default: m.ProjectView })))
 const DashboardView = lazy(() => import("./views/DashboardView").then(m => ({ default: m.DashboardView })))
-const CompanyView   = lazy(() => import("./views/CompanyView").then(m => ({ default: m.CompanyView })))
+// IA-пересборка (вариант C, живой дизайн-аудит): бывшая "Компания" (10 под-
+// вкладок вперемешку) разделена на SettingsView (кто мы/куда идём/аккаунт) и
+// ResourcesView (Хранилище/Доступы/Приложения/MCP) — Роли/Скиллы переехали в
+// TeamView, к живым агентам тех же ролей.
+const SettingsView  = lazy(() => import("./views/SettingsView").then(m => ({ default: m.SettingsView })))
+const ResourcesView = lazy(() => import("./views/ResourcesView").then(m => ({ default: m.ResourcesView })))
 const ChatsView     = lazy(() => import("./views/ChatsView").then(m => ({ default: m.ChatsView })))
 const TeamView      = lazy(() => import("./views/TeamView").then(m => ({ default: m.TeamView })))
 const ScenarioView  = lazy(() => import("./views/ScenarioView").then(m => ({ default: m.ScenarioView })))
 const LeadsView     = lazy(() => import("./views/LeadsView").then(m => ({ default: m.LeadsView })))
-const AccountView   = lazy(() => import("./views/AccountView").then(m => ({ default: m.AccountView })))
 const OnboardingFlow = lazy(() => import("./onboarding/OnboardingFlow").then(m => ({ default: m.OnboardingFlow })))
 
 /** Маленький чип-счётчик слоя памяти. */
@@ -132,7 +136,7 @@ export default function App() {
 
   function goToStorage(workspaceDir: string) {
     setFocusStorageProject(workspaceDir || "")
-    setView("company")
+    setView("resources")
   }
 
   // Всплывающие попапы ("Пока тебя не было" / "Понимание компании") — контекст
@@ -323,7 +327,7 @@ export default function App() {
                   )}
                   {qualityMode && (
                     <StatusChip label="Качество" value={`${qualityMode.icon} ${qualityMode.label}`}
-                      onClick={() => { changeView("company"); setUnderstandingOpen(false) }} />
+                      onClick={() => { changeView("settings"); setUnderstandingOpen(false) }} />
                   )}
                 </div>
               )}
@@ -413,8 +417,8 @@ export default function App() {
                   {view === "team"        && <TeamView onOpenChat={openChat} onOpenInbox={() => openChat("")} />}
                   {view === "leads"       && <LeadsView />}
                   {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
-                  {view === "company"     && <CompanyView focusStorageProject={focusStorageProject} onFocusHandled={() => setFocusStorageProject(undefined)} />}
-                  {view === "account"     && <AccountView />}
+                  {view === "resources"   && <ResourcesView focusStorageProject={focusStorageProject} onFocusHandled={() => setFocusStorageProject(undefined)} />}
+                  {view === "settings"    && <SettingsView />}
                 </Suspense>
               </motion.div>
             </AnimatePresence>

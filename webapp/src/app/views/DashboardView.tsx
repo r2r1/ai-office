@@ -72,7 +72,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
 
   return (
     <ViewShell>
-      <ViewHead title="Сводка" sub={state.ready ? "Состояние компании на текущий момент" : "Офис ожидает бриф"} />
+      <ViewHead title="Обзор" sub={state.ready ? "Состояние компании на текущий момент" : "Офис ожидает бриф"} />
       <SubTabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === "business" ? <BusinessDashboard /> : tab === "transparency" ? <TransparencyTab /> : (
       <ViewBody>
