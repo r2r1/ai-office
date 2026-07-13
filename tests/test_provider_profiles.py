@@ -168,8 +168,13 @@ def test_acquire_offers_all_provider_options_when_multiple():
 
 
 def test_crm_capability_registered_with_two_providers():
+    # "bitrix24" (OAuth-приложение) — третий провайдер той же способности,
+    # добавлен вместе с интеграциями Figma/Bitrix24 OAuth (см. src/integrations/
+    # bitrix24.py) рядом с уже существующими crm (TEST-режим) и crm_bitrix24
+    # (входящий вебхук). Имя теста ("two_providers") оставлено как есть —
+    # переименовывать исторический тест ради актуальности числа не стали.
     spec = capability._CATALOG["crm"]
-    assert set(spec["backed_by"]) == {"crm", "crm_bitrix24"}
+    assert set(spec["backed_by"]) == {"crm", "crm_bitrix24", "bitrix24"}
 
 
 # ── crm_bitrix24.py: обработчик без сети (только путь "нет кредов") ─────────

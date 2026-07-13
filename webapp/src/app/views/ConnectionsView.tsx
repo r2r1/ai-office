@@ -133,6 +133,42 @@ function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; 
   )
 }
 
+/** Bitrix24 — единственный OAuth-провайдер здесь без единой страницы согласия
+ * (портал клиента multi-tenant, *.bitrix24.ru у каждого свой) — спрашиваем
+ * домен перед редиректом на /auth/bitrix24/login, а не сразу window.location. */
+function Bitrix24PortalModal({ open, onClose, portal, setPortal }:
+  { open: boolean; onClose: () => void; portal: string; setPortal: (v: string) => void }) {
+  const inputStyle = {
+    width: "100%", padding: "9px 11px", borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--hairline-strong)", background: "var(--surface)",
+    color: "var(--text)", fontSize: 13, fontFamily: "var(--font-sans)",
+  } as const
+  const go = () => {
+    if (!portal.trim()) return
+    window.location.href = `/auth/bitrix24/login?portal=${encodeURIComponent(portal.trim())}`
+  }
+  return (
+    <Modal open={open} onClose={onClose} title="Подключить Bitrix24">
+      <ModalSection label="Домен вашего портала">
+        <input style={inputStyle} placeholder="my-company.bitrix24.ru" value={portal}
+          onChange={e => setPortal(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") go() }} autoFocus />
+        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 6, lineHeight: 1.5 }}>
+          Адрес, который открывается, когда вы заходите в свой Bitrix24 (без https://).
+        </div>
+      </ModalSection>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button disabled={!portal.trim()} onClick={go}
+          style={{ padding: "8px 16px", borderRadius: "var(--radius-sm)", border: "1px solid var(--hairline-strong)",
+            background: "var(--surface-soft)", color: "var(--text)", fontSize: 12.5, fontWeight: 600,
+            cursor: portal.trim() ? "pointer" : "default", opacity: portal.trim() ? 1 : 0.5 }}>
+          Продолжить
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 // Экспортирован — переиспользуется шагом "Интеграции" минимального онбординга
 // (OnboardingFlow.tsx): тот же CTA подключения, momент пиковой мотивации, а не
 // новый компонент карточки интеграции.
@@ -140,11 +176,19 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
   const isOAuth   = Boolean(integ.oauth_url)
   const isGoogle  = GOOGLE_SERVICES.has(integ.name)
   const isTgPersonal = integ.name === "telegram_personal"
+  // Bitrix24 — единственный OAuth здесь без единой страницы согласия (портал
+  // клиента multi-tenant, *.bitrix24.ru у каждого свой) — редиректу нужен домен,
+  // спрашиваем его в маленькой модалке перед переходом (как у Telegram-логина).
+  const isBitrix24 = integ.name === "bitrix24"
   const connected = integ.connected
   const [loginOpen, setLoginOpen] = useState(false)
+  const [portalOpen, setPortalOpen] = useState(false)
+  const [portal, setPortal] = useState("")
 
   const handleConnect = () => {
-    if (isOAuth) {
+    if (isBitrix24) {
+      setPortalOpen(true)
+    } else if (isOAuth) {
       // OAuth: редирект на страницу согласия
       window.location.href = integ.oauth_url
     } else if (isTgPersonal) {
@@ -214,11 +258,13 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
         )
       })()}
 
-      {/* Для подключённых Google — кнопка отключить */}
-      {isGoogle && connected && (
+      {/* Кнопка отключить — для ЛЮБОЙ подключённой OAuth-интеграции, не только
+          Google (раньше было захардкожено на google, Figma/Bitrix24 не могли
+          отключиться из UI вообще). */}
+      {isOAuth && connected && (
         <button
           onClick={async () => {
-            await fetch("/auth/google/disconnect", { method: "POST" })
+            await fetch(`/auth/${isGoogle ? "google" : integ.name}/disconnect`, { method: "POST" })
             onRefresh()
           }}
           style={{
@@ -258,6 +304,9 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
       )}
       {isTgPersonal && (
         <TelegramPersonalLoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onDone={onRefresh} />
+      )}
+      {isBitrix24 && (
+        <Bitrix24PortalModal open={portalOpen} onClose={() => setPortalOpen(false)} portal={portal} setPortal={setPortal} />
       )}
     </Card>
   )
@@ -332,10 +381,12 @@ export function ConnectionsBody() {
   const tick = useThrottled(state.feed.length, 2500)
   useEffect(refresh, [tick])
 
-  // Если вернулись с OAuth (?connected=google) — обновляем список
+  // Если вернулись с OAuth (?connected=<имя>) — обновляем список. Раньше было
+  // захардкожено на "google" — Figma/Bitrix24 подключались бы на бэкенде, но
+  // список карточек не обновлялся сам (нужен был лишний ручной reload).
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
-    if (p.get("connected") === "google") {
+    if (p.get("connected")) {
       refresh()
       window.history.replaceState({}, "", window.location.pathname)
     }

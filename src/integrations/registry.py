@@ -21,6 +21,8 @@ from src.integrations.ads               import INTEGRATION as _ads
 from src.integrations.crm               import INTEGRATION as _crm
 from src.integrations.crm_bitrix24      import INTEGRATION as _crm_bitrix24
 from src.integrations.erp_1c            import INTEGRATION as _erp_1c
+from src.integrations.figma             import INTEGRATION as _figma
+from src.integrations.bitrix24          import INTEGRATION as _bitrix24
 from src.office import connections
 
 _ALL: dict[str, Integration] = {
@@ -38,6 +40,8 @@ _ALL: dict[str, Integration] = {
     _crm.name:              _crm,
     _crm_bitrix24.name:     _crm_bitrix24,
     _erp_1c.name:           _erp_1c,
+    _figma.name:            _figma,
+    _bitrix24.name:         _bitrix24,
 }
 
 # Все Google-интеграции держат токен под одним именем "google"
@@ -137,6 +141,11 @@ _SUGGEST_KEYWORDS: dict[str, tuple[str, ...]] = {
     "crm":             ("crm", "pipedrive", "hubspot", "amocrm", "внешняя crm"),
     "crm_bitrix24":    ("bitrix", "битрикс", "bitrix24"),
     "erp_1c":          ("1с", "1c", "erp", "эрп", "контрагент"),
+    "figma":           ("figma", "фигма", "макет", "дизайн-файл"),
+    # "bitrix24" (OAuth-вариант) намеренно НЕ в этом словаре — иначе бриф про
+    # Bitrix24 показывал бы владельцу два конкурирующих провайдера одной
+    # потребности сразу (вебхук crm_bitrix24 уже покрывает подсказку);
+    # OAuth-вариант всё равно виден в полном каталоге «Ресурсы → Доступы».
 }
 
 

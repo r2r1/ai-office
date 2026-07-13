@@ -420,6 +420,123 @@ async def google_oauth_disconnect(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/auth/figma/login")
+async def figma_oauth_login(request: Request):
+    """Редирект на страницу согласия Figma (по образцу /auth/google/start,
+    без режима login — Figma только подключается как интеграция, не как вход)."""
+    from src.integrations import figma_oauth
+    if not figma_oauth.is_configured():
+        return JSONResponse({"error": "Задайте FIGMA_CLIENT_ID и FIGMA_CLIENT_SECRET в .env"}, status_code=400)
+    import jwt as _jwt
+    tenant = saas_context.get_tenant()
+    state = _jwt.encode(
+        {"k": "figma", "tid": tenant, "exp": int(time.time()) + 600},
+        saas_auth.APP_SECRET, algorithm="HS256",
+    )
+    return RedirectResponse(figma_oauth.authorization_url(state))
+
+
+@app.get("/auth/figma/callback")
+async def figma_oauth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse("/webapp/?figma_error=denied")
+    if not code:
+        return JSONResponse({"error": "нет code"}, status_code=400)
+
+    import jwt as _jwt
+    try:
+        payload = _jwt.decode(state, saas_auth.APP_SECRET, algorithms=["HS256"])
+        if payload.get("k") != "figma":
+            raise ValueError
+        tenant_id = payload.get("tid", "default")
+    except Exception:
+        return JSONResponse({"error": "неверный state"}, status_code=400)
+
+    from src.integrations import figma_oauth
+    try:
+        tokens = await figma_oauth.exchange_code(code)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    saas_context.set_tenant(tenant_id)
+    handle = tokens.get("handle", "")
+    connections.save({"name": "figma", "type": "oauth", "fields": tokens,
+                       "note": f"Figma OAuth ({handle})" if handle else "Figma OAuth"})
+    return RedirectResponse("/webapp/?connected=figma")
+
+
+@app.post("/auth/figma/disconnect")
+async def figma_oauth_disconnect(request: Request):
+    uid = current_user(request)
+    if not uid:
+        return JSONResponse({"error": "не авторизован"}, status_code=401)
+    from src.integrations import figma_oauth
+    await figma_oauth.revoke()
+    return JSONResponse({"ok": True})
+
+
+@app.get("/auth/bitrix24/login")
+async def bitrix24_oauth_login(request: Request, portal: str = ""):
+    """Редирект на страницу согласия Bitrix24 — В ОТЛИЧИЕ от Google/Figma нужен
+    домен портала клиента (Bitrix24 multi-tenant, нет единой страницы согласия),
+    поэтому фронт сначала спрашивает домен и передаёт его сюда параметром."""
+    from src.integrations import bitrix24_oauth
+    if not bitrix24_oauth.is_configured():
+        return JSONResponse({"error": "Задайте BITRIX24_CLIENT_ID и BITRIX24_CLIENT_SECRET в .env"}, status_code=400)
+    if not portal.strip():
+        return JSONResponse({"error": "Нужен домен портала Bitrix24 (например my-company.bitrix24.ru)"}, status_code=400)
+    import jwt as _jwt
+    tenant = saas_context.get_tenant()
+    state = _jwt.encode(
+        {"k": "bitrix24", "tid": tenant, "portal": portal.strip(), "exp": int(time.time()) + 600},
+        saas_auth.APP_SECRET, algorithm="HS256",
+    )
+    try:
+        return RedirectResponse(bitrix24_oauth.authorization_url(portal, state))
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@app.get("/auth/bitrix24/callback")
+async def bitrix24_oauth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse("/webapp/?bitrix24_error=denied")
+    if not code:
+        return JSONResponse({"error": "нет code"}, status_code=400)
+
+    import jwt as _jwt
+    try:
+        payload = _jwt.decode(state, saas_auth.APP_SECRET, algorithms=["HS256"])
+        if payload.get("k") != "bitrix24":
+            raise ValueError
+        tenant_id = payload.get("tid", "default")
+        portal = payload.get("portal", "")
+    except Exception:
+        return JSONResponse({"error": "неверный state"}, status_code=400)
+
+    from src.integrations import bitrix24_oauth
+    try:
+        tokens = await bitrix24_oauth.exchange_code(code, portal)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    saas_context.set_tenant(tenant_id)
+    domain = tokens.get("domain", portal)
+    connections.save({"name": "bitrix24", "type": "oauth", "fields": tokens,
+                       "note": f"Bitrix24 OAuth ({domain})" if domain else "Bitrix24 OAuth"})
+    return RedirectResponse("/webapp/?connected=bitrix24")
+
+
+@app.post("/auth/bitrix24/disconnect")
+async def bitrix24_oauth_disconnect(request: Request):
+    uid = current_user(request)
+    if not uid:
+        return JSONResponse({"error": "не авторизован"}, status_code=401)
+    from src.integrations import bitrix24_oauth
+    bitrix24_oauth.revoke()
+    return JSONResponse({"ok": True})
+
+
 @app.post("/auth/dev-login")
 async def dev_login(request: Request):
     """Локальный вход без GitHub (только если ALLOW_DEV_LOGIN=1)."""
