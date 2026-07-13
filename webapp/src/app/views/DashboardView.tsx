@@ -16,6 +16,7 @@ interface DashboardViewProps {
 const TABS = [
   { id: "office",   label: "Офис" },
   { id: "business", label: "Бизнес" },
+  { id: "transparency", label: "Прозрачность" },
 ]
 
 export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps) {
@@ -73,7 +74,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
     <ViewShell>
       <ViewHead title="Сводка" sub={state.ready ? "Состояние компании на текущий момент" : "Офис ожидает бриф"} />
       <SubTabs tabs={TABS} active={tab} onChange={setTab} />
-      {tab === "business" ? <BusinessDashboard /> : (
+      {tab === "business" ? <BusinessDashboard /> : tab === "transparency" ? <TransparencyTab /> : (
       <ViewBody>
         {/* Gap до цели — заголовок Command Center: разрыв между тем, где
             компания хочет быть, и где она сейчас (BOS §3 Gap Analysis). Раньше
@@ -267,4 +268,145 @@ const linkCard: React.CSSProperties = {
   flex: "1 1 160px", textAlign: "left", fontSize: 13, color: "var(--text-dim)",
   background: "var(--surface-soft)", border: "1px solid var(--hairline)",
   borderRadius: "var(--radius-md)", padding: "14px 16px", cursor: "pointer",
+}
+
+// ── Прозрачность: намерения владельца + хронология решений офиса ──────────────
+// Раньше это существовало только как API (/api/intents, /api/observability/*) —
+// намерение владельца интерпретировалось молча, а решения CEO нельзя было
+// проследить нигде, кроме как через curl. Здесь — минимальный, но полный путь:
+// список → клик по решению → цепочка промпт→исполнение→изменение мира.
+const SOURCE_UI: Record<string, { label: string; color?: string }> = {
+  decision: { label: "решение", color: "var(--mercury-a)" },
+  prompt:   { label: "промпт" },
+  trace:    { label: "исполнение" },
+  snapshot: { label: "срез мира", color: "var(--success)" },
+}
+
+function TransparencyTab() {
+  const [intents, setIntents] = useState<any[]>([])
+  const [timeline, setTimeline] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [openDecision, setOpenDecision] = useState<string | null>(null)
+  const [chain, setChain] = useState<any>(null)
+
+  useEffect(() => {
+    Promise.all([api.intents(), api.observabilityTimeline(150)]).then(([i, t]) => {
+      setIntents(i.intents || [])
+      setTimeline([...(t.timeline || [])].reverse())
+      setLoading(false)
+    })
+  }, [])
+
+  const openChain = async (id: string) => {
+    if (openDecision === id) { setOpenDecision(null); return }
+    setOpenDecision(id)
+    setChain(null)
+    const d = await api.observabilityDecision(id)
+    setChain(d)
+  }
+
+  if (loading) return <ViewBody><div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div></ViewBody>
+
+  return (
+    <ViewBody>
+      <SectionLabel>Намерения владельца · {intents.length}</SectionLabel>
+      {intents.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--faint)", marginBottom: 24 }}>
+          Пока нет ни одного намерения — появится, когда вы напишете офису задачу в чате
+          или пройдёте онбординг.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 8, marginBottom: 24 }}>
+          <ShowMore items={intents} initial={4} render={(it: any) => (
+            <Card key={it.id} style={{ padding: "12px 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ fontSize: 12.5, color: "var(--text)", flex: 1 }}>{it.text}</div>
+                <Pill color={it.status === "interpreted" ? "var(--success)" : "var(--warning)"}>
+                  {it.status === "interpreted" ? "понято" : "получено"}
+                </Pill>
+              </div>
+              {it.interpretation?.directive && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 7, borderTop: "1px solid var(--hairline)", paddingTop: 7 }}>
+                  → {it.interpretation.directive}
+                  {it.interpretation.tasks_added > 0 && ` · задач добавлено: ${it.interpretation.tasks_added}`}
+                </div>
+              )}
+            </Card>
+          )} />
+        </div>
+      )}
+
+      <SectionLabel>Хронология офиса · последние {timeline.length}</SectionLabel>
+      {timeline.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--faint)" }}>
+          Хронология пуста за последний час — офис ничего не делал или на паузе.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 6 }}>
+          {timeline.map((e: any, i: number) => {
+            const src = SOURCE_UI[e.source] || { label: e.source }
+            const clickable = e.source === "decision"
+            return (
+              <div key={i}>
+                <Card
+                  onClick={clickable ? () => openChain(e.id) : undefined}
+                  style={{ padding: "9px 13px", display: "flex", alignItems: "center", gap: 10,
+                    cursor: clickable ? "pointer" : "default" }}>
+                  <Pill color={src.color}>{src.label}</Pill>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", flex: 1, minWidth: 0,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {e.kind}{e.made_by ? ` · ${e.made_by}` : e.agent ? ` · ${e.agent}` : ""}
+                    {e.thought ? ` — ${e.thought}` : ""}
+                  </div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--faint)", flexShrink: 0 }}>
+                    {e.t ? new Date(e.t * 1000).toLocaleTimeString("ru-RU") : ""}
+                  </div>
+                </Card>
+                {openDecision === e.id && (
+                  <Card style={{ marginTop: 4, padding: "14px 16px", background: "var(--surface-soft)" }}>
+                    {!chain ? (
+                      <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка цепочки…</div>
+                    ) : chain.error ? (
+                      <div style={{ fontSize: 12, color: "var(--faint)" }}>Не найдено.</div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+                        <div>
+                          <div style={{ color: "var(--muted)", fontSize: 10.5, textTransform: "uppercase", marginBottom: 3 }}>Мысль решения</div>
+                          <div style={{ color: "var(--text-dim)" }}>{chain.decision?.thought || "—"}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                          <span style={{ color: "var(--muted)" }}>Уверенность: <b style={{ color: "var(--text)" }}>{chain.decision?.confidence ?? "—"}%</b></span>
+                          <span style={{ color: "var(--muted)" }}>Промпт: <b style={{ color: "var(--text)" }}>
+                            {chain.prompt ? `${chain.prompt.system_chars}+${chain.prompt.task_chars} симв.` : "не найден"}</b></span>
+                          <span style={{ color: "var(--muted)" }}>Исполнение: <b style={{ color: "var(--text)" }}>{(chain.trace || []).length} записей</b></span>
+                        </div>
+                        {chain.world_diff && (
+                          <div>
+                            <div style={{ color: "var(--muted)", fontSize: 10.5, textTransform: "uppercase", marginBottom: 3 }}>Что изменилось в мире</div>
+                            {chain.world_diff.note ? (
+                              <div style={{ color: "var(--faint)" }}>{chain.world_diff.note}</div>
+                            ) : chain.world_diff.empty ? (
+                              <div style={{ color: "var(--faint)" }}>Мир не изменился.</div>
+                            ) : (
+                              <div className="mono" style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.6, whiteSpace: "pre-line" }}>
+                                {[
+                                  ...Object.keys(chain.world_diff.added || {}).map(k => `+ ${k}`),
+                                  ...Object.keys(chain.world_diff.removed || {}).map(k => `− ${k}`),
+                                  ...Object.keys(chain.world_diff.changed || {}).map(k => `~ ${k}`),
+                                ].slice(0, 8).join("\n") || "без изменений"}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Card>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </ViewBody>
+  )
 }

@@ -123,6 +123,52 @@ function GoalsTab() {
               </div>
             </Card>
           )}
+
+          {(world.metrics || []).length > 0 && (
+            <>
+              <SectionLabel>Метрики (Measurement)</SectionLabel>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 20 }}>
+                {world.metrics.map((m: any, i: number) => (
+                  <Card key={m.metric_id || i} style={{ padding: "12px 14px" }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                      {m.title || m.metric_id}
+                    </div>
+                    <div className="mono" style={{ fontSize: 18, color: "var(--text)", marginBottom: 2 }}>{String(m.value ?? "—")}</div>
+                    <Pill color={m.source === "fact" ? "var(--success)" : "var(--warning)"}>
+                      {m.source === "fact" ? "факт" : "оценка"}
+                    </Pill>
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
+
+          {(world.projects || []).length > 0 && (
+            <>
+              <SectionLabel>Проекты (что оставили после себя)</SectionLabel>
+              <div style={{ display: "grid", gap: 8, marginBottom: 20 }}>
+                {world.projects.map((p: any) => (
+                  <Card key={p.id} style={{ padding: "12px 14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <div style={{ fontSize: 13, color: "var(--text)" }}>{p.title}</div>
+                      <Pill color={p.status === "active" ? "var(--success)" : undefined}>{p.status}</Pill>
+                    </div>
+                    {p.left_behind && Object.keys(p.left_behind).length > 0 && (
+                      <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 6 }}>
+                        {Object.entries(p.left_behind).map(([k, v]) => `${k}: ${v}`).join(" · ")}
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
+
+          {bs.open_questions > 0 && (
+            <div style={{ fontSize: 11.5, color: "var(--warning)", marginBottom: 20 }}>
+              ❓ Открытых вопросов клиенту: {bs.open_questions}
+            </div>
+          )}
         </>
       )}
 

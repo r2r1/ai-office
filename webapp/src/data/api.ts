@@ -126,6 +126,10 @@ export const api = {
   acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null),
   rejectInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/reject`, {}, null),
   gap: () => getJSON<{ gaps: any[] }>("/api/gap", { gaps: [] }),
+  decisions: () => getJSON<{ decisions: any[] }>("/api/decisions", { decisions: [] }),
+  observabilityTimeline: (limit = 200) =>
+    getJSON<{ timeline: any[] }>(`/api/observability/timeline?limit=${limit}`, { timeline: [] }),
+  observabilityDecision: (id: string) => getJSON<any>(`/api/observability/decision/${id}`, null),
   // ── Бизнес-дашборд: системные карточки + кастомные графики по запросу ──
   dashboard: () => getJSON<{ widgets: any[] }>("/api/dashboard", { widgets: [] }),
   dashboardRequest: (text: string) =>
