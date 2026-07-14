@@ -93,10 +93,12 @@ def test_no_stack_rotation_helpers_left():
 
 def test_website_query_routes_to_single_system_skill():
     """Любая формулировка «построить сайт» маршрутизируется в ЕДИНСТВЕННЫЙ
-    системный скилл сайта — не разбегается по 4 конкурирующим стекам."""
+    системный скилл сайта — не разбегается по 4 конкурирующим стекам.
+    2026-07-14: роль сборки сайта — только developer (designer вернулась
+    отдельной ролью для бренд-бука ДО кода, не строит сайт сама)."""
     for need in ("построить сайт с 3D-эффектами", "сделать премиальный лендинг",
                  "лендинг с анимациями при скролле"):
-        got = skills.match(need, role="designer")
+        got = skills.match(need, role="developer")
         assert got is not None, f"нет скилла под {need!r}"
         assert got.id == "vite_react_site", f"{need!r} → {got.id}, ожидался vite_react_site"
 
@@ -126,18 +128,23 @@ def test_style_line_self_heal_idempotent():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
-def test_task_context_contains_stack_hint_for_designer():
-    """Подсказка про стек есть у designer/developer (текст зависит от
-    site_builder.build_allowed() — сборка вкл/выкл — но она всегда присутствует)
-    и отсутствует у marketer."""
+def test_task_context_contains_stack_hint_for_developer_only():
+    """Подсказка про стек (текст зависит от site_builder.build_allowed() — сборка
+    вкл/выкл — но она всегда присутствует) — ТОЛЬКО у developer, единственной
+    роли, которая строит сайт. 2026-07-14: designer вернулась отдельной ролью
+    (бренд-бук ДО кода, roles.py.ROLE_META["designer"]) — раньше подсказка
+    ошибочно шла и ей (когда designer была алиасом developer), что толкало её
+    строить сайт самой, нарушая границу артефактов (plan._derive_artifacts)."""
     ctx.set_tenant("stack_hint_unit")
     from src.saas import context
     context.write_json("brief.json", {"niche": "кухни", "goal": "сайт", "audience": "семьи"})
     from src.office import prompt_builder
-    tc = prompt_builder.task_context("designer", "сделай сайт")
+    tc = prompt_builder.task_context("developer", "сделай сайт")
     assert "use_skill" in tc and ("системным стеком" in tc or "сборка" in tc.lower())
     tc_marketer = prompt_builder.task_context("marketer", "напиши оффер")
     assert "React + Vite + Framer Motion" not in tc_marketer
+    tc_designer = prompt_builder.task_context("designer", "выбери направление")
+    assert "React + Vite + Framer Motion" not in tc_designer
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 

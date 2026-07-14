@@ -87,10 +87,16 @@ def _derive_artifacts(role: str, title: str) -> list[str]:
     t = (title or "").lower()
     if needs.is_bot_reference(t):
         return ["bot"]
-    if role in ("designer", "developer"):
-        # designer/developer по умолчанию пишут в site/ (тот же инвертированный
+    if role == "developer":
+        # developer по умолчанию пишет в site/ (тот же инвертированный
         # безопасный принцип, что был в touches_site) — кроме бот-задач (выше).
         return ["site"]
+    if role == "designer":
+        # designer вернулась (2026-07-14) как отдельная роль, но артефакт — НЕ
+        # site/: она производит docs/brand_book.md ДО того, как developer начнёт
+        # писать код (см. roles.py.ROLE_META["designer"], builtin_skills/brand_book.md).
+        # Тот же "doc", что у marketer/analyst — не участвует в site-мьютексе.
+        return ["doc"]
     if role == "integrator":
         return ["integration"]
     return ["doc"]

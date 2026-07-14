@@ -181,14 +181,24 @@ def task_context(role: str, task: str, skill: str = "",
     portfolio_section = portfolio_block(role)
     lessons_section = lessons.context_block(role)
     knowledge_section = knowledge.context_block(task, department=department)
+    # Вкус владельца (issue: designer/brand_book) — только ролям, которым реально
+    # предстоит решать о тоне/палитре; остальным (salesman, analyst...) не нужно.
+    creative_section = ""
+    if role in ("designer", "marketer", "developer"):
+        from src.office import creative_brief
+        block = creative_brief.prompt_block()
+        creative_section = f"\n{block}\n" if block else ""
     # Системный стек сайта — ОДИН на всю платформу (React + Vite + Framer Motion,
     # см. builtin_skills/vite_react_site.md), без ротации по нише: раньше без
     # детерминированной подсказки designer/developer всегда сваливались в
     # vanilla-HTML («сайт всегда делается на html» — жалоба владельца), а после
     # ротации по 4 стекам получили непредсказуемое качество на скилл (Alpine —
     # порядок CDN-плагинов, esm.sh — рассинхрон importmap). Один стек — предсказуемо.
+    # ⚠️ ТОЛЬКО developer — designer вернулась как отдельная роль (2026-07-14),
+    # но она НЕ пишет в site/ (см. roles.py.ROLE_META["designer"]) — эта подсказка
+    # раньше толкала и designer строить сайт, что напрямую нарушало её границу.
     stack_line = ""
-    if role in ("designer", "developer"):
+    if role == "developer":
         from src.office import site_builder
         if site_builder.build_allowed():
             stack_line = ("Строишь/правишь сайт — вызови use_skill за системным стеком платформы "
@@ -211,7 +221,7 @@ def task_context(role: str, task: str, skill: str = "",
         f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
         f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}{stack_line}"
         f"Твоя задача от руководителя: {task}\n"
-        f"{tdd_section}{portfolio_section}{knowledge_section}{lessons_section}\n"
+        f"{tdd_section}{portfolio_section}{knowledge_section}{lessons_section}{creative_section}\n"
         f"Если workspace непуст — начни с list_files, прежде чем писать новый файл, "
         f"чтобы не создать дубликат или не потерять чужую работу.\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "

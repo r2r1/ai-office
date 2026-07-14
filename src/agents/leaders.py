@@ -19,6 +19,7 @@ from src.agents.orchestrator import _parse_json
 # company_system с {title}/{roles_desc} и слотом Brief, логируется в prompts.jsonl).
 
 _ROLE_DESC = {
+    "designer": "designer — бренд-бук/референсы/палитра ДО кода, утверждение с владельцем (не пишет код/сайт)",
     "developer": "developer — КАСТОМНЫЙ код (НЕ нужен для обычного бота записи), сайты, автоматизации",
     "integrator": "integrator — реальные действия во внешних сервисах + ЗАПУСК готового бота записи (launch_bot)",
     "architect": "architect — техническое проектирование, ТЗ",

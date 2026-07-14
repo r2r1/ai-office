@@ -520,11 +520,11 @@ function RolesTab() {
 // ── Скиллы: каталог + установка из любого источника (как npx skills) ──────────
 const ROLE_RU: Record<string, string> = {
   cto: "CTO", cmo: "CMO", sales_lead: "Head of Sales", developer: "Разработчик",
-  // designer как отдельная нанимаемая роль слита с developer (roles.py) — но
-  // строка "designer" остаётся в roles: скиллов как алиас поиска (защищено
-  // тестами test_design_skills.py), поэтому в UI просто показываем то же имя,
-  // что у developer, а не сырое "designer" (было найдено при живом аудите).
-  designer: "Разработчик",
+  // designer вернулась как отдельная нанимаемая роль (roles.py, 2026-07-14) —
+  // готовит бренд-бук ДО кода, developer строит сайт. Раньше была слита с
+  // developer (один артефакт site/, дублирующая работа) — теперь разные
+  // артефакты (docs/brand_book.md vs site/), конфликт не повторяется.
+  designer: "Дизайнер",
   integrator: "Интегратор", marketer: "Маркетолог",
   analyst: "Аналитик", salesman: "Продажник", researcher: "Ресёрчер",
   strategist: "Стратег", architect: "Архитектор", hr: "HR",

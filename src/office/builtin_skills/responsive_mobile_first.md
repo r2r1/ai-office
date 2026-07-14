@@ -3,7 +3,7 @@ id: responsive_mobile_first
 title: Адаптив — mobile-first вёрстка
 description: Корректный вид на 360/768/1024/1440, гибкие сетки, тач-цели — сайт не ломается на телефоне.
 keywords: адаптив, мобильн, responsive, mobile, телефон, медиа, media query, flex, grid, тач
-roles: designer, developer
+roles: developer
 ---
 СКИЛЛ: mobile-first адаптивная вёрстка.
 

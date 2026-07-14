@@ -3,7 +3,7 @@ id: web_accessibility
 title: Доступность сайта (a11y)
 description: Контраст, alt, aria, клавиатура, prefers-reduced-motion — базовая доступность без боли.
 keywords: доступност, accessibility, a11y, контраст, aria, клавиатур, screen reader, скринридер, alt
-roles: designer, developer
+roles: developer
 ---
 СКИЛЛ: базовая веб-доступность (быстрые обязательные вещи).
 

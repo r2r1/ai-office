@@ -3,7 +3,7 @@ id: analytics_counter
 title: Подключение счётчика аналитики
 description: Как правильно поставить Яндекс.Метрику / GA4 / VK Pixel на сайт — сниппет в head существующих страниц, БЕЗ отдельных страниц-заглушек.
 keywords: метрик, аналитик, счётчик, счетчик, pixel, пиксел, ga4, analytics, отслежива, статистик посещ
-roles: integrator, developer, designer
+roles: integrator, developer
 ---
 СКИЛЛ: подключить счётчик веб-аналитики (Яндекс.Метрика / GA4 / VK Pixel) на сайт.
 

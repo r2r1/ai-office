@@ -34,10 +34,13 @@ def test_pick_for_spreads_across_different_niches():
 
 def test_names_match_landing_conversion_catalog():
     """Machine-readable список должен 1:1 совпадать с человекочитаемым каталогом
-    в builtin_skills/landing_conversion.md — иначе designer декодирует «Стиль: X»
-    в несуществующее направление."""
+    в builtin_skills/brand_book.md — иначе designer декодирует «Стиль: X»
+    в несуществующее направление. 2026-07-14: каталог переехал из
+    landing_conversion.md в brand_book.md вместе с ролью designer (см.
+    docs/architecture-improvements.md — designer теперь отдельная роль,
+    владеет выбором стиля ДО кода)."""
     skill_md = (Path(__file__).resolve().parents[1] /
-                "src/office/builtin_skills/landing_conversion.md").read_text(encoding="utf-8")
+                "src/office/builtin_skills/brand_book.md").read_text(encoding="utf-8")
     for name in design_style.DIRECTIONS:
         assert name in skill_md, f"направление {name!r} есть в design_style.py, но не в скилле"
 
