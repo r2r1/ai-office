@@ -261,6 +261,15 @@ export default function App() {
                 zIndex: 100, background: "var(--surface-card)",
                 border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-lg)",
                 boxShadow: "var(--shadow)", padding: "14px 16px", maxWidth: 520,
+                // Явно завязано на digestOpen, НЕ на факт присутствия в DOM (issue #12):
+                // если AnimatePresence по какой-то причине не завершит exit-анимацию
+                // (например setDigestOpen(false) прилетел в том же тике, что смена view,
+                // см. эффект выше), «призрачный» узел остаётся в DOM невидимым, но с
+                // pointer-events по умолчанию — и перехватывает клики по NavRail/контенту
+                // под собой НАВСЕГДА, до ручного location.reload(). Раньше это заметили
+                // только визуально («не то, что должно висеть поверх контента»), но не
+                // как потерю кликабельности НАВСЕГДА — реальный кейс живого прогона.
+                pointerEvents: digestOpen ? "auto" : "none",
               }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
@@ -305,6 +314,8 @@ export default function App() {
                 zIndex: 100, background: "var(--surface-card)",
                 border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-lg)",
                 boxShadow: "var(--shadow)", padding: "16px", width: 300, maxHeight: "70vh", overflowY: "auto",
+                // См. комментарий у digest-попапа выше (issue #12) — тот же защитный приём.
+                pointerEvents: understandingOpen ? "auto" : "none",
               }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>Статус офиса</div>
