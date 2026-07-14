@@ -188,6 +188,13 @@ def task_context(role: str, task: str, skill: str = "",
         from src.office import creative_brief
         block = creative_brief.prompt_block()
         creative_section = f"\n{block}\n" if block else ""
+    # Карта сайта (issue #13 "Не в этой итерации" → реализовано) — только
+    # designer/developer: тем, кто решает/строит по многостраничной структуре.
+    sitemap_section = ""
+    if role in ("designer", "developer"):
+        from src.office import sitemap
+        sblock = sitemap.prompt_block()
+        sitemap_section = f"\n{sblock}\n" if sblock else ""
     # Системный стек сайта — ОДИН на всю платформу (React + Vite + Framer Motion,
     # см. builtin_skills/vite_react_site.md), без ротации по нише: раньше без
     # детерминированной подсказки designer/developer всегда сваливались в
@@ -221,7 +228,7 @@ def task_context(role: str, task: str, skill: str = "",
         f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
         f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}{stack_line}"
         f"Твоя задача от руководителя: {task}\n"
-        f"{tdd_section}{portfolio_section}{knowledge_section}{lessons_section}{creative_section}\n"
+        f"{tdd_section}{portfolio_section}{knowledge_section}{lessons_section}{creative_section}{sitemap_section}\n"
         f"Если workspace непуст — начни с list_files, прежде чем писать новый файл, "
         f"чтобы не создать дубликат или не потерять чужую работу.\n"
         f"Выдай конкретный готовый результат. Если нужны свежие данные — web_search "
