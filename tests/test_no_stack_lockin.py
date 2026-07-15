@@ -73,6 +73,35 @@ def test_brief_block_serializes_constraints():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+def test_brief_block_serializes_business_stage_with_confirmation_flag():
+    """business_stage (issue #21 — гипотеза о стадии бизнеса с лендинга, владелец
+    мог подтвердить/поправить) должна явно помечаться как предположение или
+    подтверждённый факт — агент не должен принять эвристику за бесспорный факт."""
+    ctx.set_tenant("brief_stage_unit")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "потолки", "goal": "сайт",
+        "business_stage": {"key": "growth", "label": "в активном росте",
+                            "reason": "аналитика уже подключена", "confirmed": False},
+    })
+    block = prompt_builder.brief_block()
+    assert "в активном росте" in block
+    assert "предположение" in block.lower()
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_brief_block_marks_confirmed_business_stage_differently():
+    ctx.set_tenant("brief_stage_confirmed_unit")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "потолки", "goal": "сайт",
+        "business_stage": {"key": "growth", "label": "в активном росте", "confirmed": True},
+    })
+    block = prompt_builder.brief_block()
+    assert "подтверждено владельцем" in block
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):

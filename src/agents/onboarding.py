@@ -188,6 +188,10 @@ def build_brief_structured(mode: str, answers: list[dict], scan_result: dict | N
         "research_question": research_question,
         "summary": summary,
         "scan": scan_result or None,
+        # Гипотеза о стадии бизнеса (issue #21) — та же логика, что в
+        # /api/brief/start: если она пришла со сканом (в т.ч. поправленная
+        # владельцем на лендинге), кладём отдельным полем для prompt_builder.brief_block().
+        "business_stage": (scan_result or {}).get("stage"),
     }
 
 # Тексты онбординга — policies/onboarding_{questions,brief}.md. Слот Brief НЕ

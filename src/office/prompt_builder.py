@@ -67,6 +67,13 @@ def brief_block() -> str:
         parts.append(f"Аудитория — кому продаёт: {b['audience']}")
     if b.get("assets"):
         parts.append(f"Что есть: {b['assets']}")
+    stage = b.get("business_stage") or {}
+    if stage.get("label"):
+        # Гипотеза (LLM/эвристика по автоскану сайта, issue #19/#21), владелец мог
+        # подтвердить/поправить на лендинге — НЕ факт из брифа, поэтому явная пометка.
+        confirmed = " (подтверждено владельцем)" if stage.get("confirmed") else " (предположение, не факт)"
+        parts.append(f"Вероятная стадия бизнеса{confirmed}: {stage['label']}"
+                     + (f" — {stage['reason']}" if stage.get("reason") else ""))
     if b.get("constraints"):
         # Раньше тонуло внутри summary (одной строкой среди прочего) — архитектор/
         # воркеры не видели явно, что клиент уже пользуется (CRM/таблицы/рассылки/

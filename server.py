@@ -721,6 +721,11 @@ async def brief_start(request: Request):
 
     try:
         brief_data = await onboarding.build_brief(effective_input, qa_pairs, publish=bus.publish)
+        # Гипотеза о стадии бизнеса (issue #21) — если владелец её видел/поправил на
+        # лендинге, она уже часть scan_result.stage (ScanBox мутирует sessionStorage
+        # при клике на кнопку-корректировку); не переспрашиваем и не теряем правку.
+        if scan_result and scan_result.get("stage"):
+            brief_data["business_stage"] = scan_result["stage"]
         if scan_url:
             brief_data["scan_url"] = scan_url
         brief.set_brief(brief_data)  # сигналит офису о старте
