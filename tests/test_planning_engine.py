@@ -53,6 +53,35 @@ def test_fallback_plan_is_deterministic():
     assert len(generic) == 1 and generic[0]["role"] == "marketer"
 
 
+def test_fallback_plan_audits_existing_site_for_growth_stage():
+    """Issue #22 branching: growth/mature клиент уже пользуется сайтом (иначе
+    стадия не определилась бы так) — план не должен пересобирать его вслепую."""
+    plan = pe.fallback_plan("нужен сайт", business_stage="growth")
+    assert [t["role"] for t in plan] == ["analyst", "developer"]
+    assert "точки роста" in plan[0]["title"].lower()
+    assert "не переписывать" in plan[1]["title"].lower() or "точечно" in plan[1]["title"].lower()
+
+
+def test_fallback_plan_mature_stage_same_as_growth():
+    plan = pe.fallback_plan("сделай лендинг", business_stage="mature")
+    assert [t["role"] for t in plan] == ["analyst", "developer"]
+
+
+def test_fallback_plan_ignores_stage_when_no_site_requested():
+    """business_stage не должна влиять на бот-путь или общий путь — только на явную
+    просьбу сайта, иначе "growth"-клиент, просящий бота, получил бы неправильный план."""
+    assert [t["role"] for t in pe.fallback_plan("сделай бот записи", business_stage="growth")] == \
+        ["marketer", "integrator"]
+
+
+def test_fallback_plan_launch_and_idea_stage_unaffected():
+    """launch/idea/пустая стадия — прежнее поведение (клиент ещё не пользуется
+    сайтом, пересборка с нуля уместна)."""
+    for stage in ("launch", "idea", ""):
+        assert [t["role"] for t in pe.fallback_plan("нужен лендинг", business_stage=stage)] == \
+            ["marketer", "developer"]
+
+
 def test_has_orphan_tasks():
     ctx.set_tenant("pe_unit_test")
     from src.saas import context
