@@ -31,6 +31,13 @@ const ScenarioView  = lazy(() => import("./views/ScenarioView").then(m => ({ def
 const ResultsView   = lazy(() => import("./views/ResultsView").then(m => ({ default: m.ResultsView })))
 const OnboardingFlow = lazy(() => import("./onboarding/OnboardingFlow").then(m => ({ default: m.OnboardingFlow })))
 
+// Разбивка Company Understanding по доменам (understanding.py.payload()["domains"])
+// — backend уже считал это, но фронт нигде не показывал (найдено при добавлении
+// Confidence): "Продажи 12%" мотивирует подключить CRM сильнее общего процента.
+const DOMAIN_LABELS: Record<string, string> = {
+  business: "Бизнес", marketing: "Маркетинг", sales: "Продажи", finance: "Финансы", team: "Команда",
+}
+
 /** Маленький чип-счётчик слоя памяти. */
 function MemChip({ label }: { label: string }) {
   return (
@@ -356,6 +363,40 @@ export default function App() {
               <div style={{ fontSize: 10.5, color: "var(--faint)", marginTop: -6, marginBottom: 8 }}>
                 Что офис узнал о вас на онбординге (не путать со «Здоровьем работы» выше)
               </div>
+
+              {understanding.domains && Object.keys(understanding.domains).length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  {Object.entries(DOMAIN_LABELS).map(([key, label]) => {
+                    const v = understanding.domains[key] ?? 0
+                    return (
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 10.5, color: "var(--text-dim)", width: 70, flexShrink: 0 }}>{label}</span>
+                        <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--hairline)", overflow: "hidden" }}>
+                          <div style={{ width: `${v}%`, height: "100%", borderRadius: 2,
+                            background: v >= 60 ? "#a0e0ab" : v >= 30 ? "#ffac2e" : "var(--faint)" }} />
+                        </div>
+                        <span className="mono" style={{ fontSize: 9.5, color: "var(--faint)", width: 26, textAlign: "right" }}>{v}%</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {typeof understanding.confidence === "number" && (
+                <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--hairline)" }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>
+                    🎯 Уверенность в выводах — {understanding.confidence}%
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--faint)", marginBottom: 6 }}>
+                    Насколько можно доверять оценке (не путать с «Данные о бизнесе» выше — там сколько
+                    известно, здесь — насколько это проверено, а не просто со слов)
+                  </div>
+                  {(understanding.confidence_reasons || []).map((r: string, i: number) => (
+                    <div key={i} style={{ fontSize: 10.5, color: "var(--text-dim)", marginBottom: 2 }}>· {r}</div>
+                  ))}
+                </div>
+              )}
+
               {understanding.items.map((item: any, i: number) => (
                 <div key={i} style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 5, display: "flex", gap: 6 }}>
                   <span>{item.icon}</span><span>{item.label}</span>

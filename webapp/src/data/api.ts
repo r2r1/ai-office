@@ -113,7 +113,8 @@ export const api = {
   models: () => getJSON<any>("/api/models", { default: "", presets: [], per_agent: {}, per_role: {} }),
   setModel: (model: string) => postJSON<any>("/api/model", { model }, null),
   digest: () => getJSON<any>("/api/digest", { items: [], count: 0, since: "", is_first: true }),
-  understanding: () => getJSON<any>("/api/understanding", { score: 0, items: [], missing: [] }),
+  understanding: () => getJSON<any>("/api/understanding",
+    { score: 0, items: [], missing: [], domains: {}, confidence: 0, confidence_reasons: [] }),
   knowledge: () => getJSON<any>("/api/knowledge", { facts: [], count: 0, layers: { global: 0, user: 0, department: 0 } }),
   departmentEvents: () => getJSON<any>("/api/department-events", { events: [], pending: 0 }),
   // ── BOS-ядро: World Model, цели, проекты, спецификация, намерения ──

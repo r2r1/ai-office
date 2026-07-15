@@ -217,6 +217,20 @@ def test_ru_plural_agrees_with_number():
     assert company_scan._ru_plural(21) == "точку роста"
 
 
+def test_sales_domain_not_inflated_by_crm_router_stub():
+    """Реальный баг, найден при добавлении Confidence: Tool Router capability-
+    заглушка "crm" (src/integrations/crm.py, cred_fields=[]) всегда "connected"
+    независимо от клиента — раньше ЛЮБОЙ тенант получал +60 к домену "sales" без
+    единого реального подключения CRM."""
+    from src.office import understanding
+    ctx.set_tenant("understanding_sales_no_stub_unit")
+    from src.saas import context
+    context.write_json("brief.json", {})
+    payload = understanding.payload()
+    assert payload["domains"]["sales"] < 60
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def test_understanding_domains_present_and_bounded():
     from src.office import understanding
     ctx.set_tenant("understanding_domains_unit")
@@ -227,6 +241,49 @@ def test_understanding_domains_present_and_bounded():
     for key in ("business", "marketing", "sales", "finance", "team"):
         assert key in payload["domains"]
         assert 0 <= payload["domains"][key] <= 100
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+# ── Confidence ≠ Understanding score (issue #24) ─────────────────────────────
+
+def test_confidence_present_and_bounded():
+    from src.office import understanding
+    ctx.set_tenant("understanding_confidence_unit1")
+    from src.saas import context
+    context.write_json("brief.json", {"niche": "потолки", "goal": "сайт", "summary": "тест"})
+    payload = understanding.payload()
+    assert "confidence" in payload
+    assert 0 <= payload["confidence"] <= 100
+    assert isinstance(payload["confidence_reasons"], list)
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_confidence_higher_with_verified_scan_than_bare_summary():
+    """Self-report ("сказал сам") должно весить МЕНЬШЕ, чем проверенный автоскан —
+    это и есть весь смысл Confidence, отдельный от Understanding score."""
+    from src.office import understanding
+    from src.saas import context
+
+    ctx.set_tenant("understanding_confidence_unit2")
+    context.write_json("brief.json", {"summary": "тест"})
+    conf_bare = understanding.payload()["confidence"]
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+    ctx.set_tenant("understanding_confidence_unit3")
+    context.write_json("brief.json", {"summary": "тест", "scan": {"ok": True, "url": "https://x.com"}})
+    conf_scanned = understanding.payload()["confidence"]
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+    assert conf_scanned > conf_bare
+
+
+def test_confidence_zero_signals_stays_low():
+    from src.office import understanding
+    from src.saas import context
+    ctx.set_tenant("understanding_confidence_unit4")
+    context.write_json("brief.json", {})
+    payload = understanding.payload()
+    assert payload["confidence"] <= 20
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 

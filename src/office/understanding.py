@@ -102,8 +102,15 @@ def payload() -> dict:
     # набор сигналов, сгруппированный иначе, чтобы клиент видел, ЧТО именно
     # непонятно ("Продажи 12%" сильнее мотивирует подключить CRM, чем общий %).
     has_scan = bool(b.get("scan") and b["scan"].get("ok"))
-    crm_connected = any(s.get("connected") for s in catalog if "crm" in s.get("name", "").lower()
-                        or "amo" in s.get("name", "").lower() or "bitrix" in s.get("name", "").lower())
+    # ⚠️ Реальная CRM-интеграция (amocrm/bitrix24 — cred_fields/oauth_url непустые),
+    # НЕ абстрактная Tool Router-заглушка способности "crm" (src/integrations/
+    # crm.py, cred_fields=[]) — та всегда "connected" независимо от клиента и
+    # раньше давала ЛЮБОМУ тенанту +60 к домену "sales" без единого реального
+    # подключения (реальный баг, найден при добавлении Confidence — тот же
+    # сигнал использует и она).
+    crm_connected = any(s.get("connected") for s in catalog
+                        if (s.get("cred_fields") or s.get("oauth_url"))
+                        and any(k in s.get("name", "").lower() for k in ("crm", "amo", "bitrix")))
     domains = {
         "business": 40 + (30 if b.get("summary") else 0) + (30 if has_scan else 0),
         "marketing": 20 + (20 if has_scan else 0) + (20 if has_strategy else 0) +
@@ -115,9 +122,49 @@ def payload() -> dict:
     }
     domains = {k: min(100, v) for k, v in domains.items()}
 
+    # Интеграции БЕЗ cred_fields (website, и Tool Router-заглушки capability-
+    # провайдеров crm/ads/payments/deploy/invoicing — cred_fields=[], см. их
+    # модули в src/integrations/) всегда "подключены" независимо от реальных
+    # действий клиента (registry.is_connected: "без кредов → True") — не
+    # засчитываются как верифицированный внешний сигнал для Confidence, иначе
+    # пустой бриф БЕЗ единого реального подключения уже давал бы бонусные очки.
+    verified_connections = [s for s in connected if s.get("cred_fields") or s.get("oauth_url")]
+    confidence, confidence_reasons = _confidence(b, verified_connections, crm_connected, has_research)
+
     return {
         "score": score,
         "items": items,
         "missing": missing[:6],
         "domains": domains,
+        "confidence": confidence,
+        "confidence_reasons": confidence_reasons,
     }
+
+
+def _confidence(b: dict, connected: list, crm_connected: bool, has_research: bool) -> tuple[int, list[str]]:
+    """Confidence ≠ Understanding score выше. Score — СКОЛЬКО данных есть (широта:
+    заполнен ли бриф, написаны ли документы). Confidence — НАСКОЛЬКО ИМ МОЖНО
+    ДОВЕРЯТЬ: самоотчёт клиента в текстовом поле ("сказал сам") весит меньше, чем
+    факт, который офис ПРОВЕРИЛ САМ (автоскан сайта — реальные детектированные
+    маркеры, не пересказ; подключённая интеграция — реальный аккаунт, не текст
+    "у нас есть CRM"). Цель метрики — product-тезис "не ради продукта, а ради
+    качества рекомендаций": владелец должен понимать, ПОЧЕМУ подключение CRM
+    поднимает число, а не просто механику ради механики.
+    """
+    reasons: list[str] = []
+    conf = 10  # база: хоть что-то заполнено в брифе — уже не полный ноль
+    if b.get("summary"):
+        reasons.append("есть описание бизнеса (со слов клиента)")
+    if b.get("scan") and b["scan"].get("ok"):
+        conf += 25
+        reasons.append("автоскан сайта подтвердил реальные факты (не пересказ клиента)")
+    conf += min(40, len(connected) * 10)
+    if connected:
+        reasons.append(f"подключено интеграций: {len(connected)} (реальные данные, не слова)")
+    if crm_connected:
+        conf += 10
+        reasons.append("CRM-виджет обнаружен на сайте — видно, что клиент реально ведёт продажи")
+    if has_research:
+        conf += 15
+        reasons.append("рынок исследован через внешние источники, не только со слов клиента")
+    return min(100, conf), reasons[:5]
