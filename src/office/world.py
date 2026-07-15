@@ -22,6 +22,27 @@ decision_engine.py (Sandbox-проверки) и planning_engine.py (save_snapsh
 после решения). invalidate_cache() вызывается loop.py в начале каждого цикла
 (до первого возможного вызова snapshot() этого цикла) — снимок остаётся
 консистентным ВНУТРИ цикла и гарантированно свежим на следующем.
+
+Это CQRS (Command Query Responsibility Segregation) — не новая архитектура,
+а имя уже существующему в этом модуле разделению (issue #9, docs/architecture-
+improvements.md):
+
+  Query-сторона  — ИСКЛЮЧИТЕЛЬНО этот файл: snapshot()/diff()/context_block()/
+                   snapshot_by_id()/snapshots_between(). world.py НЕ пишет
+                   доменные данные ни в один из источников — только читает их
+                   и собирает в срез. save_snapshot()/reset() не исключение:
+                   они пишут СОБСТВЕННЫЙ журнал срезов (world_snapshots.jsonl),
+                   не домен.
+  Command-сторона — каждый модуль-источник сам (brief.set_brief, objectives.add/
+                   update, plan.set_tasks, events.raise_event и т.д.) — команды
+                   живут РЯДОМ с данными, которыми командуют, не в world.py.
+
+Явный вывод из этого разделения: если промпту/фиче нужно ИЗМЕНИТЬ мир — правь
+модуль-источник (plan.py/objectives.py/...), не добавляй сюда write-метод
+"на скорую руку". Если нужно ПРОЧИТАТЬ что-то новое о мире — новое поле в
+snapshot(), не отдельный ad-hoc запрос к источнику в обход агрегатора (иначе
+два места будут по-разному собирать один и тот же факт, как раньше было с
+Milestones/Plan).
 """
 
 import copy

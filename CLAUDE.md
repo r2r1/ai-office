@@ -300,7 +300,7 @@ vanilla HTML, React/esm.sh без сборки) — консолидирован
 | `office/specification.py` | Specification — контракт приёмки из брифа + плана (функции, критерии успеха); подтверждение владельцем опционально |
 | `office/execution_policy.py` | **Execution Policy** (BOS §6): модель по ЗАДАЧЕ (рутина → дешёвая, оверрайды владельца главнее), `estimate_cost` до исполнения, capability-гейт плана (недостающие доступы — сразу) |
 | `office/projects.py` | **Project** (BOS §1): единица работы крупнее задачи; задачи плана принадлежат проекту, закрытие фиксирует «что оставил после себя» + срез мира |
-| `office/world.py` | **World Model v1** (BOS §4): SSOT-агрегатор — `snapshot()` (единый срез мира), `diff()`, журнал срезов, `context_block()` «где компания сейчас» для CEO |
+| `office/world.py` | **World Model v1** (BOS §4): SSOT-агрегатор — `snapshot()` (единый срез мира), `diff()`, журнал срезов, `context_block()` «где компания сейчас» для CEO. CQRS: Query — только этот файл, Command — каждый модуль-источник сам (см. докстринг модуля) |
 | `office/objectives.py` | Objectives — измеримые цели (desired state); `measured_by` пуст → цель не в gap-анализе, а источник работы «обеспечить измеримость» |
 | `office/intent.py` | Intent Layer — единый вход намерений владельца: `capture()` до интерпретации + результат CEO-триажа в журнале |
 | `office/prompt_builder.py` | **Единая сборка промптов**: system (`build`) + контекст задачи (`task_context`), загрузчик политик, полный лог промптов в `prompts.jsonl` |
