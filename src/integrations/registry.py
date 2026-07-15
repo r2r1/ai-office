@@ -149,20 +149,36 @@ _SUGGEST_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
-def suggested_for(text: str) -> list[dict]:
+# Интеграции, которые реальный «подключить существующую инфраструктуру» клиент
+# (growth/mature стадия бизнеса, company_scan._stage_heuristic — issue #19/#21)
+# ищет чаще всего, даже если не назвал их словами в свободном брифе. Крупный
+# клиент обычно пишет «автоматизировать процессы», а не «подключи Bitrix24» —
+# буквальный keyword-матч (_SUGGEST_KEYWORDS) такого клиента не находил вообще.
+_ENTERPRISE_INTEGRATIONS = ("crm", "crm_bitrix24", "erp_1c", "google_sheets")
+
+
+def suggested_for(text: str, business_stage: str = "") -> list[dict]:
     """Интеграции, релевантные тексту брифа (BOS §5: предложить подключение в
     момент пиковой мотивации — сразу после того, как клиент увидел анализ и
     инициативы, а не спрятанным в «Компания → Доступы», где его никто не
     находит). Уже подключённые тоже попадают в список (foreground: "готово"),
     просто без CTA — иначе после первой же подключённой интеграции список
-    менялся бы под ногами непредсказуемо."""
+    менялся бы под ногами непредсказуемо.
+
+    `business_stage` (brief.get()["business_stage"]["key"]) — growth/mature
+    добавляют CRM/ERP-класс интеграций в кандидаты ДАЖЕ без буквального
+    упоминания в тексте (см. _ENTERPRISE_INTEGRATIONS) — реальную
+    инфраструктуру такой клиент почти наверняка уже использует."""
     low = (text or "").lower()
+    enterprise_boost = business_stage in ("growth", "mature")
     scored: list[tuple[int, Integration]] = []
     for integ in _ALL.values():
         kws = _SUGGEST_KEYWORDS.get(integ.name)
         if not kws:
             continue
         hits = sum(1 for kw in kws if kw in low)
+        if enterprise_boost and integ.name in _ENTERPRISE_INTEGRATIONS:
+            hits += 1
         if hits:
             scored.append((hits, integ))
     scored.sort(key=lambda x: -x[0])

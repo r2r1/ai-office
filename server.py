@@ -817,7 +817,8 @@ async def get_suggested_integrations():
     from src.integrations import registry as integrations_registry
     b = brief.get()
     text = " ".join(str(b.get(k, "")) for k in ("summary", "goal", "niche", "audience"))
-    return {"integrations": integrations_registry.suggested_for(text)}
+    stage_key = (b.get("business_stage") or {}).get("key", "")
+    return {"integrations": integrations_registry.suggested_for(text, business_stage=stage_key)}
 
 
 @app.get("/api/history")

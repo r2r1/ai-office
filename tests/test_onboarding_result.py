@@ -87,6 +87,31 @@ def test_suggested_for_includes_connected_flag():
     assert out and "connected" in out[0]
 
 
+def test_suggested_for_ignores_stage_without_literal_keywords():
+    """Без business_stage поведение прежнее — "автоматизировать процессы" сам по
+    себе не матчит ни один keyword."""
+    _fresh("obr_test_suggest_stage_off")
+    out = integrations_registry.suggested_for("хочу автоматизировать процессы в компании")
+    assert out == []
+
+
+def test_suggested_for_boosts_enterprise_integrations_for_growth_stage():
+    """Issue #25 (4-я категория пользователей — enterprise/BOS): growth/mature
+    клиент, который НЕ назвал ни одной системы словами, всё равно должен увидеть
+    CRM/ERP-класс интеграций — он почти наверняка их уже использует."""
+    _fresh("obr_test_suggest_stage_growth")
+    out = integrations_registry.suggested_for("хочу автоматизировать процессы в компании", business_stage="growth")
+    names = {i["name"] for i in out}
+    assert names & {"crm", "crm_bitrix24", "erp_1c", "google_sheets"}
+
+
+def test_suggested_for_stage_boost_does_not_apply_to_launch_or_idea():
+    _fresh("obr_test_suggest_stage_launch")
+    for stage in ("launch", "idea", ""):
+        out = integrations_registry.suggested_for("хочу автоматизировать процессы в компании", business_stage=stage)
+        assert out == []
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("obr_test_*"):
         if d.is_dir():
