@@ -14,7 +14,7 @@ _hire_leader, _run_leaders): 🧭 — мысль CEO, 👔 — мысль лид
 import asyncio
 
 from src.saas import context as ctx
-from src.office import bus, registry, org, plan as plan_module
+from src.office import bus, registry, org, plan as plan_module, office_channel
 
 # Аудит (docs/pre-release-audit-2026-07-15.md), находка Medium #4: демо-сценарий
 # рассказывал про кипящую работу, но `plan.set_tasks()` не вызывался ни разу —
@@ -149,6 +149,9 @@ async def run() -> None:
                 if rec and lap == 1:
                     await bus.publish({"type": "hired", "agent_id": agent_id, "role": role,
                                        "desk": rec.desk, "task": objective[:100]})
+                    gmsg = office_channel.greet(agent_id, role, objective[:100])
+                    await bus.publish({"type": "office_chat", "from": agent_id, "role": role,
+                                       "text": gmsg["text"], "id": gmsg["id"]})
                 if lap == 1:
                     await bus.publish({"type": "system",
                                        "text": f"📂 CEO открыл «{info.get('name', dept_id)}»"})
@@ -166,6 +169,9 @@ async def run() -> None:
                         "desk": rec.desk,
                         "task": task,
                     })
+                    gmsg = office_channel.greet(agent_id, role, task)
+                    await bus.publish({"type": "office_chat", "from": agent_id, "role": role,
+                                       "text": gmsg["text"], "id": gmsg["id"]})
                 task_id = _TASK_BY_AGENT.get(agent_id)
                 if task_id:
                     plan_module.assign(task_id, agent_id)

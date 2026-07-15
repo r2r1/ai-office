@@ -44,7 +44,7 @@ async def _set_progress_note(note: str, publish) -> None:
 async def hire_initial(publish) -> None:
     """CEO + штаб стратегии. Лидеры отделов и работники нанимаются по необходимости
     (CEO открывает отдел → нанимается лидер → лидер нанимает работников)."""
-    from src.office import registry
+    from src.office import registry, office_channel
     starters = [
         ("orchestrator_1", "orchestrator", "Управление компанией и отделами"),
         ("researcher_1", "researcher", "Исследование рынка и трендов"),
@@ -58,6 +58,9 @@ async def hire_initial(publish) -> None:
                 await publish({
                     "type": "hired", "agent_id": aid, "role": role, "desk": rec.desk, "task": rec.task,
                 })
+                gmsg = office_channel.greet(aid, role, rec.task)
+                await publish({"type": "office_chat", "from": aid, "role": role,
+                               "text": gmsg["text"], "id": gmsg["id"]})
 
 
 async def run(publish) -> str:

@@ -265,6 +265,10 @@ async def hire_leader(dept_id: str, objective: str, publish) -> None:
     if rec:
         await publish({"type": "hired", "agent_id": agent_id, "role": role,
                        "desk": rec.desk, "task": objective[:100]})
+        from src.office import office_channel
+        gmsg = office_channel.greet(agent_id, role, objective[:100])
+        await publish({"type": "office_chat", "from": agent_id, "role": role,
+                       "text": gmsg["text"], "id": gmsg["id"]})
 
 
 async def hire_and_run(role: str, task: str, publish, skill: str = "",
@@ -286,6 +290,10 @@ async def hire_and_run(role: str, task: str, publish, skill: str = "",
     if rec:
         await publish({"type": "hired", "agent_id": agent_id, "role": role,
                        "desk": rec.desk, "task": full_task[:100], "skill": skill})
+        from src.office import office_channel
+        gmsg = office_channel.greet(agent_id, role, full_task[:100])
+        await publish({"type": "office_chat", "from": agent_id, "role": role,
+                       "text": gmsg["text"], "id": gmsg["id"]})
         objective = org.state_of(department).get("objective", "") if department else ""
         if task_id and plan.is_generated():
             plan.assign(task_id, agent_id)
