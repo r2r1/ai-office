@@ -104,6 +104,37 @@ def test_scan_result_has_headline_and_pain_points_keys():
     assert result["headline"] == ""
 
 
+# ── SSRF-защита (эндпоинт публичный — см. server.py _PUBLIC_API) ────────────
+
+def test_is_private_host_blocks_localhost_and_loopback():
+    assert company_scan._is_private_host("localhost")
+    assert company_scan._is_private_host("127.0.0.1")
+    assert company_scan._is_private_host("0.0.0.0")
+
+
+def test_is_private_host_blocks_link_local_metadata():
+    assert company_scan._is_private_host("169.254.169.254")  # облачный metadata-эндпоинт
+
+
+def test_is_private_host_blocks_private_ranges():
+    assert company_scan._is_private_host("10.0.0.5")
+    assert company_scan._is_private_host("192.168.1.1")
+
+
+def test_is_private_host_allows_public_ip():
+    assert not company_scan._is_private_host("8.8.8.8")
+
+
+def test_is_private_host_blocks_unresolvable():
+    assert company_scan._is_private_host("этот-домен-точно-не-существует-xyzzy123.invalid")
+
+
+def test_scan_rejects_localhost_without_network_call():
+    result = asyncio.run(company_scan.scan("http://localhost:8000/"))
+    assert result["ok"] is False
+    assert "нельзя" in result["findings"][0].lower()
+
+
 def test_ru_plural_agrees_with_number():
     assert company_scan._ru_plural(1) == "точку роста"
     assert company_scan._ru_plural(2) == "точки роста"

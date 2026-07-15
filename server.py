@@ -157,7 +157,13 @@ async def tenant_middleware(request: Request, call_next):
 # ⚠️ /api/site-lead — публичный приём заявок с опубликованных сайтов: посетитель
 # лендинга НЕ авторизован в SaaS, а формы многофайловых сайтов шлют именно сюда
 # (critic.check_site это требует). Без исключения посетитель получал 401 и лид терялся.
-_PUBLIC_API = {"/api/me", "/api/site-lead"}
+# ⚠️ /api/onboarding/scan — Instant Learning ДО регистрации (докс/company-
+# understanding-vision): моат продукта — «AI уже понимает бизнес» — теряет
+# смысл, если сканировать сайт можно только ПОСЛЕ логина. company_scan.scan()
+# не пишет ничего в тенант (чистая функция, только httpx GET + regex), так что
+# публичный доступ не течёт данные между тенантами; SSRF на внутреннюю сеть
+# закрыт отдельно в company_scan._is_private_host (см. её докстринг).
+_PUBLIC_API = {"/api/me", "/api/site-lead", "/api/onboarding/scan"}
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -721,7 +727,15 @@ async def brief_start(request: Request):
 async def onboarding_scan(request: Request):
     """Instant Learning: клиент даёт URL сайта → офис изучает его за секунды,
     БЕЗ единого вопроса и без LLM (company_scan.py). Вау-эффект первых секунд
-    онбординга — «мы уже кое-что знаем о вас»."""
+    онбординга — «мы уже кое-что знаем о вас».
+
+    Публичный эндпоинт (см. _PUBLIC_API) — доступен ДО регистрации/логина,
+    иначе моат «AI уже понимает бизнес» не проявляется до формы. Именно
+    поэтому здесь отдельный rate-limit по IP: без сессии/тенанта как ключа
+    анонимный эндпоинт, делающий исходящий HTTP GET по любому URL, — готовый
+    вектор для использования сервера как открытого прокси/сканера."""
+    if _rate_limited("scan", _client_ip(request), 12):
+        return JSONResponse({"error": "Слишком много запросов, попробуйте через минуту"}, status_code=429)
     data = await request.json()
     url = (data.get("url") or "").strip()
     if not url:

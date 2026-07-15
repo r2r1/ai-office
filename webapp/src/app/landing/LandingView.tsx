@@ -2,6 +2,7 @@ import { motion, useMotionValue, useSpring, useScroll, useTransform, useReducedM
 import { useRef, useState, useEffect } from "react"
 import type { ReactNode } from "react"
 import { ROLE_NAMES, ROLE_DESC } from "../../data/roles"
+import { api } from "../../data/api"
 
 // Скилл vite_react_site: палитра ДОСЛОВНО из уже установленного бренда платформы
 // (design.css — Mercury Flow, единственный цветной акцент поверх ахроматики) —
@@ -105,7 +106,10 @@ function Hero({ onLogin, onDemo }: { onLogin: () => void; onDemo?: () => void })
           сама изучает рынок, решает, что делать дальше, и постепенно берёт бизнес на себя.
         </motion.p>
 
-        <motion.div variants={item} style={{ display: "flex", gap: 12, marginTop: 30, flexWrap: "wrap" }}>
+        <motion.div variants={item} style={{ marginTop: 30 }}>
+          <ScanBox onLogin={onLogin} />
+        </motion.div>
+        <motion.div variants={item} style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
           <CTA primary magnetic onClick={onLogin}>Запустить офис →</CTA>
           {onDemo && <CTA onClick={onDemo}>Демо</CTA>}
         </motion.div>
@@ -115,6 +119,135 @@ function Hero({ onLogin, onDemo }: { onLogin: () => void; onDemo?: () => void })
         <OfficePreview />
       </motion.div>
     </motion.section>
+  )
+}
+
+// ── SCAN BOX: Instant Learning ДО регистрации ──────────────────────────────
+// Ключевой продуктовый тезис (docs/architecture-improvements.md — Company
+// Understanding как moat): AI должен показать, что уже понимает бизнес, ДО
+// формы регистрации — не после. company_scan.scan() уже даёт находки и
+// pain_points бесплатно ($0, без LLM); здесь — публичный вызов /api/onboarding/
+// scan (см. server.py _PUBLIC_API) прямо с лендинга, построчный вывод вместо
+// спиннера/JSON разом, чтобы ощущалось как «AI изучает у меня на глазах».
+type ScanState = "idle" | "loading" | "done" | "error"
+function ScanBox({ onLogin }: { onLogin: () => void }) {
+  const [url, setUrl] = useState("")
+  const [state, setState] = useState<ScanState>("idle")
+  const [result, setResult] = useState<any>(null)
+  const [revealed, setRevealed] = useState(0)
+  const reduceMotion = useReducedMotion()
+
+  const lines: string[] = result?.ok
+    ? [result.headline, ...(result.pain_points || [])].filter(Boolean)
+    : []
+
+  useEffect(() => {
+    if (state !== "done" || !lines.length) return
+    setRevealed(0)
+    if (reduceMotion) { setRevealed(lines.length); return }
+    const t = setInterval(() => {
+      setRevealed(n => {
+        if (n + 1 >= lines.length) { clearInterval(t); return lines.length }
+        return n + 1
+      })
+    }, 450)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, result])
+
+  async function run() {
+    const v = url.trim()
+    if (!v || state === "loading") return
+    setState("loading")
+    setResult(null)
+    try {
+      const r = await api.onboardingScan(v)
+      if (r && r.ok) {
+        // сохраняем находки — онбординг после регистрации подхватит их и не
+        // будет спрашивать заново то, что уже увидел на лендинге
+        try { sessionStorage.setItem("aioffice_landing_scan", JSON.stringify({ url: v, result: r })) } catch { /* приватный режим браузера */ }
+        setResult(r)
+        setState("done")
+      } else {
+        setResult(r)
+        setState("error")
+      }
+    } catch {
+      setState("error")
+    }
+  }
+
+  return (
+    <div className="card" style={{ borderRadius: "var(--radius-lg)", padding: 16, maxWidth: 460 }}>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>
+        Ещё до регистрации — вставьте сайт компании, я его изучу
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={url} onChange={e => setUrl(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && run()}
+          placeholder="например, mycompany.ru"
+          aria-label="Ссылка на сайт компании"
+          disabled={state === "loading"}
+          style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+            borderRadius: "var(--radius-pill)", padding: "10px 16px", color: "var(--text)",
+            fontSize: 13, outline: "none", fontFamily: "var(--font-sans)" }} />
+        <button onClick={run} disabled={!url.trim() || state === "loading"}
+          style={{ border: "none", borderRadius: "var(--radius-pill)", padding: "0 20px",
+            background: url.trim() && state !== "loading" ? MERCURY : "var(--ghost)",
+            color: url.trim() && state !== "loading" ? "#0a0a0a" : "var(--faint)",
+            cursor: url.trim() ? "pointer" : "default", fontSize: 13, fontWeight: 600,
+            fontFamily: "var(--font-sans)", whiteSpace: "nowrap" }}>
+          {state === "loading" ? "Изучаю…" : "Исследовать"}
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {state === "loading" && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
+            <motion.span animate={reduceMotion ? {} : { opacity: [1, 0.35, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
+              style={{ width: 6, height: 6, borderRadius: "50%", background: "#a0e0ab", flexShrink: 0 }} />
+            Проверяю CMS, аналитику, контакты, скорость ответа…
+          </motion.div>
+        )}
+
+        {state === "error" && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
+            Не удалось изучить этот адрес — ничего страшного, расскажете о бизнесе сами при запуске.
+          </motion.div>
+        )}
+
+        {state === "done" && lines.length > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {lines.slice(0, revealed + 1).map((l, i) => (
+                <motion.div key={i} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3 }}
+                  style={{ fontSize: 12.5, color: i === 0 ? "var(--text)" : "var(--muted)",
+                    fontWeight: i === 0 ? 600 : 400, lineHeight: 1.5 }}>
+                  {i > 0 && <span style={{ color: "var(--mercury-a)", marginRight: 6 }}>•</span>}
+                  {l}
+                </motion.div>
+              ))}
+            </div>
+            {revealed >= lines.length - 1 && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
+                style={{ marginTop: 14 }}>
+                <CTA primary onClick={onLogin}>Сохранить это исследование →</CTA>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+
+        {state === "done" && lines.length === 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
+            Явных проблем не нашли — сайт в целом в порядке. Остальное узнаю в диалоге.
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 

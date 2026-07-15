@@ -7,8 +7,11 @@ company-understanding-vision). Чистый httpx + regex по HTML, $0 стои
 возвращается частичный результат с тем, что удалось получить.
 """
 
+import ipaddress
 import re
+import socket
 import time
+from urllib.parse import urlparse
 
 import httpx
 
@@ -78,20 +81,64 @@ def _normalize_url(raw: str) -> str:
     return raw
 
 
+def _is_private_host(host: str) -> bool:
+    """SSRF-защита: раньше scan() вызывался только авторизованными пользователями
+    (за auth_middleware), теперь эндпоинт публичный (см. docs/architecture-
+    improvements.md — Instant Learning до регистрации) — любой аноним может
+    попросить сервер обратиться по указанному URL. Без этой проверки это прямой
+    путь просканировать localhost/внутреннюю сеть/облачные metadata-эндпоинты
+    (169.254.169.254) от имени сервера."""
+    host = (host or "").strip().lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return True  # не резолвится — не сканируем вслепую
+    for info in infos:
+        ip = info[4][0]
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return True
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return True
+    return False
+
+
 async def scan(url: str) -> dict:
     """Возвращает {ok, url, findings: [str], detected: {...}}. Не бросает исключений
     наружу — недоступный сайт тоже даёт полезный сигнал (findings об этом)."""
     url = _normalize_url(url)
     if not url:
         return {"ok": False, "url": "", "findings": [], "detected": {}, "pain_points": [], "headline": ""}
+    if _is_private_host(urlparse(url).hostname or ""):
+        return {"ok": False, "url": url, "findings": ["Этот адрес нельзя просканировать"],
+                "detected": {}, "pain_points": [], "headline": ""}
 
     detected: dict = {}
     findings: list[str] = []
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS, follow_redirects=True) as client:
+    # follow_redirects=False + ручные хопы: httpx следует за Location без повторной
+    # проверки хоста — сайт мог бы 302-редиректнуть на http://169.254.169.254/... и
+    # обойти проверку выше. Проверяем КАЖДЫЙ хоп заново (эндпоинт публичный, см.
+    # _is_private_host).
+    from urllib.parse import urljoin
+    async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS, follow_redirects=False) as client:
         t0 = time.monotonic()
         try:
-            resp = await client.get(url)
+            hop_url = url
+            resp = None
+            for _ in range(5):
+                resp = await client.get(hop_url)
+                if resp.status_code not in (301, 302, 303, 307, 308) or "location" not in resp.headers:
+                    break
+                hop_url = urljoin(hop_url, resp.headers["location"])
+                if _is_private_host(urlparse(hop_url).hostname or ""):
+                    return {"ok": False, "url": url, "findings": ["Этот адрес нельзя просканировать"],
+                            "detected": {}, "pain_points": [], "headline": ""}
+            url = hop_url
             elapsed_ms = int((time.monotonic() - t0) * 1000)
         except Exception:
             return {
