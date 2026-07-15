@@ -32,6 +32,11 @@ const BIRTH = [
 // молча начинает работу за спиной клиента.
 type Phase = "input" | "analyzing" | "result" | "integrations" | "building"
 
+// Ключ sessionStorage, которым ScanBox на лендинге (LandingView.tsx) делится
+// результатом Instant Learning (issue #19) — здесь подхватываем его, чтобы НЕ
+// спрашивать сайт повторно и не сканировать его на сервере второй раз.
+const LANDING_SCAN_KEY = "aioffice_landing_scan"
+
 export function OnboardingFlow({ onDone, onStart }: Props) {
   const [phase, setPhase] = useState<Phase>("input")
   const [text, setText] = useState("")
@@ -40,13 +45,30 @@ export function OnboardingFlow({ onDone, onStart }: Props) {
   const [result, setResult] = useState<{ analysis: string[]; growth_points: string[]; initiatives: any[] }>(
     { analysis: [], growth_points: [], initiatives: [] })
   const [integrations, setIntegrations] = useState<any[]>([])
+  const [landingScan, setLandingScan] = useState<{ url: string; result: any } | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(LANDING_SCAN_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (parsed?.url && parsed?.result) {
+        setLandingScan(parsed)
+        setUrl(parsed.url)
+      }
+    } catch { /* приватный режим браузера / битый JSON — просто без подсказки */ }
+  }, [])
 
   async function start() {
     setBusy(true)
     onStart()  // ДО await — App.tsx должен зафиксировать "мы в потоке" раньше,
                // чем ready успеет стать true (brief.set_brief происходит в
                // начале BOOTSTRAP, не в конце)
-    await api.briefStart(text.trim(), url.trim()).catch(() => null)
+    // Если url не менялся с момента лендинга — передаём уже готовый скан,
+    // сервер не будет обращаться к сайту второй раз.
+    const scanToSend = landingScan && landingScan.url === url.trim() ? landingScan.result : undefined
+    await api.briefStart(text.trim(), url.trim(), scanToSend).catch(() => null)
+    try { sessionStorage.removeItem(LANDING_SCAN_KEY) } catch { /* noop */ }
     setBusy(false)
     setPhase("analyzing")
   }
@@ -74,6 +96,15 @@ export function OnboardingFlow({ onDone, onStart }: Props) {
               В двух словах или подробно — как удобно. Есть бизнес, только открываетесь
               или просто идея — офис разберётся сам.
             </p>
+
+            {landingScan && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontSize: 12.5,
+                color: "var(--mercury-a)", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+                borderRadius: "var(--radius-md)", padding: "10px 14px", marginBottom: 16 }}>
+                <span aria-hidden>✓</span>
+                <span>Уже посмотрел {landingScan.url} — {landingScan.result.headline?.toLowerCase() || "учту это в работе"}</span>
+              </div>
+            )}
 
             <textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={4}
               placeholder="Например: делаю торты на заказ, хочу больше клиентов…"

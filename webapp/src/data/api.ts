@@ -162,7 +162,9 @@ export const api = {
   onboardingFinish: (mode: string, answers: any[], scan?: any) =>
     postJSON<any>("/api/onboarding/finish", { mode, answers, scan }, null),
   // Минимальный онбординг (BOS §5): 1 необязательное поле + необязательная ссылка.
-  briefStart: (input: string, url = "") => postJSON<any>("/api/brief/start", { input, url }, null),
+  // scan — готовый результат company_scan (issue #19: клиент мог уже увидеть его
+  // на лендинге ДО регистрации) — сервер не сканирует тот же сайт повторно, если он есть.
+  briefStart: (input: string, url = "", scan?: any) => postJSON<any>("/api/brief/start", { input, url, scan }, null),
   onboardingResult: () => getJSON<any>("/api/onboarding/result",
     { ready: false, analysis: [], growth_points: [], initiatives: [] }),
   suggestedIntegrations: () => getJSON<{ integrations: any[] }>(

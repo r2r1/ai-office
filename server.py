@@ -701,15 +701,21 @@ async def brief_start(request: Request):
     client_input = (data.get("input") or "").strip()
     url = (data.get("url") or "").strip()
     qa_pairs = data.get("answers", [])
+    # Клиент мог уже увидеть скан на лендинге (issue #19, публичный /api/onboarding/
+    # scan ДО регистрации) — если фронт прислал готовый результат, не сканируем
+    # тот же сайт второй раз (лишний сетевой поход + задержка онбординга ради
+    # данных, которые уже есть).
+    precomputed_scan = data.get("scan") or None
 
     effective_input = client_input
     scan_url = ""
-    if url:
-        from src.office import company_scan
+    from src.office import company_scan
+    scan_result = precomputed_scan if (precomputed_scan and precomputed_scan.get("ok")) else None
+    if scan_result is None and url:
         scan_result = await company_scan.scan(url)
-        if scan_result.get("ok"):
-            scan_url = scan_result.get("url", "")
-            effective_input = (effective_input + "\n\n" + company_scan.summary_line(scan_result)).strip()
+    if scan_result and scan_result.get("ok"):
+        scan_url = scan_result.get("url", "")
+        effective_input = (effective_input + "\n\n" + company_scan.summary_line(scan_result)).strip()
     if not effective_input:
         effective_input = "Клиент не описал бизнес словами — общий старт, офис исследует сам."
 
