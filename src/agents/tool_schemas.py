@@ -582,6 +582,24 @@ READ_PROJECT_FILE_TOOL = {
     },
 }
 
+ANALYZE_IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "analyze_image",
+        "description": "Смотрит на изображение по URL и описывает его словами (vision-модель) — например, "
+                       "экспортированный figma.export_images макет: палитра, композиция, стиль, элементы. "
+                       "Не для site/* скриншотов твоей же работы — только для внешних референсов/макетов.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_url": {"type": "string", "description": "Прямая ссылка на изображение (например, из figma.export_images)"},
+                "question": {"type": "string", "description": "Что именно нужно узнать (например «опиши палитру и стиль»)"},
+            },
+            "required": ["image_url"],
+        },
+    },
+}
+
 VERIFY_CODE_TOOL = {
     "type": "function",
     "function": {

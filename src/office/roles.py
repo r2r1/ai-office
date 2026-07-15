@@ -60,7 +60,7 @@ ROLE_META: dict[str, dict] = {
                               "выбор палитры/типографики/приёма из каталога направлений",
                               "карта сайта для многостраничных проектов (не для лендинга)",
                               "утверждение направления/карты с владельцем"],
-        "tools": ["web_search", "write_file", "ask_user", "read_file", "list_files"],
+        "tools": ["web_search", "write_file", "ask_user", "read_file", "list_files", "analyze_image"],
         "constraints": ["никогда не пишет в site/ — только docs/brand_book.md, docs/site_content.md, docs/sitemap.md",
                          "не публикует и не финализирует сайт — это делает developer после явного «да» владельца"],
         "success_metrics": ["бренд-бук одобрен владельцем с первого раза",
@@ -84,7 +84,7 @@ ROLE_META: dict[str, dict] = {
         "responsibilities": ["UI/UX и вёрстка сайтов", "боты", "скрипты/API", "анимации"],
         # web_search — для референсов приёмов (см. builtin_skills/three_js_3d_site.md),
         # не для замены готовым сайтом целиком: искать ПРИЁМ, не копировать чужой сайт.
-        "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file", "web_search"],
+        "tools": ["write_file", "verify_code", "execute_code", "list_files", "read_file", "web_search", "analyze_image"],
         "constraints": ["не использовать платные конструкторы (Tilda/Webflow)", "артефакты только через write_file"],
         "success_metrics": ["код компилируется и работает", "красивый рабочий сайт"],
     },

@@ -34,6 +34,17 @@ PRESETS = [
 ]
 
 
+def vision_model() -> str:
+    """Модель с реальной поддержкой изображений (для core/llm.describe_image) —
+    отдельно от for_agent/get_default, т.к. текстовая модель тенанта (часто
+    дешёвая glm-4.5-flash) картинку физически не примет. VISION_MODEL в .env
+    переопределяет; иначе — самая дешёвая из каталога с меткой "vision"."""
+    env = os.getenv("VISION_MODEL", "").strip()
+    if env:
+        return env
+    return next((p["id"] for p in PRESETS if "vision" in p["label"].lower()), ENV_DEFAULT)
+
+
 def _cfg() -> dict:
     return ctx.read_json(_FILE, {"default": ENV_DEFAULT, "per_agent": {}})
 

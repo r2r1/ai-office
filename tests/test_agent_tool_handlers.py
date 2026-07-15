@@ -150,6 +150,34 @@ def test_designer_delete_in_site_is_denied():
     assert workspace.read_file("site/index.html") == "x"
 
 
+# ── analyze_image: гейт по роли + реальный вызов через мокнутый describe_image ─
+
+def test_analyze_image_available_to_designer():
+    _fresh_tenant("af_test_vision1")
+    handlers, _ = _run_async(_captured_handlers(role="designer"))
+    assert "analyze_image" in handlers
+
+
+def test_analyze_image_not_available_to_marketer():
+    _fresh_tenant("af_test_vision2")
+    handlers, _ = _run_async(_captured_handlers(role="marketer"))
+    assert "analyze_image" not in handlers
+
+
+def test_analyze_image_calls_describe_image_and_returns_result():
+    _fresh_tenant("af_test_vision3")
+    handlers, _ = _run_async(_captured_handlers(role="designer"))
+
+    async def fake_describe_image(image_url, question, agent_id="agent", model=None):
+        assert image_url == "https://example.com/frame.png"
+        return "Тёплая терракотовая палитра, засечковый заголовок."
+
+    with patch("src.core.llm.describe_image", side_effect=fake_describe_image):
+        result = _run_async(handlers["analyze_image"](
+            {"image_url": "https://example.com/frame.png", "question": "опиши палитру"}))
+    assert "терракотовая" in result.lower()
+
+
 # ── _handle_read_file / _handle_list_files ───────────────────────────────────
 
 def test_read_file_roundtrips_write_file():

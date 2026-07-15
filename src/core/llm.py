@@ -482,6 +482,55 @@ async def run_agent(
     return final_text
 
 
+async def describe_image(image_url: str, question: str, agent_id: str = "agent",
+                          model: Optional[str] = None) -> str:
+    """
+    Одноразовый (не агентный, без tool-loop) вызов vision-модели над одной
+    картинкой — для designer/developer, читающих экспорт Figma
+    (figma.export_images отдаёт URL, но текстовая модель тенанта его не видит).
+
+    Отдельная функция, а не ветка внутри run_agent: vision — редкий, разовый
+    запрос («опиши этот макет»), не полноценный агентный цикл с инструментами;
+    смешивать forматы messages (текст vs multimodal-контент) внутри одного
+    run_agent усложнило бы _mask_old_observations/историю без реальной пользы.
+    """
+    if not (image_url or "").strip():
+        return "Ошибка: пустой image_url."
+    client = _client()
+    if model:
+        use_model = model
+    else:
+        from src.office import models as _models
+        use_model = _models.vision_model()
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": (question or "Опиши, что на этом изображении.")
+                                       + "\n\nОтветь на русском, по делу, без воды."},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ],
+    }]
+    try:
+        import asyncio as _asyncio
+        resp = await _asyncio.wait_for(
+            client.chat.completions.create(model=use_model, messages=messages, max_tokens=1200),
+            timeout=CALL_TIMEOUT,
+        )
+    except Exception as e:
+        return f"Ошибка анализа изображения ({use_model}): {e}"
+    usage = getattr(resp, "usage", None)
+    if usage:
+        pin = getattr(usage, "prompt_tokens", 0) or 0
+        pout = getattr(usage, "completion_tokens", 0) or 0
+        if pin or pout:
+            try:
+                from src.office import costs
+                costs.record(agent_id, use_model, pin, pout)
+            except Exception:
+                pass
+    return (resp.choices[0].message.content or "").strip() or "Модель не вернула описание."
+
+
 async def _search_async(query: str) -> str:
     """DuckDuckGo синхронный — запускаем в потоке, чтобы не блокировать event loop.
     wait_for обязателен: поиск без ответа не должен вешать агента (см. SEARCH_TIMEOUT)."""

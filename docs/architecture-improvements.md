@@ -132,3 +132,16 @@
 **Тесты:** `tests/test_agent_tool_handlers.py` — 4 новых теста (`test_designer_write_to_site_is_denied`, `test_designer_write_to_docs_is_allowed`, `test_developer_write_to_site_is_allowed`, `test_designer_delete_in_site_is_denied`).
 **Файлы:** `src/office/roles.py`, `src/agents/file_tool_handlers.py`, `tests/test_agent_tool_handlers.py`.
 **Статус:** done (2026-07-15) — `tests/run_all.py` — 50/50 чисто (34/34 в `test_agent_tool_handlers.py`, включая 4 новых).
+
+### #16 — Vision: designer/developer реально «видят» изображение (закрывает пробел из #14)
+**Запрос:** следующий пункт бэклога после #15 — `core/llm.py` не поддерживал vision вообще (grep на `image_url`/`vision`/`base64` — ноль совпадений), хотя в `.env`/каталоге моделей уже есть вижн-модели (`qwen3-vl-plus`, `qwen3-vl-flash`). Из-за этого designer читал экспорт Figma (`figma.export_images`) только как ссылку на картинку, которую физически не мог интерпретировать — шаг 0.5 в `brand_book.md` прямо констатировал «БЕЗ картинки, у тебя нет инструмента посмотреть».
+**Реализовано:**
+- `src/office/models.py` — `vision_model()`: `VISION_MODEL` из `.env` или самая дешёвая модель из `PRESETS` с меткой `vision` в описании (сейчас `qwen3-vl-flash`). Отдельно от `for_agent`/`get_default` — текстовая модель тенанта (часто `glm-4.5-flash`) картинку не примет.
+- `src/core/llm.py` — новая функция `describe_image(image_url, question, agent_id, model=None)`: ОДНОРАЗОВЫЙ (не агентный, без tool-loop) вызов chat.completions с multimodal-контентом (`{"type": "image_url", ...}`) — сознательно отдельно от `run_agent`, а не веткой внутри него (vision — редкий разовый запрос, не полноценный агентный цикл; смешивание форматов messages внутри `_mask_old_observations`/истории усложнило бы без пользы). Инкрементальный учёт расхода (`costs.record`) — тот же паттерн, что в `run_agent`.
+- `src/agents/tool_schemas.py` — `ANALYZE_IMAGE_TOOL`; `src/agents/vision_tool_handlers.py` (новый, по образцу `file_tool_handlers.py`) — `_handle_analyze_image` зовёт `llm.describe_image`.
+- `src/agents/agent_factory.py` — тул и хендлер подключены ТОЛЬКО ролям `designer`/`developer` (`_VISION_ROLES`) — остальным ролям инструмент не нужен и не предлагается, каталог тулов не раздувается.
+- `src/office/roles.py` — `analyze_image` добавлен в `tools` designer/developer (метаданные для UI/промпта).
+- `src/office/builtin_skills/brand_book.md` — шаг 0.5 переписан: после `figma.export_images` designer теперь реально вызывает `analyze_image` на полученную ссылку и получает текстовое описание палитры/типографики/композиции — не только имена фреймов.
+**Файлы:** `src/office/models.py`, `src/core/llm.py`, `src/agents/tool_schemas.py`, `src/agents/vision_tool_handlers.py` (новый), `src/agents/agent_factory.py`, `src/office/roles.py`, `src/office/builtin_skills/brand_book.md`.
+**Тесты:** `tests/test_agent_tool_handlers.py` — 3 новых (`test_analyze_image_available_to_designer`, `test_analyze_image_not_available_to_marketer`, `test_analyze_image_calls_describe_image_and_returns_result`, последний мокает `llm.describe_image` — реальный вижн-вызов деньги стоит, не гоняли).
+**Статус:** done (2026-07-15) — `tests/run_all.py` — 50/50 чисто, `tsc --noEmit` чист (изменений во фронте не потребовалось — `webapp/src/data/roles.ts` уже описывал designer через «Figma»/«референсы», что теперь буквально верно).

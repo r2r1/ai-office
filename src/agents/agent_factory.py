@@ -13,6 +13,7 @@ from src.agents import file_tool_handlers
 from src.agents import comms_tool_handlers
 from src.agents import integration_tool_handlers
 from src.agents import portfolio_tool_handlers
+from src.agents import vision_tool_handlers
 from src.office import mcp_bridge
 from src.office import models as models_module
 from src.office import office_channel
@@ -98,6 +99,15 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
         _comms_handlers = comms_tool_handlers.build(agent_id, role, publish, _publish_and_log)
         _integration_handlers = integration_tool_handlers.build(agent_id, role, publish, _publish_and_log)
 
+        # Vision (analyze_image) — только ролям, которые реально работают с
+        # визуальными референсами (designer читает Figma/бренд-референсы,
+        # developer иногда сверяется со структурой макета). Остальным ролям
+        # инструмент не нужен и не предлагается — не раздуваем каталог тулов.
+        _VISION_ROLES = ("designer", "developer")
+        _vision_tools = [_ts.ANALYZE_IMAGE_TOOL] if role in _VISION_ROLES else []
+        _vision_handlers = (vision_tool_handlers.build(agent_id, role, publish, _publish_and_log)
+                            if role in _VISION_ROLES else {})
+
         def _touch_liveness() -> None:
             # Каждый ответ API/инструмента = «агент жив»: продлеваем watchdog, чтобы
             # длинная ЗАКОННАЯ работа (десяток правок сайта) не считалась зависанием
@@ -164,12 +174,13 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
             publish=_publish_and_log,
             agent_id=agent_id,
             on_activity=_touch_liveness,
-            extra_tools=[*_extra_tools, *_portfolio_tools, _ts.DESCRIBE_SELF_TOOL, *_mcp_schemas],
+            extra_tools=[*_extra_tools, *_portfolio_tools, *_vision_tools, _ts.DESCRIBE_SELF_TOOL, *_mcp_schemas],
             tool_handlers={
                 **_comms_handlers,
                 **_integration_handlers,
                 **_file_handlers,
                 **_portfolio_handlers,
+                **_vision_handlers,
                 **_mcp_handlers,
                 "describe_self": _handle_describe_self,
             },
