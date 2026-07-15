@@ -17,6 +17,7 @@ from typing import Awaitable, Callable
 
 from src.office import workspace as workspace_module
 from src.office import project_map
+from src.office import roles as roles_module
 
 
 def build(agent_id: str, role: str,
@@ -34,6 +35,10 @@ def build(agent_id: str, role: str,
         if (role in ("developer", "designer", "integrator") and path
                 and "/" not in path and path.lower().endswith((".html", ".css", ".js"))):
             path = f"site/{path}"
+        denial = roles_module.path_denied(role, path)
+        if denial:
+            await publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🚫 {denial}"})
+            return denial
         res = workspace_module.write_file(path, content)
         await publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"📝 {res}"})
         if res.startswith("Файл сохранён:"):
@@ -72,6 +77,10 @@ def build(agent_id: str, role: str,
 
     async def _handle_delete_file(args: dict) -> str:
         path = args.get("path", "")
+        denial = roles_module.path_denied(role, path)
+        if denial:
+            await publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🚫 {denial}"})
+            return denial
         res = workspace_module.delete_file(path)
         await publish_and_log({"type": "speech", "agent_id": agent_id, "text": f"🗑 {res}"})
         return res

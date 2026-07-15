@@ -115,6 +115,41 @@ def test_write_file_publishes_file_written_event_on_success():
     assert any(e.get("type") == "file_written" for e in events)
 
 
+# ── _handle_write_file / _handle_delete_file: enforcement границ роли ────────
+
+def test_designer_write_to_site_is_denied():
+    _fresh_tenant("af_test_role_boundary1")
+    handlers, events = _run_async(_captured_handlers(role="designer"))
+    result = _run_async(handlers["write_file"]({"path": "site/index.html", "content": "<h1>hi</h1>"}))
+    assert result.startswith("Ошибка:")
+    assert workspace.read_file("site/index.html").startswith("Файл не найден")
+
+
+def test_designer_write_to_docs_is_allowed():
+    _fresh_tenant("af_test_role_boundary2")
+    handlers, _ = _run_async(_captured_handlers(role="designer"))
+    result = _run_async(handlers["write_file"]({"path": "docs/brand_book.md", "content": "# Стиль"}))
+    assert "docs/brand_book.md" in result
+    assert workspace.read_file("docs/brand_book.md").startswith("# Стиль")
+
+
+def test_developer_write_to_site_is_allowed():
+    _fresh_tenant("af_test_role_boundary3")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    result = _run_async(handlers["write_file"]({"path": "site/index.html", "content": "<h1>hi</h1>"}))
+    assert "site/index.html" in result
+
+
+def test_designer_delete_in_site_is_denied():
+    _fresh_tenant("af_test_role_boundary4")
+    handlers, _ = _run_async(_captured_handlers(role="developer"))
+    _run_async(handlers["write_file"]({"path": "site/index.html", "content": "x"}))
+    handlers_designer, _ = _run_async(_captured_handlers(role="designer", agent_id="designer_1"))
+    result = _run_async(handlers_designer["delete_file"]({"path": "site/index.html"}))
+    assert result.startswith("Ошибка:")
+    assert workspace.read_file("site/index.html") == "x"
+
+
 # ── _handle_read_file / _handle_list_files ───────────────────────────────────
 
 def test_read_file_roundtrips_write_file():

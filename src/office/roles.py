@@ -151,6 +151,33 @@ _SERVICE_CAPABILITY: dict[str, str] = {
 }
 
 
+# Границы артефактов, которые раньше были только текстом в builtin_roles/*.md
+# (constraints выше) — LLM иногда всё равно нарушает промпт-инструкцию (реальный
+# риск, а не гипотетический: см. designer.md "🔴 ГРАНИЦА" — до этого словаря
+# ничего не мешало designer буквально вызвать write_file("site/index.html", ...)).
+# Единственная роль с явным письменным запретом сегодня — designer; остальные
+# роли ничем не ограничены (developer/marketer и т.д. пишут где угодно в
+# workspace, как и раньше) — расширять список только под реальный задокументированный
+# инвариант, не "на всякий случай".
+ROLE_DENY_PREFIXES: dict[str, tuple[str, ...]] = {
+    "designer": ("site/",),
+}
+
+
+def path_denied(role: str, path: str) -> str:
+    """Пусто, если запись разрешена; иначе — причина отказа для tool-результата.
+    Единственный источник правды для enforcement (было только текстом в .md —
+    см. ROLE_DENY_PREFIXES)."""
+    norm = (path or "").strip().lstrip("/")
+    for prefix in ROLE_DENY_PREFIXES.get(role, ()):
+        if norm.startswith(prefix):
+            return (f"Ошибка: роль «{role}» не может писать в «{prefix}» "
+                     f"(путь «{path}»). Это зона роли developer — передай направление "
+                     f"через docs/brand_book.md и попроси владельца одобрить, developer "
+                     f"построит сайт сам.")
+    return ""
+
+
 def known_roles() -> set[str]:
     """Все существующие в офисе роли: отдельческие (ROLE_META) + штаб CEO.
     Источник правды для валидации delegate_task/send_message — чтобы агент не
