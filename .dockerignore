@@ -1,0 +1,23 @@
+# Данные тенантов и локальная БД — НИКОГДА в образ, всегда volume (см. Dockerfile/
+# docker-compose.yml). Попадание в слой образа = утечка данных клиентов в registry.
+data/
+
+# Node/Python окружения и кеши хоста — стейджи сами ставят зависимости с нуля.
+webapp/node_modules/
+webapp/dist/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Секреты и локальная конфигурация — .env.example остаётся образцом, реальный
+# .env передаётся в контейнер через docker-compose env_file/environment, не слоем.
+.env
+
+# Служебное/незначащее для образа
+.git/
+.github/
+.claude/
+.agents/
+graphify-out/
+*.md

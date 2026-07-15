@@ -1,0 +1,16 @@
+# Reverse-proxy + автоматический TLS для AI-Office (issue #8). Caddy получает
+# и обновляет сертификат Let's Encrypt сам по имени в DOMAIN — ручной certbot/
+# cron не нужен. Для DOMAIN=localhost (по умолчанию, без реального домена)
+# Caddy отдаёт локально доверенный self-signed сертификат вместо Let's Encrypt.
+{$DOMAIN:localhost} {
+	# flush_interval -1 — без буферизации на КАЖДЫЙ ответ, не только /events:
+	# сервер отдаёт /events как долгоживущий SSE-стрим (server.py), и Caddy по
+	# умолчанию может задерживать чанки в буфере. Раздельный маршрут под /events
+	# с "handle" здесь избыточен и конфликтовал бы с этим же reverse_proxy,
+	# матчащим все пути, — проще и надёжнее выключить буферизацию глобально.
+	reverse_proxy app:8000 {
+		flush_interval -1
+	}
+
+	encode gzip
+}

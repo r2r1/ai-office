@@ -1,0 +1,55 @@
+# Прод-деплой AI-Office за пределами одного хоста (issue #8, docs/architecture-
+# improvements.md) — app-контейнер + reverse-proxy с автоматическим TLS.
+#
+# Caddy выбран вместо nginx+certbot: один бинарник получает сертификат
+# Let's Encrypt и обновляет его сам — нет отдельного cron/certbot-контейнера,
+# который надо было бы поддерживать отдельно. Docker Compose — потому что это
+# единственный реальный сервис проекта (см. CLAUDE.md §3.8 — БД тенанта это
+# JSON-файлы, отдельная Postgres/Redis сознательно НЕ добавлены, issue #10/#11
+# "backlog, не начинать без триггера").
+#
+# Запуск:
+#   1. Скопировать .env.example → .env, заполнить (обязательно APP_SECRET,
+#      LLM_API_KEY; APP_BASE_URL — реальный https://ваш-домен для OAuth/webhook).
+#   2. export DOMAIN=ваш-домен.ru  (или прописать в .env — читается обоими сервисами)
+#   3. docker compose up -d --build
+#
+# Без домена/DNS (просто проверить локально) — оставить DOMAIN=localhost,
+# Caddy отдаст self-signed сертификат вместо Let's Encrypt (см. Caddyfile).
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Единственное состояние, которое обязано пережить пересборку образа —
+      # per-tenant данные (sqlite, workspace агентов). Всё остальное — из кода.
+      - app-data:/app/data
+    expose:
+      - "8000"
+    # Прямой доступ по 8000 не публикуем наружу — только через Caddy (TLS,
+    # единая точка входа). Открыть для отладки без прокси: раскомментировать.
+    # ports:
+    #   - "8000:8000"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

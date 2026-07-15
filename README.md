@@ -83,6 +83,22 @@ DEMO_MODE=1 python scripts/run.py        # демо-режим без расхо
 cd webapp && npm run dev
 ```
 
+## Прод-деплой
+
+```bash
+cp .env.example .env   # заполнить APP_SECRET, LLM_API_KEY, APP_BASE_URL (https://ваш-домен)
+export DOMAIN=ваш-домен.ru
+docker compose up -d --build
+```
+
+`Dockerfile` — двухстейджевая сборка (Node собирает фронт → Python-рантайм без Node/исходников webapp).
+`docker-compose.yml` поднимает приложение + `Caddyfile`-прокси с автоматическим TLS (Let's Encrypt).
+Без домена (`DOMAIN=localhost`) Caddy отдаёт self-signed сертификат — годится для локальной проверки.
+`data/` — единственное состояние, которое обязано пережить пересборку образа (volume, не слой).
+
+Это НЕ то же самое, что `docker/sandbox.Dockerfile` — та песочница исполняет код агентов
+(`SANDBOX_MODE=docker`), а этот `Dockerfile` — сам сервер.
+
 ## CLI (без веб-интерфейса)
 
 ```bash
