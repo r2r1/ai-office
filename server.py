@@ -2109,6 +2109,19 @@ async def _steer_from_chat(text: str) -> None:
     from src.office import intent as intent_module
     _intent = intent_module.capture(text, source="owner" if brief.is_ready() else "onboarding")
 
+    # ⚠️ Тот же класс бага, что был закрыт в /api/ask (pre-release аудит,
+    # docs/pre-release-audit-2026-07-15.md, находка High #2): DEMO_MODE обещает
+    # "демо без расхода токенов" (CLAUDE.md §2), но и discovery-ветка (_intake_from_chat),
+    # и CEO-триаж (interpret_directive) ниже безусловно дёргают реальный LLM.
+    # Короткое замыкание ДО обеих веток — общий чат демо-режима теперь тоже бесплатен.
+    if DEMO_MODE:
+        reply = ("Сейчас я в демо-режиме и работаю по сценарию, а не отвечаю на "
+                 "произвольные вопросы — зарегистрируйтесь, чтобы говорить с реальным офисом.")
+        cmsg = office_channel.post("orchestrator_1", "orchestrator", reply)
+        await bus.publish({"type": "office_chat", "from": "orchestrator_1", "role": "orchestrator",
+                           "text": reply, "id": cmsg["id"]})
+        return
+
     # ── DISCOVERY: офис ещё не запущен — сначала уточняем, потом строим бриф ──
     if not brief.is_ready():
         try:

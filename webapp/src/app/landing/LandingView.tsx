@@ -164,14 +164,24 @@ function buildDiscoveries(result: any): string[] {
   return out
 }
 
+// Пока идёт реальный сетевой скан, крутим шаги расследования вместо одной
+// статичной надписи (аудит, находка High #3: раньше пауза была немой, а вся
+// анимация "AI роется" начиналась только ПОСЛЕ ответа сервера — то есть
+// ощущение расследования было иллюзией, не покрывающей реальное время сети).
+// Это НЕ выдуманные находки (те строятся из настоящего ответа в buildDiscoveries) —
+// просто честный индикатор процесса, который идёт синхронно с реальным ожиданием.
+const LOADING_STEPS = ["Открываю сайт…", "Читаю содержимое…", "Ищу контакты и соцсети…", "Сопоставляю с похожими компаниями…"]
+
 function ScanBox({ onLogin }: { onLogin: () => void }) {
   const [url, setUrl] = useState("")
   const [phase, setPhase] = useState<Phase>("idle")
   const [result, setResult] = useState<any>(null)
   const [shownDiscoveries, setShownDiscoveries] = useState(0)
   const [stageCorrected, setStageCorrected] = useState(false)
+  const [loadingStep, setLoadingStep] = useState(0)
   const reduceMotion = useReducedMotion()
   const timers = useRef<number[]>([])
+  const loadingInterval = useRef<number | undefined>(undefined)
 
   function correctStage(key: string) {
     const corrected = { key, label: STAGE_LABELS[key], reason: "уточнено вами", confirmed: true }
@@ -192,7 +202,10 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
   const surprise = points[0] || ""
   const restPoints = points.slice(1)
 
-  useEffect(() => () => { timers.current.forEach(clearTimeout) }, [])
+  useEffect(() => () => {
+    timers.current.forEach(clearTimeout)
+    if (loadingInterval.current) window.clearInterval(loadingInterval.current)
+  }, [])
 
   // Детективный темп: находки одна за другой → короткая пауза «нашёл кое-что
   // интересное» → главный инсайт отдельно (не в общем списке) → остальное →
@@ -228,8 +241,14 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
     setResult(null)
     setShownDiscoveries(0)
     setStageCorrected(false)
+    setLoadingStep(0)
+    if (!reduceMotion) {
+      loadingInterval.current = window.setInterval(
+        () => setLoadingStep(s => Math.min(s + 1, LOADING_STEPS.length - 1)), 1100)
+    }
     try {
       const r = await api.onboardingScan(v)
+      if (loadingInterval.current) { window.clearInterval(loadingInterval.current); loadingInterval.current = undefined }
       if (r && r.ok) {
         // сохраняем находки — онбординг после регистрации подхватит их и не
         // будет спрашивать заново то, что уже увидел на лендинге
@@ -241,6 +260,7 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
         setPhase("error")
       }
     } catch {
+      if (loadingInterval.current) { window.clearInterval(loadingInterval.current); loadingInterval.current = undefined }
       setPhase("error")
     }
   }
@@ -278,7 +298,7 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
             style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
             <motion.span animate={reduceMotion ? {} : { opacity: [1, 0.35, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
               style={{ width: 6, height: 6, borderRadius: "50%", background: "#a0e0ab", flexShrink: 0 }} />
-            Изучаю компанию…
+            {LOADING_STEPS[loadingStep]}
           </motion.div>
         )}
 

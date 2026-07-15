@@ -14,7 +14,22 @@ _hire_leader, _run_leaders): 🧭 — мысль CEO, 👔 — мысль лид
 import asyncio
 
 from src.saas import context as ctx
-from src.office import bus, registry, org
+from src.office import bus, registry, org, plan as plan_module
+
+# Аудит (docs/pre-release-audit-2026-07-15.md), находка Medium #4: демо-сценарий
+# рассказывал про кипящую работу, но `plan.set_tasks()` не вызывался ни разу —
+# вкладка «Работа» показывала пустую доску одновременно с бурлящей лентой
+# событий. Три задачи ниже соответствуют трём "hire" из SCENARIO (developer_1/
+# salesman_1/marketer_1) — доска и лента теперь рассказывают одну историю.
+DEMO_TASKS = [
+    {"id": "demo_t1", "title": "Собрать лендинг и Telegram-бота для квалификации лидов",
+     "role": "developer", "done_criterion": "MVP работает, код в рабочей папке"},
+    {"id": "demo_t2", "title": "Найти 5 клиентов в нише e-commerce",
+     "role": "salesman", "done_criterion": "5 лидов найдены, минимум 1 сделка закрыта"},
+    {"id": "demo_t3", "title": "Создать контент-план для Telegram-канала",
+     "role": "marketer", "done_criterion": "План на месяц готов, первый пост опубликован"},
+]
+_TASK_BY_AGENT = {"developer_1": "demo_t1", "salesman_1": "demo_t2", "marketer_1": "demo_t3"}
 
 # Сценарий: список событий с задержками (секунды до следующего события).
 # Поддерживаемые шаги:
@@ -93,14 +108,31 @@ SCENARIO = [
 
 
 async def run() -> None:
-    """Проигрывает демо-сценарий по кругу (в контексте тенанта 'default')."""
+    """Проигрывает демо-сценарий по кругу (в контексте тенанта 'default').
+
+    Аудит, находки Medium #5/#6: раньше `registry.reset()`/`org.reset()` вызывались
+    в начале КАЖДОГО повтора (~каждые 90+8 сек) — вся команда, включая CEO, с
+    которым посетитель мог только что переписываться, молча "увольнялась" и
+    нанималась заново, а health-скор на секунду скакал вниз из-за пустого состава
+    отделов. Теперь сброс — один раз ПЕРЕД циклом, а не в каждом его повторе:
+    команда стабильна, health не скачет, а второй и последующие проходы явно
+    называются повтором той же истории, а не сбросом.
+    """
     ctx.set_tenant("default")
     await bus.publish({"type": "system", "text": "ДЕМО-РЕЖИМ: проигрываю сценарий без API"})
 
+    registry.reset()
+    org.reset()
+    plan_module.reset()
+    plan_module.set_tasks(DEMO_TASKS)
+
+    lap = 0
     while True:
-        # Сбрасываем состояние тенанта для нового прогона
-        registry.reset()
-        org.reset()
+        lap += 1
+        if lap > 1:
+            await bus.publish({"type": "system",
+                               "text": "🔁 Демо повторяется с той же командой — никто никуда не уходил, "
+                                       "просто ещё раз показываем, как это работает"})
 
         for step in SCENARIO:
             await asyncio.sleep(step["delay"])
@@ -114,18 +146,19 @@ async def run() -> None:
                 agent_id = f"{role}_1"
                 rec = registry.register(agent_id, role, objective[:100],
                                         department=dept_id, manager="orchestrator_1")
-                if rec:
+                if rec and lap == 1:
                     await bus.publish({"type": "hired", "agent_id": agent_id, "role": role,
                                        "desk": rec.desk, "task": objective[:100]})
-                await bus.publish({"type": "system",
-                                   "text": f"📂 CEO открыл «{info.get('name', dept_id)}»"})
+                if lap == 1:
+                    await bus.publish({"type": "system",
+                                       "text": f"📂 CEO открыл «{info.get('name', dept_id)}»"})
             elif "hire" in step:
                 agent_id, role, task = step["hire"]
                 dept = org.department_of_role(role)
                 manager = org.lead_id(dept) or "orchestrator_1"
                 rec = registry.register(agent_id, role, task,
                                         department=dept, manager=manager)
-                if rec:
+                if rec and lap == 1:
                     await bus.publish({
                         "type": "hired",
                         "agent_id": agent_id,
@@ -133,8 +166,16 @@ async def run() -> None:
                         "desk": rec.desk,
                         "task": task,
                     })
+                task_id = _TASK_BY_AGENT.get(agent_id)
+                if task_id:
+                    plan_module.assign(task_id, agent_id)
             elif "event" in step:
-                await bus.publish(step["event"])
+                ev = step["event"]
+                await bus.publish(ev)
+                if ev.get("type") == "task_done":
+                    task_id = _TASK_BY_AGENT.get(ev.get("agent_id", ""))
+                    if task_id:
+                        plan_module.complete(task_id)
 
-        # Пауза перед повтором
+        # Пауза перед повтором — команда остаётся на месте
         await asyncio.sleep(8)

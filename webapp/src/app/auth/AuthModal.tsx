@@ -17,8 +17,16 @@ type Mode = "choose" | "github" | "email"
 
 export function AuthModal({ open, onClose, onSuccess, githubAvailable, googleAvailable, devLogin }: AuthModalProps) {
   const [mode, setMode] = useState<Mode>("choose")
+  const [hasScan, setHasScan] = useState(false)
 
-  useEffect(() => { if (open) setMode("choose") }, [open])
+  useEffect(() => {
+    if (!open) return
+    setMode("choose")
+    // Аудит, находка Medium #7: обещание из ScanBox лендинга ("сохраню находки")
+    // визуально обрывалось на этом экране — ничто не подтверждало владельцу,
+    // что уже собранные данные не потеряются при входе.
+    try { setHasScan(!!sessionStorage.getItem("aioffice_landing_scan")) } catch { setHasScan(false) }
+  }, [open])
 
   return (
     <AnimatePresence>
@@ -52,6 +60,11 @@ export function AuthModal({ open, onClose, onSuccess, githubAvailable, googleAva
                 <Pane key="choose">
                   <Title>Вход в офис</Title>
                   <Sub>Подключите аккаунт, чтобы запустить свою команду AI-агентов.</Sub>
+                  {hasScan && (
+                    <div style={{ marginTop: 10, fontSize: 11.5, color: "#a0e0ab", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>✓</span> Находки о вашей компании сохранены — офис продолжит с них, спрашивать заново не будет
+                    </div>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 22 }}>
                     {githubAvailable && (
                       <BigButton onClick={() => setMode("github")} primary>
