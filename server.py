@@ -2613,8 +2613,37 @@ async def accept_initiative(iid: str, request: Request):
                        "Чтобы принять вопреки рекомендации, повторите запрос с override=true.",
         }, status_code=409)
 
-    proj = projects_module.create((initiative or {}).get("title", ""),
-                                   (initiative or {}).get("rationale", ""))
+    # Аудит (docs/pre-release-audit-2026-07-15.md, находка Medium #8): реальный
+    # прогон показал, что цель брифа («сайт для лидов») и принятая инициатива
+    # («пересборка лендинга под заявки») — оба про сайт одного и того же бизнеса —
+    # заводили КАЖДЫЙ свой отдельный проект, и оба независимо опубликовали СВОЙ
+    # сайт. Для владельца это выглядит как два разных URL с двумя версиями одной
+    # компании без единого объяснения зачем. Правило: если новая инициатива сама
+    # трогает site/ (developer/designer-задачи), а среди уже активных проектов
+    # есть такой, что УЖЕ опубликовал сайт — не открываем второй параллельный
+    # сайт-проект молча, а дозаписываем задачи инициативы в СУЩЕСТВУЮЩИЙ, с явным
+    # объяснением в ленте. Другие типы инициатив (бот, CRM, контент-план и т.п.)
+    # это правило не затрагивает — параллельные Work по разным артефактам
+    # остаются штатной моделью (BOS §1, §4).
+    initiative_touches_site = any(plan_module.touches_site(t) for t in tasks)
+    reused_site_project = None
+    if initiative_touches_site:
+        for p in projects_module.active_list():
+            if p.get("type") != "project":
+                continue
+            if sites_module.for_project(p["id"]):
+                reused_site_project = p
+                break
+
+    if reused_site_project:
+        proj = reused_site_project
+        await bus.publish({"type": "system",
+                           "text": f"🔗 Инициатива «{(initiative or {}).get('title', '')}» тоже "
+                                   f"про сайт — задачи добавлены в уже идущий проект «{proj['title']}» "
+                                   f"(уже опубликовал сайт), а не в отдельный: одному бизнесу — один сайт."})
+    else:
+        proj = projects_module.create((initiative or {}).get("title", ""),
+                                       (initiative or {}).get("rationale", ""))
     added = 0
     skipped_roles: list[str] = []
     # Двухпроходное построение графа: LLM отдаёт зависимости через СВОИ
@@ -2663,11 +2692,14 @@ async def accept_initiative(iid: str, request: Request):
     # Раньше принятие инициативы не оставляло НИ ОДНОГО следа в ленте событий —
     # новый проект с командой и бюджетом появлялся молча, владелец узнавал о нём
     # только случайно наткнувшись на вкладку «Проект». Теперь видно явно, что
-    # именно произошло и почему тратится бюджет.
-    await bus.publish({"type": "system",
-                       "text": f"💡 Инициатива «{(initiative or {}).get('title', '')}» принята — "
-                               f"открыт проект «{proj_after['title'] if proj_after else proj['title']}» "
-                               f"({added} задач(и))"})
+    # именно произошло и почему тратится бюджет. Если проект переиспользован
+    # (см. reused_site_project выше) — объяснение уже отправлено там, второе
+    # сообщение только дублировало бы его другими словами.
+    if not reused_site_project:
+        await bus.publish({"type": "system",
+                           "text": f"💡 Инициатива «{(initiative or {}).get('title', '')}» принята — "
+                                   f"открыт проект «{proj_after['title'] if proj_after else proj['title']}» "
+                                   f"({added} задач(и))"})
     if skipped_roles:
         await bus.publish({"type": "system",
                            "text": f"⚠️ {len(skipped_roles)} задач(и) инициативы пропущено "
