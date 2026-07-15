@@ -460,10 +460,27 @@ export default function App() {
                 ))}
               </div>
             )}
-            <AnimatePresence mode="wait" initial={false}>
+            {/* mode="wait" убран (реальный баг, найден живым тестом): если exit-анимация
+                уходящего вида по любой причине не завершается (застряла/анимация
+                прервана внешним событием), "wait" держит старый child примонтированным
+                НАВСЕГДА и никогда не монтирует новый — навигация выглядит полностью
+                мёртвой (клик по NavRail регистрируется, view меняется в состоянии,
+                но экран не переключается ни разу, ни при повторных попытках). Основная
+                навигация продукта не должна зависеть от завершения декоративного
+                перехода — то же архитектурное решение, что уже применялось для
+                Digest/Understanding-попапов (issue #12). Default-режим монтирует новый
+                view сразу же, не дожидаясь ухода старого. */}
+            <AnimatePresence initial={false}>
               <motion.div key={view === "office" ? `office-${officeMode}` : view}
                 style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}
-                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                // pointerEvents: "none" В САМОМ exit-варианте (не только в стилях) —
+                // применяется framer-motion СРАЗУ на старте exit (строковое свойство не
+                // тянется), а не после завершения анимации. Живой тест этой же сессии
+                // показал, что exit может не долетать доunmount вообще (см. комментарий
+                // у AnimatePresence выше) — без этого призрачный узел с прошлым видом мог
+                // бы бесконечно перехватывать клики поверх уже смонтированного нового вида.
+                exit={{ opacity: 0, y: -6, pointerEvents: "none" }}
                 transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
                 <Suspense fallback={null}>
                   {view === "office" && officeMode === "scene" && <OfficeView onOpenAgent={openAgent} />}

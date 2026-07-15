@@ -2012,6 +2012,19 @@ async def ask_agent(request: Request):
                                          directive=f"диалог с {agent_id} → память офиса")
     await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "user",
                        "kind": "msg", "text": message})
+    # ⚠️ Реальный найденный баг (живой pre-release аудит): DEMO_MODE обещает
+    # "демо без расхода токенов" (CLAUDE.md §2), но личный чат с агентом ДО этой
+    # правки безусловно вызывал chat.ask() → настоящий LLM-запрос → реальный
+    # расход, даже когда demo.run() (весь остальной офис-цикл) работает по
+    # сценарию без единого обращения к сети. Посетитель демо мог случайно
+    # потратить реальный баланс оператора, просто написав агенту.
+    if DEMO_MODE:
+        reply = ("Сейчас я в демо-режиме и работаю по сценарию, а не отвечаю на "
+                 "произвольные вопросы — зарегистрируйтесь, чтобы говорить с реальным офисом.")
+        threads_module.post(agent_id, "agent", reply)
+        await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
+                           "kind": "msg", "text": reply})
+        return {"agent_id": agent_id, "worker_id": agent_id, "reply": reply}
     try:
         reply = await chat.ask(agent_id, message, publish=bus.publish)
         threads_module.post(agent_id, "agent", reply)

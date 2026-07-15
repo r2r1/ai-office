@@ -122,14 +122,23 @@ function Hero({ onLogin, onDemo }: { onLogin: () => void; onDemo?: () => void })
   )
 }
 
-// ── SCAN BOX: Instant Learning ДО регистрации ──────────────────────────────
+// ── SCAN BOX: первое расследование (не "скан сайта") ───────────────────────
 // Ключевой продуктовый тезис (docs/architecture-improvements.md — Company
-// Understanding как moat): AI должен показать, что уже понимает бизнес, ДО
+// Understanding как moat): AI должен показать, что уже понимает БИЗНЕС, ДО
 // формы регистрации — не после. company_scan.scan() уже даёт находки и
 // pain_points бесплатно ($0, без LLM); здесь — публичный вызов /api/onboarding/
-// scan (см. server.py _PUBLIC_API) прямо с лендинга, построчный вывод вместо
-// спиннера/JSON разом, чтобы ощущалось как «AI изучает у меня на глазах».
-type ScanState = "idle" | "loading" | "done" | "error"
+// scan (см. server.py _PUBLIC_API) прямо с лендинга.
+//
+// Продуктовый разбор пользователя (issue: "онбординг как диалог, не экраны"):
+// психология важнее данных — те же самые поля scan_result подаются как
+// РАССЛЕДОВАНИЕ (детективный темп: находка → пауза → вывод → неожиданный
+// инсайт), а не как дамп JSON разом. Названия действий — "познакомиться с
+// компанией", не "сканировать сайт"; находки — "что я понял", не "проблемы".
+// Полноценный редизайн в СТОРОНУ непрерывного диалога с CEO (вместо текущей
+// последовательности фаз input→analyzing→result→integrations→building в
+// OnboardingFlow.tsx) — отдельная, более крупная задача, эта правка её не
+// заменяет, только меняет темп и тон уже существующего экрана.
+type Phase = "idle" | "loading" | "discoveries" | "insight" | "more" | "stage" | "done" | "error"
 
 // Гипотеза о стадии бизнеса (company_scan._stage_hypothesis, LLM + фолбэк на
 // эвристику) — метки для кнопок-корректировок, если AI ошибся; ключи должны
@@ -137,14 +146,32 @@ type ScanState = "idle" | "loading" | "done" | "error"
 const STAGE_LABELS: Record<string, string> = {
   idea: "Только идея", launch: "Недавно запустились", growth: "Активно растём", mature: "Зрелая компания",
 }
+const SOCIAL_RU: Record<string, string> = {
+  telegram: "Telegram", instagram: "Instagram", vk: "VK", whatsapp: "WhatsApp", youtube: "YouTube", facebook: "Facebook",
+}
+
+// Что именно AI "понял" на первый взгляд — построено из тех же полей detected,
+// что уже приходят со scan(), просто поданных как последовательность открытий,
+// а не единый список фактов.
+function buildDiscoveries(result: any): string[] {
+  if (!result?.ok) return []
+  const d = result.detected || {}
+  const out: string[] = ["Нашёл сайт"]
+  const socialKey = Object.keys(d.socials || {})[0]
+  if (socialKey) out.push(`Нашёл ${SOCIAL_RU[socialKey] || socialKey}`)
+  if (d.title || d.meta_description) out.push("Понял, чем вы занимаетесь")
+  if ((d.emails || []).length || (d.phones || []).length) out.push("Нашёл, как с вами связаться")
+  return out
+}
 
 function ScanBox({ onLogin }: { onLogin: () => void }) {
   const [url, setUrl] = useState("")
-  const [state, setState] = useState<ScanState>("idle")
+  const [phase, setPhase] = useState<Phase>("idle")
   const [result, setResult] = useState<any>(null)
-  const [revealed, setRevealed] = useState(0)
+  const [shownDiscoveries, setShownDiscoveries] = useState(0)
   const [stageCorrected, setStageCorrected] = useState(false)
   const reduceMotion = useReducedMotion()
+  const timers = useRef<number[]>([])
 
   function correctStage(key: string) {
     const corrected = { key, label: STAGE_LABELS[key], reason: "уточнено вами", confirmed: true }
@@ -160,29 +187,37 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
     } catch { /* приватный режим браузера */ }
   }
 
-  const lines: string[] = result?.ok
-    ? [result.headline, ...(result.pain_points || [])].filter(Boolean)
-    : []
+  const discoveries = buildDiscoveries(result)
+  const points: string[] = result?.ok ? (result.pain_points || []) : []
+  const surprise = points[0] || ""
+  const restPoints = points.slice(1)
 
-  useEffect(() => {
-    if (state !== "done" || !lines.length) return
-    setRevealed(0)
-    if (reduceMotion) { setRevealed(lines.length); return }
-    const t = setInterval(() => {
-      setRevealed(n => {
-        if (n + 1 >= lines.length) { clearInterval(t); return lines.length }
-        return n + 1
-      })
-    }, 450)
-    return () => clearInterval(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, result])
+  useEffect(() => () => { timers.current.forEach(clearTimeout) }, [])
+
+  // Детективный темп: находки одна за другой → короткая пауза «нашёл кое-что
+  // интересное» → главный инсайт отдельно (не в общем списке) → остальное →
+  // вопрос о стадии. Без reduceMotion — просто пропускаем прямо к финалу.
+  function scheduleReveal(hasPoints: boolean) {
+    const push = (fn: () => void, delay: number) => timers.current.push(window.setTimeout(fn, delay))
+    if (reduceMotion) { setPhase(hasPoints ? "more" : "stage"); setShownDiscoveries(discoveries.length); return }
+    setPhase("discoveries")
+    discoveries.forEach((_, i) => push(() => setShownDiscoveries(i + 1), 500 + i * 550))
+    const afterDiscoveries = 500 + discoveries.length * 550 + 350
+    if (hasPoints) {
+      push(() => setPhase("insight"), afterDiscoveries)
+      push(() => setPhase("more"), afterDiscoveries + 1500)
+    } else {
+      push(() => setPhase("stage"), afterDiscoveries)
+    }
+  }
 
   async function run() {
     const v = url.trim()
-    if (!v || state === "loading") return
-    setState("loading")
+    if (!v || phase === "loading") return
+    setPhase("loading")
     setResult(null)
+    setShownDiscoveries(0)
+    setStageCorrected(false)
     try {
       const r = await api.onboardingScan(v)
       if (r && r.ok) {
@@ -190,86 +225,122 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
         // будет спрашивать заново то, что уже увидел на лендинге
         try { sessionStorage.setItem("aioffice_landing_scan", JSON.stringify({ url: v, result: r })) } catch { /* приватный режим браузера */ }
         setResult(r)
-        setState("done")
+        scheduleReveal((r.pain_points || []).length > 0)
       } else {
         setResult(r)
-        setState("error")
+        setPhase("error")
       }
     } catch {
-      setState("error")
+      setPhase("error")
     }
   }
+
+  const showStageAndOn = phase === "stage" || phase === "done"
+  const showMoreAndOn = phase === "more" || showStageAndOn
 
   return (
     <div className="card" style={{ borderRadius: "var(--radius-lg)", padding: 16, maxWidth: 460 }}>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>
-        Ещё до регистрации — вставьте сайт компании, я его изучу
+        Прежде чем начать — покажите мне свою компанию
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={url} onChange={e => setUrl(e.target.value)}
           onKeyDown={e => e.key === "Enter" && run()}
           placeholder="например, mycompany.ru"
           aria-label="Ссылка на сайт компании"
-          disabled={state === "loading"}
+          disabled={phase === "loading"}
           style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
             borderRadius: "var(--radius-pill)", padding: "10px 16px", color: "var(--text)",
             fontSize: 13, outline: "none", fontFamily: "var(--font-sans)" }} />
-        <button onClick={run} disabled={!url.trim() || state === "loading"}
+        <button onClick={run} disabled={!url.trim() || phase === "loading"}
           style={{ border: "none", borderRadius: "var(--radius-pill)", padding: "0 20px",
-            background: url.trim() && state !== "loading" ? MERCURY : "var(--ghost)",
-            color: url.trim() && state !== "loading" ? "#0a0a0a" : "var(--faint)",
+            background: url.trim() && phase !== "loading" ? MERCURY : "var(--ghost)",
+            color: url.trim() && phase !== "loading" ? "#0a0a0a" : "var(--faint)",
             cursor: url.trim() ? "pointer" : "default", fontSize: 13, fontWeight: 600,
             fontFamily: "var(--font-sans)", whiteSpace: "nowrap" }}>
-          {state === "loading" ? "Изучаю…" : "Исследовать"}
+          {phase === "loading" ? "Знакомлюсь…" : "Начать исследование"}
         </button>
       </div>
 
       <AnimatePresence>
-        {state === "loading" && (
+        {phase === "loading" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
             <motion.span animate={reduceMotion ? {} : { opacity: [1, 0.35, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
               style={{ width: 6, height: 6, borderRadius: "50%", background: "#a0e0ab", flexShrink: 0 }} />
-            Проверяю CMS, аналитику, контакты, скорость ответа…
+            Изучаю компанию…
           </motion.div>
         )}
 
-        {state === "error" && (
+        {phase === "error" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
             Не удалось изучить этот адрес — ничего страшного, расскажете о бизнесе сами при запуске.
           </motion.div>
         )}
 
-        {state === "done" && lines.length > 0 && (
+        {phase !== "idle" && phase !== "loading" && phase !== "error" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {lines.slice(0, revealed + 1).map((l, i) => (
-                <motion.div key={i} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.3 }}
-                  style={{ fontSize: 12.5, color: i === 0 ? "var(--text)" : "var(--muted)",
-                    fontWeight: i === 0 ? 600 : 400, lineHeight: 1.5 }}>
-                  {i > 0 && <span style={{ color: "var(--mercury-a)", marginRight: 6 }}>•</span>}
-                  {l}
-                </motion.div>
-              ))}
-            </div>
-            {revealed >= lines.length - 1 && result?.stage && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
-                style={{ marginTop: 14, padding: "10px 12px", borderRadius: "var(--radius-md)",
+            {discoveries.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: shownDiscoveries >= discoveries.length ? 12 : 0 }}>
+                {discoveries.slice(0, shownDiscoveries).map((d, i) => (
+                  <motion.div key={i} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3 }}
+                    style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                    <span style={{ color: "#a0e0ab", marginRight: 6 }}>✓</span>{d}
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
+            {points.length > 0 && (phase === "insight" || showMoreAndOn) && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                style={{ marginBottom: showMoreAndOn ? 10 : 0 }}>
+                {phase === "insight" && (
+                  <div style={{ fontSize: 11.5, color: "var(--faint)", marginBottom: 6, fontStyle: "italic" }}>
+                    Нашёл кое-что интересное…
+                  </div>
+                )}
+                <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 600, lineHeight: 1.5 }}>
+                  Кстати — {surprise.charAt(0).toLowerCase() + surprise.slice(1)}
+                </div>
+              </motion.div>
+            )}
+
+            {points.length === 0 && showMoreAndOn && (
+              <div style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 600, marginBottom: 10 }}>
+                На первый взгляд у вас уже неплохо настроено — копну глубже, когда продолжим.
+              </div>
+            )}
+
+            {showMoreAndOn && restPoints.length > 0 && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
+                style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+                <div style={{ fontSize: 10.5, color: "var(--faint)" }}>Ещё заметил:</div>
+                {restPoints.map((p, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+                    <span style={{ color: "var(--mercury-a)", marginRight: 6 }}>•</span>{p}
+                  </div>
+                ))}
+              </motion.div>
+            )}
+
+            {showStageAndOn && result?.stage && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                style={{ marginBottom: 12, padding: "10px 12px", borderRadius: "var(--radius-md)",
                   background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
                 <div style={{ fontSize: 12.5, color: "var(--text)" }}>
-                  Похоже, вы {result.stage.label} — <span style={{ color: "var(--muted)" }}>{result.stage.reason}</span>
+                  Кажется, вы {result.stage.label.toLowerCase()} — <span style={{ color: "var(--muted)" }}>{result.stage.reason}</span>. Поправьте меня, если ошибся.
                 </div>
                 {!stageCorrected && !result.stage.confirmed && (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                    <button onClick={() => setStageCorrected(true)}
+                    <button onClick={() => { setStageCorrected(true); setPhase("done") }}
                       style={{ fontSize: 11, padding: "4px 10px", borderRadius: "var(--radius-pill)", cursor: "pointer",
                         border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "#a0e0ab" }}>
-                      Да, так и есть
+                      Верно
                     </button>
                     {Object.entries(STAGE_LABELS).filter(([k]) => k !== result.stage.key).map(([k, label]) => (
-                      <button key={k} onClick={() => correctStage(k)}
+                      <button key={k} onClick={() => { correctStage(k); setPhase("done") }}
                         style={{ fontSize: 11, padding: "4px 10px", borderRadius: "var(--radius-pill)", cursor: "pointer",
                           border: "1px solid var(--hairline)", background: "transparent", color: "var(--muted)" }}>
                         {label}
@@ -279,19 +350,15 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
                 )}
               </motion.div>
             )}
-            {revealed >= lines.length - 1 && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-                style={{ marginTop: 14 }}>
-                <CTA primary onClick={onLogin}>Сохранить это исследование →</CTA>
+
+            {(showStageAndOn || (!result?.stage && showMoreAndOn)) && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
+                  Я могу продолжить изучение компании — для этого нужно сохранить исследование.
+                </div>
+                <CTA primary onClick={onLogin}>Продолжить исследование →</CTA>
               </motion.div>
             )}
-          </motion.div>
-        )}
-
-        {state === "done" && lines.length === 0 && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
-            Явных проблем не нашли — сайт в целом в порядке. Остальное узнаю в диалоге.
           </motion.div>
         )}
       </AnimatePresence>
