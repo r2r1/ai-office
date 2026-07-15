@@ -233,7 +233,104 @@ async def scan(url: str) -> dict:
     return {
         "ok": True, "url": url, "findings": findings, "detected": detected,
         "pain_points": pain_points, "headline": headline,
+        "stage": await _stage_hypothesis(detected, findings, pain_points),
     }
+
+
+# Гипотеза о стадии бизнеса — ИМЕННО гипотеза («похоже, вы...»), не вердикт:
+# владелец подтверждает/поправляет на лендинге/в онбординге (см. product-разбор
+# Company Understanding — стадия важна как повод для диалога, не готовый ответ).
+#
+# ⚠️ С LLM, а не чистой эвристикой (по явному запросу) — это НАРУШАЕТ инвариант
+# "company_scan.py = $0, без LLM", на котором держится остальной модуль, и это
+# осознанный компромисс, не недосмотр: эндпоинт ПУБЛИЧНЫЙ (см. server.py
+# _PUBLIC_API, issue #19), значит КАЖДЫЙ анонимный визит на лендинг с непустым
+# полем URL теперь стоит реальных денег с общего баланса платформы, а не
+# конкретного тенанта (анонимные запросы всегда попадают в тенант "default" —
+# см. saas/context.tenant_middleware). Ограничено тем же rate-limit 12/мин на
+# IP, что и сам /api/onboarding/scan; дешёвая модель + маленький max_tokens
+# держат стоимость одного вызова минимальной. Эвристика (`_stage_heuristic`)
+# остаётся safety-фолбэком — при любой ошибке LLM (нет баланса, таймаут,
+# провайдер недоступен) отдаём её вместо того, чтобы попытка "wow" сломала
+# весь скан.
+_STAGES = ("idea", "launch", "growth", "mature")
+_STAGE_LABELS = {
+    "idea": "на стадии идеи", "launch": "на стадии запуска",
+    "growth": "в активном росте", "mature": "зрелой компанией",
+}
+
+
+# Жёсткий короткий таймаут ИМЕННО на этот вызов — независимо от llm.CALL_TIMEOUT
+# (180с, рассчитан на настоящие рабочие задачи агентов). Живой замер в этой же
+# сессии: обычный вызов run_agent для этой короткой классификации занял 156.9с
+# (apinet/glm-4.5-flash под нагрузкой) — это НЕПРИЕМЛЕМО для лендинга перед
+# регистрацией: посетитель не ждёт больше нескольких секунд ни при каких
+# обстоятельствах. Лучше отдать эвристику мгновенно, чем красивую гипотезу
+# через 2.5 минуты.
+_STAGE_LLM_TIMEOUT = 8.0
+
+
+async def _stage_hypothesis(detected: dict, findings: list[str], pain_points: list[str]) -> dict | None:
+    heuristic = _stage_heuristic(detected)
+    if heuristic is None:
+        return None
+    try:
+        import asyncio as _asyncio
+        import json as _json
+        from src.core import llm as llm_module
+        system = ("Ты аналитик, который по данным автоскана сайта определяет вероятную стадию бизнеса. "
+                  "Отвечай ТОЛЬКО JSON без пояснений вокруг.")
+        user = (
+            f"Сигналы сайта: {findings}\n"
+            f"Точки роста (проблемы): {pain_points}\n"
+            f"Технические флаги: CRM={any((detected.get('crm_widgets') or {}).values())}, "
+            f"аналитика={any((detected.get('analytics') or {}).values())}, "
+            f"отзывы={bool(detected.get('has_reviews'))}, форма заявки={bool(detected.get('has_form'))}\n\n"
+            'Определи стадию из списка ["idea","launch","growth","mature"] и верни ровно такой JSON:\n'
+            '{"key": "growth", "label": "короткая фраза для владельца, например «в активном росте»", '
+            '"reason": "одно короткое предложение почему, на русском"}'
+        )
+        raw = await _asyncio.wait_for(
+            llm_module.run_agent(
+                system=system, user=user, model="glm-4.5-flash", max_tokens=200,
+                use_search=False, max_iterations=1, agent_id="landing_scan",
+            ),
+            timeout=_STAGE_LLM_TIMEOUT,
+        )
+        start, end = raw.find("{"), raw.rfind("}")
+        parsed = _json.loads(raw[start:end + 1]) if start >= 0 and end > start else {}
+        if parsed.get("key") in _STAGES and parsed.get("label") and parsed.get("reason"):
+            return {"key": parsed["key"], "label": parsed["label"], "reason": parsed["reason"]}
+    except Exception:
+        pass
+    return heuristic
+
+
+def _stage_heuristic(detected: dict) -> dict | None:
+    """Возвращает {key, label, reason} или None, если сигналов мало (например
+    сайт недоступен — detected пуст). Safety-фолбэк для _stage_hypothesis (см. её
+    докстринг) — если LLM недоступна/упала, гипотеза всё равно приходит, просто
+    менее гибкая."""
+    if not detected:
+        return None
+    has_crm = any((detected.get("crm_widgets") or {}).values())
+    has_analytics = any((detected.get("analytics") or {}).values())
+    has_reviews = bool(detected.get("has_reviews"))
+    has_form = bool(detected.get("has_form"))
+    has_cta = bool(detected.get("has_cta"))
+    has_contacts = bool(detected.get("emails") or detected.get("phones"))
+
+    if has_crm and has_analytics and has_reviews:
+        return {"key": "mature", "label": _STAGE_LABELS["mature"],
+                "reason": "на сайте есть CRM, аналитика и отзывы — обычно так выглядит уже отлаженный бизнес"}
+    if has_crm or has_analytics:
+        return {"key": "growth", "label": _STAGE_LABELS["growth"],
+                "reason": ("CRM" if has_crm else "аналитика") + " на сайте — значит, вы уже считаете заявки и клиентов"}
+    if has_form or has_cta or has_contacts:
+        return {"key": "launch", "label": _STAGE_LABELS["launch"],
+                "reason": "сайт уже принимает заявки, но без CRM и аналитики"}
+    return {"key": "idea", "label": _STAGE_LABELS["idea"],
+            "reason": "на сайте нет ни формы заявки, ни аналитики, ни контактов — скорее визитка под будущий продукт"}
 
 
 # Технический факт → на что это влияет для ВЛАДЕЛЬЦА бизнеса, не для разработчика

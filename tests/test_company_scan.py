@@ -11,6 +11,7 @@ import asyncio
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -133,6 +134,79 @@ def test_scan_rejects_localhost_without_network_call():
     result = asyncio.run(company_scan.scan("http://localhost:8000/"))
     assert result["ok"] is False
     assert "нельзя" in result["findings"][0].lower()
+
+
+# ── Гипотеза о стадии бизнеса (LLM с фолбэком на эвристику, см. company_scan.py) ─
+
+def test_stage_heuristic_mature_when_crm_analytics_reviews():
+    detected = {"crm_widgets": {"amocrm": True}, "analytics": {"ga4": True}, "has_reviews": True}
+    stage = company_scan._stage_heuristic(detected)
+    assert stage["key"] == "mature"
+
+
+def test_stage_heuristic_growth_when_only_analytics():
+    detected = {"crm_widgets": {}, "analytics": {"ga4": True}, "has_reviews": False}
+    stage = company_scan._stage_heuristic(detected)
+    assert stage["key"] == "growth"
+
+
+def test_stage_heuristic_launch_when_form_but_no_tracking():
+    detected = {"crm_widgets": {}, "analytics": {}, "has_form": True}
+    stage = company_scan._stage_heuristic(detected)
+    assert stage["key"] == "launch"
+
+
+def test_stage_heuristic_idea_when_no_signals():
+    detected = {"crm_widgets": {}, "analytics": {}, "has_form": False, "has_cta": False}
+    stage = company_scan._stage_heuristic(detected)
+    assert stage["key"] == "idea"
+
+
+def test_stage_heuristic_none_when_detected_empty():
+    assert company_scan._stage_heuristic({}) is None
+
+
+def test_stage_hypothesis_uses_llm_result_when_valid_json():
+    """Мокаем llm.run_agent — реальный API не вызываем ни разу, проверяем только
+    что валидный JSON-ответ используется вместо эвристики."""
+    async def fake_run_agent(**kwargs):
+        return '{"key": "growth", "label": "растёте быстро", "reason": "аналитика уже подключена"}'
+    detected = {"crm_widgets": {}, "analytics": {"ga4": True}, "has_reviews": False}
+    with patch("src.core.llm.run_agent", side_effect=fake_run_agent):
+        stage = asyncio.run(company_scan._stage_hypothesis(detected, [], []))
+    assert stage == {"key": "growth", "label": "растёте быстро", "reason": "аналитика уже подключена"}
+
+
+def test_stage_hypothesis_falls_back_to_heuristic_on_llm_error():
+    async def failing_call(**kwargs):
+        raise RuntimeError("нет баланса")
+    detected = {"crm_widgets": {}, "analytics": {}, "has_form": True}
+    with patch("src.core.llm.run_agent", side_effect=failing_call):
+        stage = asyncio.run(company_scan._stage_hypothesis(detected, [], []))
+    assert stage["key"] == "launch"  # эвристика для этих сигналов
+
+
+def test_stage_hypothesis_falls_back_when_llm_too_slow():
+    """Живой замер в этой сессии: обычный run_agent для этой классификации занял
+    156.9с (apinet под нагрузкой) — недопустимо для лендинга. _STAGE_LLM_TIMEOUT
+    должен оборвать вызов и вернуть эвристику, а не ждать."""
+    async def slow_call(**kwargs):
+        await asyncio.sleep(5)
+        return '{"key": "mature", "label": "не должно попасть сюда", "reason": "..."}'
+    detected = {"crm_widgets": {}, "analytics": {}, "has_form": True}
+    with patch("src.office.company_scan._STAGE_LLM_TIMEOUT", 0.05), \
+         patch("src.core.llm.run_agent", side_effect=slow_call):
+        stage = asyncio.run(company_scan._stage_hypothesis(detected, [], []))
+    assert stage["key"] == "launch"  # эвристика, не "mature" из медленного LLM-ответа
+
+
+def test_stage_hypothesis_falls_back_when_llm_returns_garbage():
+    async def garbage_call(**kwargs):
+        return "не могу определить"
+    detected = {"crm_widgets": {}, "analytics": {}, "has_form": False, "has_cta": False}
+    with patch("src.core.llm.run_agent", side_effect=garbage_call):
+        stage = asyncio.run(company_scan._stage_hypothesis(detected, [], []))
+    assert stage["key"] == "idea"
 
 
 def test_ru_plural_agrees_with_number():

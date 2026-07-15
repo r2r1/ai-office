@@ -130,12 +130,35 @@ function Hero({ onLogin, onDemo }: { onLogin: () => void; onDemo?: () => void })
 // scan (см. server.py _PUBLIC_API) прямо с лендинга, построчный вывод вместо
 // спиннера/JSON разом, чтобы ощущалось как «AI изучает у меня на глазах».
 type ScanState = "idle" | "loading" | "done" | "error"
+
+// Гипотеза о стадии бизнеса (company_scan._stage_hypothesis, LLM + фолбэк на
+// эвристику) — метки для кнопок-корректировок, если AI ошибся; ключи должны
+// совпадать 1:1 с _STAGES в company_scan.py.
+const STAGE_LABELS: Record<string, string> = {
+  idea: "Только идея", launch: "Недавно запустились", growth: "Активно растём", mature: "Зрелая компания",
+}
+
 function ScanBox({ onLogin }: { onLogin: () => void }) {
   const [url, setUrl] = useState("")
   const [state, setState] = useState<ScanState>("idle")
   const [result, setResult] = useState<any>(null)
   const [revealed, setRevealed] = useState(0)
+  const [stageCorrected, setStageCorrected] = useState(false)
   const reduceMotion = useReducedMotion()
+
+  function correctStage(key: string) {
+    const corrected = { key, label: STAGE_LABELS[key], reason: "уточнено вами", confirmed: true }
+    setResult((r: any) => r ? { ...r, stage: corrected } : r)
+    setStageCorrected(true)
+    try {
+      const raw = sessionStorage.getItem("aioffice_landing_scan")
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        parsed.result.stage = corrected
+        sessionStorage.setItem("aioffice_landing_scan", JSON.stringify(parsed))
+      }
+    } catch { /* приватный режим браузера */ }
+  }
 
   const lines: string[] = result?.ok
     ? [result.headline, ...(result.pain_points || [])].filter(Boolean)
@@ -231,8 +254,33 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
                 </motion.div>
               ))}
             </div>
+            {revealed >= lines.length - 1 && result?.stage && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
+                style={{ marginTop: 14, padding: "10px 12px", borderRadius: "var(--radius-md)",
+                  background: "var(--surface-soft)", border: "1px solid var(--hairline)" }}>
+                <div style={{ fontSize: 12.5, color: "var(--text)" }}>
+                  Похоже, вы {result.stage.label} — <span style={{ color: "var(--muted)" }}>{result.stage.reason}</span>
+                </div>
+                {!stageCorrected && !result.stage.confirmed && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                    <button onClick={() => setStageCorrected(true)}
+                      style={{ fontSize: 11, padding: "4px 10px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+                        border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "#a0e0ab" }}>
+                      Да, так и есть
+                    </button>
+                    {Object.entries(STAGE_LABELS).filter(([k]) => k !== result.stage.key).map(([k, label]) => (
+                      <button key={k} onClick={() => correctStage(k)}
+                        style={{ fontSize: 11, padding: "4px 10px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+                          border: "1px solid var(--hairline)", background: "transparent", color: "var(--muted)" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
             {revealed >= lines.length - 1 && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
                 style={{ marginTop: 14 }}>
                 <CTA primary onClick={onLogin}>Сохранить это исследование →</CTA>
               </motion.div>
