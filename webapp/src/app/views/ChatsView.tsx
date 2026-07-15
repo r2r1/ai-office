@@ -31,6 +31,45 @@ function senderName(m: any, fallback?: string): string {
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 
+// designer (builtin_skills/brand_book.md, шаг 4) формулирует вопрос-выбор
+// направления построчно: "A) Название (#accent / #bg) — почему". Разбираем это
+// в структуру для цветных свотчей — первый и пока единственный случай в
+// системе, когда UI завязан на формат конкретного скилла (см. docs/
+// architecture-improvements.md issue #17/#18: раньше выбор был только текстом).
+interface DesignCandidate { letter: string; name: string; accent: string; bg: string; why: string }
+const CANDIDATE_LINE = /^([A-ZА-Я])\)\s*(.+?)\s*\(\s*(#[0-9A-Fa-f]{6})\s*\/\s*(#[0-9A-Fa-f]{6})\s*\)\s*(?:—\s*(.*))?$/
+
+function parseDesignCandidates(text: string): DesignCandidate[] {
+  const out: DesignCandidate[] = []
+  for (const line of text.split("\n")) {
+    const m = CANDIDATE_LINE.exec(line.trim())
+    if (m) out.push({ letter: m[1], name: m[2].trim(), accent: m[3], bg: m[4], why: (m[5] || "").trim() })
+  }
+  return out
+}
+
+function DesignCandidatePicker({ candidates, onPick }: { candidates: DesignCandidate[]; onPick: (label: string) => void }) {
+  return (
+    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+      {candidates.map(c => (
+        <button key={c.letter} onClick={() => onPick(`${c.letter}) ${c.name}`)}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", textAlign: "left",
+            border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", cursor: "pointer",
+            background: "var(--surface-soft)", color: "var(--text-dim)", fontFamily: "var(--font-sans)" }}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(255,172,46,0.4)")}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--hairline)")}>
+          <span aria-hidden style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%",
+            background: c.bg, border: `2px solid ${c.accent}`, boxShadow: `inset 0 0 0 6px ${c.accent}` }} />
+          <span style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{c.letter}) {c.name}</div>
+            {c.why && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{c.why}</div>}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface ChatsViewProps { initialAgent?: string }
 
 export function ChatsView({ initialAgent }: ChatsViewProps) {
@@ -250,6 +289,7 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
               const mine = m.from === "user"
               const isQuestion = m.kind === "question"
               const isRedirect = m.kind === "redirect"
+              const candidates = isQuestion ? parseDesignCandidates(m.text || "") : []
               return (
                 <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
                   {!mine && (
@@ -276,6 +316,9 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                             || (m.redirect_agent_id === "orchestrator_1" ? "CEO" : roleName(roleFromAgentId(m.redirect_agent_id)))} →
                         </button>
                       </div>
+                    )}
+                    {candidates.length > 0 && (
+                      <DesignCandidatePicker candidates={candidates} onPick={label => setInput(label)} />
                     )}
                   </div>
                   {m.ts && (
