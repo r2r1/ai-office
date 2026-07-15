@@ -197,17 +197,27 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
   // Детективный темп: находки одна за другой → короткая пауза «нашёл кое-что
   // интересное» → главный инсайт отдельно (не в общем списке) → остальное →
   // вопрос о стадии. Без reduceMotion — просто пропускаем прямо к финалу.
-  function scheduleReveal(hasPoints: boolean) {
+  //
+  // ⚠️ Реальный баг, найден живым тестом на wildberries.ru (не в юнит-тестах —
+  // там не проверяли полную цепочку фаз до конца): ветка "есть точки роста"
+  // заканчивалась на "more" и НИКОГДА не доходила до "stage"/"done" — карточка
+  // гипотезы и CTA «Продолжить исследование» (единственный путь к регистрации
+  // с этого экрана) не появлялись вообще для сайтов с найденными проблемами —
+  // то есть для подавляющего большинства реальных сайтов. `finalPhase`
+  // гарантирует, что цепочка ВСЕГДА заканчивается терминальной фазой.
+  function scheduleReveal(hasPoints: boolean, hasStage: boolean) {
     const push = (fn: () => void, delay: number) => timers.current.push(window.setTimeout(fn, delay))
-    if (reduceMotion) { setPhase(hasPoints ? "more" : "stage"); setShownDiscoveries(discoveries.length); return }
+    const finalPhase: Phase = hasStage ? "stage" : "done"
+    if (reduceMotion) { setPhase(finalPhase); setShownDiscoveries(discoveries.length); return }
     setPhase("discoveries")
     discoveries.forEach((_, i) => push(() => setShownDiscoveries(i + 1), 500 + i * 550))
     const afterDiscoveries = 500 + discoveries.length * 550 + 350
     if (hasPoints) {
       push(() => setPhase("insight"), afterDiscoveries)
       push(() => setPhase("more"), afterDiscoveries + 1500)
+      push(() => setPhase(finalPhase), afterDiscoveries + 1500 + 1200)
     } else {
-      push(() => setPhase("stage"), afterDiscoveries)
+      push(() => setPhase(finalPhase), afterDiscoveries)
     }
   }
 
@@ -225,7 +235,7 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
         // будет спрашивать заново то, что уже увидел на лендинге
         try { sessionStorage.setItem("aioffice_landing_scan", JSON.stringify({ url: v, result: r })) } catch { /* приватный режим браузера */ }
         setResult(r)
-        scheduleReveal((r.pain_points || []).length > 0)
+        scheduleReveal((r.pain_points || []).length > 0, !!r.stage)
       } else {
         setResult(r)
         setPhase("error")
