@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { api } from "../../data/api"
 import { useOfficeSelector } from "../../data/OfficeProvider"
+import { useThrottled } from "../hooks"
 import { IntegCard } from "../views/ConnectionsView"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
@@ -23,55 +24,43 @@ const BIRTH = [
   { role: "hr", icon: "👔", name: "HR" },
 ]
 
-// Минимальный онбординг (BOS §5): "широкий, маленький, необязательный".
-// Раньше — 3 жёстких сценария × 5 фиксированных вопросов, скан сайта первым
-// шагом ДАЖЕ для тех, у кого сайта физически нет ("Хочу открыть компанию" /
-// "Есть идея"). Теперь: 1 свободное поле (широкое — пишет как хочет, от
-// одного слова до абзаца) + необязательная ссылка → офис сам исследует и
-// ПРОАКТИВНО показывает результат (аналитика/точки роста/инициативы), а не
-// молча начинает работу за спиной клиента.
-type Phase = "input" | "analyzing" | "result" | "integrations" | "building"
+// Первое расследование компании (docs/first-investigation-plan-2026-07-16.md,
+// Фаза 5): раньше "start()" слал текст в /api/brief/start — одноразовый LLM-
+// вызов БЕЗ поиска и без диалога (office/investigation.py, Фаза 4, оставался
+// недостижим из обычной регистрации — реальный разрыв между тем, что построено,
+// и тем, что реально видит пользователь). Теперь первое сообщение и вся
+// дальнейшая переписка идут через /api/chat — тот же живой агентский диалог,
+// что и обычный чат с CEO, просто начатый до того, как бриф готов.
+type Phase = "chat" | "analyzing" | "result" | "integrations" | "building"
+
+// Чипы ниш — точка входа с нулём символов текста (принцип "усилие тратит
+// офис, а не пользователь"): один тап уже даёт агенту достаточно, чтобы
+// начать расследование (нишу дальше уточнит сам через web_search/вопрос).
+const NICHE_CHIPS = ["Мебель", "Стройка и ремонт", "Красота и здоровье", "Еда и кафе",
+  "Услуги на дому", "Недвижимость", "Автосервис", "Онлайн-магазин"]
 
 // Ключ sessionStorage, которым ScanBox на лендинге (LandingView.tsx) делится
-// результатом Instant Learning (issue #19) — здесь подхватываем его, чтобы НЕ
-// спрашивать сайт повторно и не сканировать его на сервере второй раз.
+// результатом Instant Learning (issue #19) — здесь подхватываем его и
+// вкладываем в ПЕРВОЕ сообщение расследования, чтобы агент не спрашивал сайт
+// повторно и не сканировал его второй раз сам.
 const LANDING_SCAN_KEY = "aioffice_landing_scan"
 
 export function OnboardingFlow({ onDone, onStart }: Props) {
-  const [phase, setPhase] = useState<Phase>("input")
-  const [text, setText] = useState("")
-  const [url, setUrl] = useState("")
-  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<Phase>("chat")
   const [result, setResult] = useState<{ analysis: string[]; growth_points: string[]; initiatives: any[] }>(
     { analysis: [], growth_points: [], initiatives: [] })
   const [integrations, setIntegrations] = useState<any[]>([])
   const [landingScan, setLandingScan] = useState<{ url: string; result: any } | null>(null)
+  const [started, setStarted] = useState(false)
 
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(LANDING_SCAN_KEY)
       if (!raw) return
       const parsed = JSON.parse(raw)
-      if (parsed?.url && parsed?.result) {
-        setLandingScan(parsed)
-        setUrl(parsed.url)
-      }
+      if (parsed?.url && parsed?.result) setLandingScan(parsed)
     } catch { /* приватный режим браузера / битый JSON — просто без подсказки */ }
   }, [])
-
-  async function start() {
-    setBusy(true)
-    onStart()  // ДО await — App.tsx должен зафиксировать "мы в потоке" раньше,
-               // чем ready успеет стать true (brief.set_brief происходит в
-               // начале BOOTSTRAP, не в конце)
-    // Если url не менялся с момента лендинга — передаём уже готовый скан,
-    // сервер не будет обращаться к сайту второй раз.
-    const scanToSend = landingScan && landingScan.url === url.trim() ? landingScan.result : undefined
-    await api.briefStart(text.trim(), url.trim(), scanToSend).catch(() => null)
-    try { sessionStorage.removeItem(LANDING_SCAN_KEY) } catch { /* noop */ }
-    setBusy(false)
-    setPhase("analyzing")
-  }
 
   return (
     <div style={{
@@ -85,52 +74,10 @@ export function OnboardingFlow({ onDone, onStart }: Props) {
           "radial-gradient(48vw 48vw at 85% 80%, rgba(255,172,46,0.07), transparent 60%)" }} />
 
       <AnimatePresence mode="wait">
-        {phase === "input" && (
-          <motion.div key="input" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
-            style={{ position: "relative", width: "100%", maxWidth: 560, textAlign: "center" }}>
-            <CeoBadge />
-            <h1 className="display" style={{ fontSize: 28, margin: "18px 0 8px", fontWeight: 600 }}>
-              Расскажите о деле
-            </h1>
-            <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 24 }}>
-              В двух словах или подробно — как удобно. Есть бизнес, только открываетесь
-              или просто идея — офис разберётся сам.
-            </p>
-
-            {landingScan && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontSize: 12.5,
-                color: "var(--mercury-a)", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
-                borderRadius: "var(--radius-md)", padding: "10px 14px", marginBottom: 16 }}>
-                <span aria-hidden>✓</span>
-                <span>Уже посмотрел {landingScan.url} — {landingScan.result.headline?.toLowerCase() || "учту это в работе"}</span>
-              </div>
-            )}
-
-            <textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={4}
-              placeholder="Например: делаю торты на заказ, хочу больше клиентов…"
-              style={{
-                width: "100%", resize: "vertical", padding: "13px 15px", fontSize: 14, lineHeight: 1.5,
-                borderRadius: "var(--radius-md)", border: "1px solid var(--hairline-strong)",
-                background: "var(--surface-soft)", color: "var(--text)", fontFamily: "inherit", outline: "none",
-                marginBottom: 10,
-              }} />
-            <input value={url} onChange={e => setUrl(e.target.value)}
-              placeholder="Сайт или соцсеть, если есть (необязательно)"
-              onKeyDown={e => { if (e.key === "Enter") start() }}
-              style={{
-                width: "100%", padding: "11px 14px", fontSize: 13, borderRadius: "var(--radius-md)",
-                border: "1px solid var(--hairline)", background: "var(--surface-soft)",
-                color: "var(--text)", outline: "none", marginBottom: 20,
-              }} />
-
-            <motion.button onClick={start} disabled={busy} whileTap={{ scale: 0.97 }}
-              style={{
-                width: "100%", padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
-                background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1,
-              }}>
-              {busy ? "Запускаю…" : text.trim() ? "Начать →" : "Разберитесь сами →"}
-            </motion.button>
-          </motion.div>
+        {phase === "chat" && (
+          <InvestigationChat key="chat" landingScan={landingScan}
+            onFirstMessage={() => { if (!started) { onStart(); setStarted(true) } }}
+            onBriefReady={() => setPhase("analyzing")} />
         )}
 
         {phase === "analyzing" && (
@@ -160,6 +107,164 @@ export function OnboardingFlow({ onDone, onStart }: Props) {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+// ── Первое расследование: живой чат вместо формы ─────────────────────────────
+// До первого сообщения — чипы ниш (0 символов текста) + свободное поле, тот же
+// экран, что раньше. После первого сообщения — та же переписка, что обычный
+// чат с CEO (office_chat/api.chatGet/api.chatPost), только начатая ДО того, как
+// бриф готов: агент сам решает, спросить коротко или пойти искать (office/
+// investigation.py, Фаза 4). Опрашиваем /api/brief/status — как только ready,
+// сообщаем родителю переключиться на "analyzing" (реальный BOOTSTRAP уже идёт).
+function InvestigationChat({ landingScan, onFirstMessage, onBriefReady }: {
+  landingScan: { url: string; result: any } | null
+  onFirstMessage: () => void
+  onBriefReady: () => void
+}) {
+  const [messages, setMessages] = useState<any[]>([])
+  const [pending, setPending] = useState<any[]>([])
+  const [input, setInput] = useState("")
+  const [sending, setSending] = useState(false)
+  const feedLength = useOfficeSelector(s => s.feed.length)
+  const feedRef = useRef<HTMLDivElement>(null)
+  const pollRef = useRef<number | null>(null)
+  const chatting = messages.length > 0 || pending.length > 0
+
+  async function load() {
+    const data = await api.chatGet().catch(() => ({ messages: [] }))
+    const server = data.messages || []
+    setMessages(server)
+    setPending(p => p.filter(pm => !server.some((sm: any) => sm.from === "user" && sm.text === pm.text)))
+  }
+  const tick = useThrottled(feedLength, 2000)
+  useEffect(() => { if (chatting) load() }, [tick]) // eslint-disable-line
+
+  useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) }, [messages, pending])
+
+  // Пока идёт диалог (бриф ещё не готов) — проверяем готовность отдельно от
+  // общей ленты: BOOTSTRAP может начаться на том же ходу, что закрыл диалог,
+  // и владелец не должен ждать следующего тика общей ленты, чтобы увидеть это.
+  useEffect(() => {
+    if (!chatting) return
+    let cancelled = false
+    async function poll() {
+      const d = await api.briefStatus().catch(() => ({ ready: false }))
+      if (cancelled) return
+      if (d.ready) { onBriefReady(); return }
+      pollRef.current = window.setTimeout(poll, 2000)
+    }
+    poll()
+    return () => { cancelled = true; if (pollRef.current) clearTimeout(pollRef.current) }
+  }, [chatting]) // eslint-disable-line
+
+  async function send(text: string) {
+    const clean = text.trim()
+    if (!clean || sending) return
+    setSending(true)
+    onFirstMessage()
+    // Находка со скана лендинга (Instant Learning) — вкладываем в ПЕРВОЕ
+    // сообщение расследования как контекст, не как отдельный API-параметр:
+    // агент сам решает, как этим воспользоваться, вместо отдельного скан-пути.
+    const withContext = (!chatting && landingScan)
+      ? `${clean}\n\n(Уже посмотрели наш сайт ${landingScan.url}: ${landingScan.result.headline || "нашли кое-что"})`
+      : clean
+    setPending(p => [...p, { from: "user", text: clean, ts: Date.now() / 1000 }])
+    setInput("")
+    try {
+      await api.chatPost(withContext)
+      try { sessionStorage.removeItem(LANDING_SCAN_KEY) } catch { /* noop */ }
+    } finally {
+      setSending(false)
+      setTimeout(load, 500)
+    }
+  }
+
+  const allMessages = [...messages, ...pending]
+
+  return (
+    <motion.div key="chat" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+      style={{ position: "relative", width: "100%", maxWidth: 560, textAlign: "center" }}>
+      <CeoBadge small={chatting} />
+      <h1 className="display" style={{ fontSize: chatting ? 20 : 28, margin: "18px 0 8px", fontWeight: 600 }}>
+        {chatting ? "Первое расследование" : "Расскажите о деле"}
+      </h1>
+      {!chatting && (
+        <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 20 }}>
+          В двух словах или подробно — как удобно. Есть бизнес, только открываетесь
+          или просто идея — офис сам разберётся и всё, что можно, узнает сам.
+        </p>
+      )}
+
+      {!chatting && landingScan && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", fontSize: 12.5,
+          color: "var(--mercury-a)", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+          borderRadius: "var(--radius-md)", padding: "10px 14px", marginBottom: 16 }}>
+          <span aria-hidden>✓</span>
+          <span>Уже посмотрел {landingScan.url} — {landingScan.result.headline?.toLowerCase() || "учту это в работе"}</span>
+        </div>
+      )}
+
+      {!chatting && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 16 }}>
+          {NICHE_CHIPS.map(chip => (
+            <button key={chip} onClick={() => send(chip)} disabled={sending}
+              style={{ fontSize: 12.5, padding: "7px 14px", borderRadius: "var(--radius-pill)", cursor: "pointer",
+                border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>
+              {chip}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {chatting && (
+        <div ref={feedRef} style={{ textAlign: "left", maxHeight: "48vh", overflowY: "auto",
+          border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)",
+          background: "var(--surface-soft)", padding: 14, marginBottom: 12, display: "flex",
+          flexDirection: "column", gap: 10 }}>
+          {allMessages.map((m, i) => (
+            <div key={m.id || i} style={{ alignSelf: m.from === "user" ? "flex-end" : "flex-start",
+              maxWidth: "85%", padding: "8px 12px", borderRadius: "var(--radius-md)", fontSize: 13, lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+              background: m.from === "user" ? MERCURY : "var(--surface)",
+              color: m.from === "user" ? "#0b0b0b" : "var(--text)",
+              border: m.from === "user" ? "none" : "1px solid var(--hairline)" }}>
+              {m.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        {!chatting ? (
+          <textarea value={input} onChange={e => setInput(e.target.value)} autoFocus rows={3}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input || "Не знаю, с чего начать — разберитесь сами") } }}
+            placeholder="Например: делаю торты на заказ, хочу больше клиентов…"
+            style={{
+              width: "100%", resize: "vertical", padding: "13px 15px", fontSize: 14, lineHeight: 1.5,
+              borderRadius: "var(--radius-md)", border: "1px solid var(--hairline-strong)",
+              background: "var(--surface-soft)", color: "var(--text)", fontFamily: "inherit", outline: "none",
+            }} />
+        ) : (
+          <input value={input} onChange={e => setInput(e.target.value)} autoFocus
+            onKeyDown={e => { if (e.key === "Enter") send(input) }}
+            placeholder="Ответьте здесь…"
+            style={{ flex: 1, padding: "11px 14px", fontSize: 13, borderRadius: "var(--radius-pill)",
+              border: "1px solid var(--hairline)", background: "var(--surface-soft)",
+              color: "var(--text)", outline: "none" }} />
+        )}
+      </div>
+
+      <motion.button onClick={() => send(input || "Не знаю, с чего начать — разберитесь сами")}
+        disabled={sending} whileTap={{ scale: 0.97 }}
+        style={{
+          width: "100%", marginTop: 10, padding: chatting ? "10px 20px" : "13px 20px",
+          borderRadius: "var(--radius-pill)", border: "none", cursor: "pointer",
+          background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600, opacity: sending ? 0.6 : 1,
+        }}>
+        {sending ? "…" : chatting ? "Отправить →" : input.trim() ? "Начать →" : "Разберитесь сами →"}
+      </motion.button>
+    </motion.div>
   )
 }
 

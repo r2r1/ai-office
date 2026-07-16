@@ -574,7 +574,22 @@ function AccountTab() {
         </a>
       </Card>
 
-      <Card style={{ marginTop: 16, borderColor: confirmingReset ? "rgba(207,102,121,0.4)" : undefined }}>
+      {/* Первое расследование компании (docs/first-investigation-plan-2026-07-16.md,
+          Фаза 5): новый филиал/направление — НЕ повод удалять то, что офис уже узнал.
+          Отдельного механизма "повторное расследование" не заводим — CEO и так ведёт
+          живой диалог (office/investigation.py, _steer_from_chat) в любой момент;
+          здесь просто явно указываем, где эта возможность живёт, чтобы её не искали
+          там же, где полный сброс (ниже). */}
+      <Card style={{ marginTop: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "var(--text)" }}>Новый филиал или направление?</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Не нужно ничего сбрасывать — просто напишите об этом CEO в «Чатах» обычным
+          сообщением. Он впишет новое направление в текущую работу — прошлые данные
+          о компании никуда не денутся.
+        </div>
+      </Card>
+
+      <Card style={{ borderColor: confirmingReset ? "rgba(207,102,121,0.4)" : undefined }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
             <div style={{ fontSize: 13, color: "var(--text)" }}>Начать заново с другим бизнесом</div>
