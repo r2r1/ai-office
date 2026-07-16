@@ -42,7 +42,7 @@ from src.office import plan as plan_module
 from src.agents import onboarding
 from src.agents import orchestrator
 from src.office import org
-from src.office import intake as intake_module
+from src.office import investigation
 from src.core import llm as llm_core
 from src.integrations import registry as integrations_registry
 from src.saas import db as saas_db, store as saas_store, auth as saas_auth
@@ -2052,51 +2052,24 @@ async def _post_ceo(text: str) -> None:
 
 
 async def _intake_from_chat(text: str) -> None:
-    """Discovery ПЕРЕД запуском офиса: сначала уточняем задачу, потом строим бриф и стартуем.
-    Глупый офис строил бы вслепую; умный — задаёт вопросы и понимает бизнес клиента."""
-    if not intake_module.active():
-        # немедленно сигнализируем — пользователь видит реакцию, пока LLM думает
-        await bus.publish({"type": "thinking", "agent_id": "orchestrator_1",
-                           "text": "Уточняю задачу перед стартом…"})
-        await _post_ceo("Читаю вашу идею, сейчас сформулирую уточняющие вопросы... ⏳")
-        try:
-            qs = await asyncio.wait_for(
-                onboarding.make_questions(text, publish=bus.publish),
-                timeout=20.0,
-            )
-        except Exception:
-            qs = ["Какой результат вы считаете успехом?",
-                  "Кто ваша целевая аудитория и в какой нише?",
-                  "Что уже есть — продукт, бюджет, наработки, команда?"]
-        intake_module.start(text, qs)
-        reply = ("Класс, что хотите это запустить 🚀 Чтобы сделать по делу, а не строить вслепую, "
-                 "уточню несколько вещей:\n\n" + "\n".join(f"• {q}" for q in qs) +
-                 "\n\nОтветьте одним сообщением — и команда сразу приступит: исследование рынка → "
-                 "стратегия → план. Это не «лендинг за 5 минут», а настоящая работа.")
-        await _post_ceo(reply)
-        return
-
-    # это ответы на вопросы → собираем бриф и запускаем офис
-    st = intake_module.add_answer(text)
+    """Первое расследование ПЕРЕД запуском офиса (docs/first-investigation-plan-
+    2026-07-16.md, Фаза 4): живой агентский диалог вместо жёсткого 2-шагового
+    скрипта (спросить фиксированные вопросы → собрать один ответ → бриф).
+    Агент сам решает, искать ли web_search или спросить коротко, и завершает
+    явным finish_investigation — см. office/investigation.py."""
     await bus.publish({"type": "thinking", "agent_id": "orchestrator_1",
-                       "text": "Формирую бриф по вашим ответам…"})
-    qa = [{"q": "; ".join(st.get("questions", [])), "a": "\n".join(st.get("answers", []))}]
+                       "text": "Разбираюсь…"})
     try:
-        brief_data = await asyncio.wait_for(
-            onboarding.build_brief(st.get("idea", ""), qa, publish=bus.publish),
-            timeout=25.0,
+        reply, finished = await asyncio.wait_for(
+            investigation.run_turn(text, publish=bus.publish),
+            timeout=90.0,
         )
     except Exception:
-        joined = (st.get("idea", "") + " — " + " ".join(st.get("answers", []))).strip()
-        brief_data = {"summary": joined[:600], "goal": st.get("idea", "")[:300], "niche": ""}
-    brief.set_brief(brief_data)
-    memory.remember("Бриф клиента (приоритет)", brief_data.get("summary", ""))
-    intake_module.clear()
-    reply = (f"Принял ✅ Вот как я понял задачу:\n\n{brief_data.get('summary', '')}\n\n"
-             "Команда приступает: ресёрчер изучает рынок, стратег считает модель, дальше — "
-             "стратегия и план. Это займёт время — делаем по-настоящему. Пишите сюда в любой "
-             "момент, чтобы направлять или уточнять.")
+        reply, finished = (
+            "Не расслышал — повторите, пожалуйста, чем занимается компания?", False)
     await _post_ceo(reply)
+    if finished:
+        office_loop.wake_tenant()
 
 
 async def _steer_from_chat(text: str) -> None:
