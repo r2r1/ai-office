@@ -138,7 +138,36 @@ def payload() -> dict:
         "domains": domains,
         "confidence": confidence,
         "confidence_reasons": confidence_reasons,
+        "checklist": _checklist(b, has_research, has_strategy, has_tech, crm_connected),
     }
+
+
+# Фаза 3 (docs/first-investigation-plan-2026-07-16.md): гранулярный чек-лист —
+# ПОД-УРОВЕНЬ внутри уже существующих 5 доменов (не замена их), видимый пункт за
+# пунктом ("офис уже знает 24%: ✓ рынок ✓ регион ○ продажи ○ CRM..."), а не только
+# один общий процент. Каждый пункт — реальный сигнал, уже посчитанный выше в
+# payload() (никаких новых источников данных в этой фазе — только их раскладка
+# по конкретным, узнаваемым для владельца пунктам).
+def _checklist(b: dict, has_research: bool, has_strategy: bool, has_tech: bool,
+               crm_connected: bool) -> list[dict]:
+    from src.office import leads as leads_module
+    scan = b.get("scan") or {}
+    scan_detected = scan.get("detected") or {}
+    has_leads = leads_module.count() > 0
+    items = [
+        ("рынок", "business", has_research),
+        ("конкуренты", "business", has_research),
+        ("регион", "business", bool(b.get("audience"))),
+        ("продукты", "business", bool(b.get("niche"))),
+        ("сайт", "marketing", bool(scan.get("ok"))),
+        ("аналитика", "marketing", any((scan_detected.get("analytics") or {}).values())),
+        ("продажи", "sales", has_leads),
+        ("CRM", "sales", crm_connected),
+        ("финансы", "finance", bool(b.get("avg_check_usd") or b.get("budget_usd"))),
+        ("процессы", "team", has_strategy),
+        ("команда", "team", has_tech),
+    ]
+    return [{"label": label, "domain": domain, "done": done} for label, domain, done in items]
 
 
 def _confidence(b: dict, connected: list, crm_connected: bool, has_research: bool) -> tuple[int, list[str]]:

@@ -368,14 +368,30 @@ export default function App() {
                 <div style={{ marginBottom: 12 }}>
                   {Object.entries(DOMAIN_LABELS).map(([key, label]) => {
                     const v = understanding.domains[key] ?? 0
+                    // Фаза 3 (docs/first-investigation-plan-2026-07-16.md): гранулярный
+                    // чек-лист — ПОД-УРОВЕНЬ внутри этого же домена (не отдельная
+                    // структура) — "Бизнес 40%" сам по себе ничего не говорит владельцу,
+                    // а "✓ продукты ○ рынок ○ регион" сразу видно, чего конкретно не хватает.
+                    const checklistForDomain = (understanding.checklist || []).filter((c: any) => c.domain === key)
                     return (
-                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                        <span style={{ fontSize: 10.5, color: "var(--text-dim)", width: 70, flexShrink: 0 }}>{label}</span>
-                        <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--hairline)", overflow: "hidden" }}>
-                          <div style={{ width: `${v}%`, height: "100%", borderRadius: 2,
-                            background: v >= 60 ? "#a0e0ab" : v >= 30 ? "#ffac2e" : "var(--faint)" }} />
+                      <div key={key} style={{ marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 10.5, color: "var(--text-dim)", width: 70, flexShrink: 0 }}>{label}</span>
+                          <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--hairline)", overflow: "hidden" }}>
+                            <div style={{ width: `${v}%`, height: "100%", borderRadius: 2,
+                              background: v >= 60 ? "#a0e0ab" : v >= 30 ? "#ffac2e" : "var(--faint)" }} />
+                          </div>
+                          <span className="mono" style={{ fontSize: 9.5, color: "var(--faint)", width: 26, textAlign: "right" }}>{v}%</span>
                         </div>
-                        <span className="mono" style={{ fontSize: 9.5, color: "var(--faint)", width: 26, textAlign: "right" }}>{v}%</span>
+                        {checklistForDomain.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 10px", marginTop: 3, marginLeft: 78 }}>
+                            {checklistForDomain.map((c: any) => (
+                              <span key={c.label} style={{ fontSize: 10, color: c.done ? "#a0e0ab" : "var(--faint)" }}>
+                                {c.done ? "✓" : "○"} {c.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )
                   })}

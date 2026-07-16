@@ -258,6 +258,58 @@ def test_understanding_domains_present_and_bounded():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+# ── Гранулярный чек-лист Company Understanding (Фаза 3, docs/first-investigation-plan-2026-07-16.md) ──
+
+def test_checklist_has_11_items_all_tagged_with_existing_domain():
+    from src.office import understanding
+    ctx.set_tenant("understanding_checklist_unit1")
+    from src.saas import context
+    context.write_json("brief.json", {"niche": "потолки", "goal": "сайт", "summary": "тест"})
+    checklist = understanding.payload()["checklist"]
+    assert len(checklist) == 11
+    for item in checklist:
+        assert item["domain"] in ("business", "marketing", "sales", "finance", "team")
+        assert isinstance(item["done"], bool)
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_checklist_marks_product_and_region_from_brief_fields():
+    from src.office import understanding
+    ctx.set_tenant("understanding_checklist_unit2")
+    from src.saas import context
+    context.write_json("brief.json", {"niche": "потолки", "audience": "жители КМВ", "summary": "тест"})
+    checklist = {item["label"]: item["done"] for item in understanding.payload()["checklist"]}
+    assert checklist["продукты"] is True
+    assert checklist["регион"] is True
+    assert checklist["рынок"] is False  # research.md ещё не написан
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_checklist_marks_site_and_analytics_from_real_scan():
+    from src.office import understanding
+    ctx.set_tenant("understanding_checklist_unit3")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "потолки", "summary": "тест",
+        "scan": {"ok": True, "detected": {"analytics": {"ga4": True}}},
+    })
+    checklist = {item["label"]: item["done"] for item in understanding.payload()["checklist"]}
+    assert checklist["сайт"] is True
+    assert checklist["аналитика"] is True
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_checklist_sales_marked_only_by_real_leads_not_bare_summary():
+    from src.office import understanding
+    ctx.set_tenant("understanding_checklist_unit4")
+    from src.saas import context
+    context.write_json("brief.json", {"niche": "потолки", "summary": "тест"})
+    checklist = {item["label"]: item["done"] for item in understanding.payload()["checklist"]}
+    assert checklist["продажи"] is False
+    assert checklist["CRM"] is False
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 # ── Confidence ≠ Understanding score (issue #24) ─────────────────────────────
 
 def test_confidence_present_and_bounded():
