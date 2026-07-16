@@ -214,6 +214,15 @@ def _build_sync(root: str, fingerprint: float) -> dict:
                           str(proj), INSTALL_TIMEOUT)
         log += ilog
         if code != 0:
+            # Реальный найденный баг (живая проверка сборки настоящего 3D-Vite-проекта,
+            # 2026-07-16): прерванный npm install (ENOSPC/сеть/таймаут) оставляет
+            # node_modules НАПОЛОВИНУ заполненным — следующий вызов видел, что
+            # node_modules существует, и НИКОГДА больше не переустанавливал, поэтому
+            # сборка молча падала на каждой попытке из-за одного и того же
+            # повреждённого пакета, пока кто-то не удалял node_modules руками.
+            # Удаляем недоустановленную папку — следующий вызов увидит её отсутствие
+            # и честно переустановит с нуля, а не будет пересдавать один и тот же лог.
+            shutil.rmtree(node_modules, ignore_errors=True)
             return _finish(dict(ok=False, out_dir="", fingerprint=fingerprint,
                                 reason="npm install не прошёл",
                                 log_tail=log[-1500:]), t0)
@@ -268,7 +277,14 @@ async def ensure_built(publish=None) -> dict:
 
     fp = _src_fingerprint(d["root"])
     cache = _cache()
-    if _cache_fresh(cache, fp):
+    # ⚠️ Реальный найденный баг (та же живая проверка сборки, 2026-07-16): кеш
+    # считался "свежим" только по отпечатку исходников, БЕЗ учёта ok — упавшая
+    # сборка (ENOSPC/сеть/временная недоступность npm-реестра) кешировалась и
+    # НАВСЕГДА блокировала повторную попытку, пока исходники не изменятся хоть
+    # на байт, даже если причина сбоя была временной и уже исчезла. Пропускаем
+    # реальную сборку по кешу ТОЛЬКО если прошлая попытка реально удалась —
+    # неудача всегда получает шанс на повтор.
+    if cache.get("ok") and _cache_fresh(cache, fp):
         return {**cache, "kind": "build"}
 
     if not build_allowed():
@@ -282,7 +298,7 @@ async def ensure_built(publish=None) -> dict:
     async with lock:
         # Пока ждали лок, параллельная корутина могла уже собрать то же самое.
         cache = _cache()
-        if _cache_fresh(cache, fp):
+        if cache.get("ok") and _cache_fresh(cache, fp):
             return {**cache, "kind": "build"}
         if publish:
             await publish({"type": "system",
