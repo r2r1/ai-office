@@ -287,6 +287,115 @@ def test_confidence_zero_signals_stays_low():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+# ── Первое расследование: search_company (docs/first-investigation-plan-2026-07-16.md, Фаза 1) ──
+
+def test_investigation_queries_orders_by_specificity_and_dedups():
+    qs = company_scan._investigation_queries("корпусная мебель", "КМВ", "Мебель+")
+    assert qs[0] == "Мебель+ корпусная мебель КМВ"
+    assert "Мебель+ КМВ" in qs
+    assert "корпусная мебель КМВ" in qs
+    assert "корпусная мебель" in qs
+    assert len(qs) == len(set(qs))
+
+
+def test_investigation_queries_without_name_uses_niche_only():
+    qs = company_scan._investigation_queries("корпусная мебель", "КМВ", "")
+    assert qs == ["корпусная мебель КМВ", "корпусная мебель"]
+
+
+def test_search_company_empty_input_returns_unconfirmed_without_search():
+    result = asyncio.run(company_scan.search_company("", "", ""))
+    assert result["ok"] is False
+    assert result["stage"]["confidence"] == "unconfirmed"
+    assert result["queries_tried"] == []
+
+
+def test_search_company_no_results_is_honest_not_confirmed():
+    with patch("src.core.search.web_search_raw", return_value=[]):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", ""))
+    assert result["ok"] is False
+    assert result["stage"]["confidence"] == "unconfirmed"
+    assert len(result["queries_tried"]) > 1  # пробовал несколько формулировок, не одну
+
+
+def test_search_company_tries_next_query_only_if_previous_empty():
+    calls = []
+    def fake_search(query, max_results=6, timeout=8):
+        calls.append(query)
+        return [] if len(calls) == 1 else [{"title": "Рынок мебели", "body": "обзор", "href": "https://example.com/a"}]
+    with patch("src.core.search.web_search_raw", side_effect=fake_search):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", "Мебель+"))
+    assert len(calls) == 2  # первая формулировка пустая → перешёл к следующей, не искал третью
+    assert result["ok"] is True
+
+
+def test_search_company_stops_after_first_successful_query():
+    calls = []
+    def fake_search(query, max_results=6, timeout=8):
+        calls.append(query)
+        return [{"title": "Нашли", "body": "", "href": "https://vk.com/mebelplus"}]
+    with patch("src.core.search.web_search_raw", side_effect=fake_search):
+        asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", "Мебель+"))
+    assert len(calls) == 1  # первая формулировка сразу дала результат — бюджет не тратим дальше
+
+
+def test_search_company_without_name_finds_market_not_company():
+    with patch("src.core.search.web_search_raw",
+               return_value=[{"title": "Топ мебельных мастерских КМВ", "body": "обзор рынка", "href": "https://example.com"}]):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", ""))
+    assert result["ok"] is True
+    assert result["stage"]["confidence"] == "unconfirmed"
+    assert "рынок" in result["stage"]["reason"]
+
+
+def test_search_company_finds_vk_presence_with_reviews_infers_growth():
+    with patch("src.core.search.web_search_raw",
+               return_value=[{"title": "Мебель+ | VK", "body": "4.8 рейтинг, отзывы клиентов",
+                              "href": "https://vk.com/mebelplus"}]):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", "Мебель+"))
+    assert result["stage"]["key"] == "growth"
+    assert result["stage"]["confidence"] == "inferred"
+    assert result["detected"]["aggregators"].get("vk") == "VK"
+
+
+def test_search_company_finds_presence_without_reviews_infers_launch():
+    with patch("src.core.search.web_search_raw",
+               return_value=[{"title": "Мебель+ | Instagram", "body": "новый профиль",
+                              "href": "https://instagram.com/mebelplus"}]):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", "Мебель+"))
+    assert result["stage"]["key"] == "launch"
+    assert result["stage"]["confidence"] == "inferred"
+
+
+def test_search_company_generic_web_hit_stays_unconfirmed():
+    with patch("src.core.search.web_search_raw",
+               return_value=[{"title": "Мебель+ упоминание в статье", "body": "просто текст",
+                              "href": "https://news.example.com/article"}]):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", "Мебель+"))
+    assert result["stage"]["confidence"] == "unconfirmed"
+
+
+def test_classify_result_host_recognizes_aggregators_and_subdomains():
+    assert company_scan._classify_result_host("https://vk.com/mebelplus") == ("vk", "VK")
+    assert company_scan._classify_result_host("https://www.instagram.com/mebelplus") == ("instagram", "Instagram")
+    assert company_scan._classify_result_host("https://2gis.ru/pyatigorsk/firm/1") == ("2gis", "2ГИС")
+    assert company_scan._classify_result_host("https://news.example.com") is None
+
+
+def test_search_company_respects_time_budget_stub():
+    """Бюджет — по времени, не по числу вызовов: если первая попытка "съела"
+    почти весь остаток бюджета, следующие формулировки не запускаются."""
+    def slow_search(query, max_results=6, timeout=8):
+        import time as _time
+        _time.sleep(0.6)
+        return []
+    with patch("src.office.company_scan._SEARCH_BUDGET_SECONDS", 1.5), \
+         patch("src.core.search.web_search_raw", side_effect=slow_search):
+        result = asyncio.run(company_scan.search_company("корпусная мебель", "КМВ", "Мебель+"))
+    assert result["ok"] is False
+    assert len(result["queries_tried"]) == 1  # вторая формулировка не запущена — бюджет исчерпан
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):

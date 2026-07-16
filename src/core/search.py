@@ -6,8 +6,12 @@
 from typing import Optional
 
 
-def web_search(query: str, max_results: int = 5, timeout: int = 20) -> str:
-    """Ищет в DuckDuckGo и возвращает отформатированный текст результатов.
+def web_search_raw(query: str, max_results: int = 5, timeout: int = 20) -> list[dict]:
+    """Ищет в DuckDuckGo и возвращает СТРУКТУРИРОВАННЫЕ результаты
+    ([{title, body, href}, ...]) — для кода, который сам разбирает находки
+    (см. company_scan.search_company), а не только подаёт текст в промпт LLM.
+    Пустой список — ничего не найдено или поиск недоступен (не бросает исключений
+    наружу, тот же принцип, что и company_scan.scan: недоступность — тоже сигнал).
 
     `timeout` — потолок HTTP-запросов внутри DDGS. Без него зависший поисковик
     (DDG в РФ нередко блокируется/стоит) держал тред вечно; треды копились в общем
@@ -19,7 +23,7 @@ def web_search(query: str, max_results: int = 5, timeout: int = 20) -> str:
         try:
             from duckduckgo_search import DDGS  # старое имя пакета
         except ImportError:
-            return "Ошибка: установите пакет 'ddgs' (pip install ddgs)"
+            return []
 
     try:
         results = []
@@ -30,9 +34,15 @@ def web_search(query: str, max_results: int = 5, timeout: int = 20) -> str:
         with client as ddgs:
             for r in ddgs.text(query, max_results=max_results):
                 results.append(r)
-    except Exception as e:
-        return f"Ошибка поиска: {e}"
+        return results
+    except Exception:
+        return []
 
+
+def web_search(query: str, max_results: int = 5, timeout: int = 20) -> str:
+    """Ищет в DuckDuckGo и возвращает отформатированный текст результатов (для
+    промпта LLM-агента — см. web_search_raw для структурированного варианта)."""
+    results = web_search_raw(query, max_results=max_results, timeout=timeout)
     if not results:
         return "Ничего не найдено."
 

@@ -7,6 +7,7 @@ company-understanding-vision). Чистый httpx + regex по HTML, $0 стои
 возвращается частичный результат с тем, что удалось получить.
 """
 
+import asyncio
 import ipaddress
 import re
 import socket
@@ -385,3 +386,170 @@ def summary_line(scan_result: dict) -> str:
     if pain_points:
         line += ". Точки роста: " + "; ".join(pain_points)
     return line
+
+
+# ─────────────────────── Первое расследование: поиск БЕЗ готового URL ───────────────────────
+#
+# docs/first-investigation-plan-2026-07-16.md, Фаза 1: раньше единственный источник
+# знаний о компании — HTML одной страницы, которую ДОЛЖЕН дать сам пользователь
+# (scan(url) выше). Если URL не дали (типичный случай — "корпусная мебель", без
+# сайта), business_stage не появлялся ВООБЩЕ, и дальше по цепочке LLM молча
+# угадывал стадию бизнеса из воздуха (реальная находка, разбор с владельцем
+# 2026-07-16). search_company() ищет компанию/рынок в вебе по нише+региону+(опц.)
+# имени — не ждёт готовую ссылку.
+#
+# Источник данных здесь — сниппеты поисковой выдачи (title/body/href), НЕ полный
+# HTML страницы, поэтому сигнал заведомо слабее, чем у scan(): результат ВСЕГДА
+# несёт явное поле confidence (unconfirmed/inferred), никогда не молчаливое
+# отсутствие стадии, как раньше. Значение "confirmed" здесь не выставляется —
+# оно принадлежит либо прямому scan() полной страницы, либо явному подтверждению
+# владельцем (см. LandingView.tsx correctStage) — search_company() по построению
+# не может знать наверняка, только предполагать.
+_SEARCH_BUDGET_SECONDS = 20.0  # суммарный суббюджет на все формулировки запроса
+
+# Домены-агрегаторы, по которым результат поиска классифицируется как реальное
+# присутствие компании в вебе (не просто "упоминание где-то в статье") — то же
+# семейство источников, что и _SOCIAL_RE выше, но для ссылок ИЗ ВЫДАЧИ поиска,
+# а не с самой HTML-страницы.
+_AGGREGATOR_HOSTS: dict[str, tuple[str, str]] = {
+    "vk.com": ("vk", "VK"),
+    "instagram.com": ("instagram", "Instagram"),
+    "t.me": ("telegram", "Telegram-канал"),
+    "2gis.ru": ("2gis", "2ГИС"),
+    "avito.ru": ("avito", "Авито"),
+    "yandex.ru": ("yandex_maps", "Яндекс.Картах/Бизнесе"),
+    "maps.google.com": ("google_maps", "Google Картах"),
+    "flamp.ru": ("flamp", "отзывах на Flamp"),
+    "zoon.ru": ("zoon", "отзывах на Zoon"),
+}
+
+_REVIEW_SIGNAL_RE = re.compile(r"отзыв|рейтинг|★|rating|review", re.I)
+
+
+def _classify_result_host(href: str) -> tuple[str, str] | None:
+    host = (urlparse(href).hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    for known, val in _AGGREGATOR_HOSTS.items():
+        if host == known or host.endswith("." + known):
+            return val
+    return None
+
+
+def _investigation_queries(niche: str, region: str, name: str) -> list[str]:
+    """Формулировки запроса по убыванию специфичности — как решено в обсуждении:
+    несколько попыток (с именем/без, с регионом/без) до честной сдачи, не одна
+    попытка и не бесконечный перебор."""
+    queries: list[str] = []
+    if name:
+        if niche or region:
+            queries.append(" ".join(p for p in (name, niche, region) if p))
+        queries.append(" ".join(p for p in (name, region) if p) or name)
+    if niche:
+        queries.append(" ".join(p for p in (niche, region) if p))
+        if region:
+            queries.append(niche)  # без региона — последний резерв, если и это не дало сигнала
+    seen: set[str] = set()
+    out = []
+    for q in queries:
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out
+
+
+async def search_company(niche: str = "", region: str = "", name: str = "") -> dict:
+    """Ищет компанию/рынок в вебе по нише+региону+(опц.)имени — БЕЗ готового URL
+    (см. docstring секции выше). Не бросает исключений наружу — недоступность
+    поиска тоже честный исход (см. `stage.confidence == "unconfirmed"`).
+
+    Возвращает {ok, queries_tried, candidates: [{title, snippet, url, source}],
+    detected: {...}, stage: {key, label, reason, confidence}, findings: [...]}.
+    """
+    niche = (niche or "").strip()[:120]
+    region = (region or "").strip()[:80]
+    name = (name or "").strip()[:120]
+
+    if not niche and not name:
+        return {
+            "ok": False, "queries_tried": [], "candidates": [], "detected": {},
+            "stage": {"key": "idea", "label": _STAGE_LABELS["idea"], "confidence": "unconfirmed",
+                     "reason": "ни ниша, ни название не указаны — искать нечему"},
+            "findings": [],
+        }
+
+    queries = _investigation_queries(niche, region, name)
+    t0 = time.monotonic()
+    results: list[dict] = []
+    tried: list[str] = []
+    from src.core import search as search_module
+
+    for q in queries:
+        remaining = _SEARCH_BUDGET_SECONDS - (time.monotonic() - t0)
+        if remaining <= 1.0:
+            break
+        tried.append(q)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.to_thread(search_module.web_search_raw, q, 6, 8),
+                timeout=min(remaining, 10.0),
+            )
+        except Exception:
+            results = []
+        if results:
+            break  # эта формулировка дала сигнал — не тратим остаток бюджета на следующие
+
+    candidates: list[dict] = []
+    aggregator_hits: dict[str, str] = {}
+    has_reviews_signal = False
+    for r in results[:6]:
+        href = r.get("href", "") or ""
+        title = r.get("title", "") or ""
+        body = r.get("body", "") or ""
+        cls = _classify_result_host(href)
+        source = cls[0] if cls else "web"
+        if cls:
+            aggregator_hits[cls[0]] = cls[1]
+        if _REVIEW_SIGNAL_RE.search(f"{title} {body}"):
+            has_reviews_signal = True
+        candidates.append({"title": title[:160], "snippet": body[:220], "url": href, "source": source})
+
+    detected = {
+        "queries_tried": tried,
+        "aggregators": aggregator_hits,
+        "has_reviews_signal": has_reviews_signal,
+        "candidates_count": len(candidates),
+    }
+    last_query = tried[-1] if tried else ""
+
+    if not candidates:
+        stage = {"key": "idea", "label": _STAGE_LABELS["idea"], "confidence": "unconfirmed",
+                 "reason": f"не нашёл сигналов в сети ни по одной из {len(tried)} формулировок запроса — "
+                          "либо компания только начинает, либо ищу не там"}
+        findings = [f"Пробовал {len(tried)} формулировок запроса — ничего не нашёл"]
+    elif not name:
+        # Есть результаты, но без имени они привязаны к нише/рынку в целом,
+        # не к конкретной компании — законный исход "нашёл рынок, не компанию".
+        stage = {"key": "idea", "label": _STAGE_LABELS["idea"], "confidence": "unconfirmed",
+                 "reason": "нашёл рынок и похожие компании в этой нише, но не название вашей — "
+                          "имени не было в запросе, привязать находки не к чему"}
+        findings = [f"Нашёл {len(candidates)} результатов по рынку «{niche}»" + (f" в {region}" if region else "")]
+    elif aggregator_hits and has_reviews_signal:
+        stage = {"key": "growth", "label": _STAGE_LABELS["growth"], "confidence": "inferred",
+                 "reason": "нашёл вас в " + ", ".join(aggregator_hits.values()) +
+                          " с отзывами — похоже, вы уже работаете с клиентами"}
+        findings = [f"Нашёл {len(candidates)} результатов по «{last_query}», есть отзывы"]
+    elif aggregator_hits:
+        stage = {"key": "launch", "label": _STAGE_LABELS["launch"], "confidence": "inferred",
+                 "reason": "нашёл вас в " + ", ".join(aggregator_hits.values()) +
+                          " — присутствие есть, но следов активности (отзывов) не вижу"}
+        findings = [f"Нашёл {len(candidates)} результатов по «{last_query}»"]
+    else:
+        stage = {"key": "idea", "label": _STAGE_LABELS["idea"], "confidence": "unconfirmed",
+                 "reason": "нашёл что-то похожее по названию, но не в узнаваемых источниках "
+                          "(соцсети/карты/агрегаторы) — не уверен, что это точно вы"}
+        findings = [f"Нашёл {len(candidates)} результатов по «{last_query}», но без явного подтверждения"]
+
+    return {
+        "ok": bool(candidates), "queries_tried": tried, "candidates": candidates,
+        "detected": detected, "stage": stage, "findings": findings,
+    }
