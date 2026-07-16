@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Конфиденциальность — AI Office</title>
+  <link rel="icon" type="image/png" href="/webapp/favicon.png" />
+  <style>
+    :root { --bg:#0a0908; --text:#f2f0ed; --muted:#9b968f; --hairline:#2a2825; --accent:#a0e0ab; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+      line-height:1.65; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 64px 24px 100px; }
+    a { color: var(--accent); }
+    h1 { font-size: 28px; font-weight: 600; margin: 0 0 6px; }
+    .updated { color: var(--muted); font-size: 13px; margin-bottom: 40px; }
+    h2 { font-size: 17px; font-weight: 600; margin: 36px 0 10px; }
+    p, li { color: #cfcbc4; font-size: 14.5px; }
+    ul { padding-left: 20px; }
+    table { width:100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+    th, td { text-align:left; padding: 8px 10px; border-bottom: 1px solid var(--hairline); color:#cfcbc4; }
+    th { color: var(--muted); font-weight: 500; }
+    .back { display:inline-block; margin-bottom: 28px; font-size: 13px; color: var(--muted); text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/webapp/">← AI Office</a>
+    <h1>Конфиденциальность</h1>
+    <div class="updated">Действует с 16 июля 2026</div>
+
+    <p>Здесь честно и конкретно перечислено, какие данные собирает AI Office и зачем —
+    без общих формулировок «в маркетинговых целях».</p>
+
+    <h2>Какие данные мы собираем</h2>
+    <table>
+      <tr><th>Данные</th><th>Зачем</th></tr>
+      <tr><td>Email или аккаунт GitHub/Google (при входе)</td><td>Идентификация вашего рабочего пространства</td></tr>
+      <tr><td>Текст брифа и переписки с агентами</td><td>Единственный способ офиса понять ваш бизнес и задачу</td></tr>
+      <tr><td>Учётные данные подключённых интеграций</td><td>Хранятся зашифрованными (Fernet), нужны, чтобы агенты могли действовать от вашего имени в этих сервисах</td></tr>
+      <tr><td>Контакты, оставленные посетителями ваших сайтов (лиды)</td><td>Показываются вам в разделе «Результаты» — это данные ваших клиентов, не наши</td></tr>
+      <tr><td>Технические логи работы агентов</td><td>Отладка и учёт расхода токенов LLM</td></tr>
+    </table>
+
+    <h2>Чего мы не делаем</h2>
+    <ul>
+      <li>Не передаём содержимое вашего рабочего пространства другим клиентам сервиса.</li>
+      <li>Не используем ваши данные для обучения сторонних моделей.</li>
+      <li>Не продаём и не передаём ваши данные third-party рекламным сетям.</li>
+    </ul>
+
+    <h2>Языковые модели</h2>
+    <p>Запросы к языковым моделям (для исследования, стратегии, кода, переписки
+    агентов) обрабатываются через провайдера LLM-инфраструктуры сервиса. Текст
+    запроса и ответа при этом технически проходит через инфраструктуру
+    провайдера согласно его собственной политике обработки данных.</p>
+
+    <h2>Хранение и удаление</h2>
+    <p>Данные вашего рабочего пространства хранятся, пока существует аккаунт.
+    Полное и необратимое удаление всех данных — в любой момент, через
+    «Настройки → Аккаунт → Начать заново» (полный сброс) или закрытием аккаунта.</p>
+
+    <h2>Cookies</h2>
+    <p>Используется только cookie сессии для входа в аккаунт — без сторонних
+    трекеров и рекламных cookie.</p>
+
+    <h2>Ваши права</h2>
+    <p>Вы можете в любой момент запросить выгрузку данных вашего рабочего
+    пространства («Настройки → Аккаунт → Скачать логи») или полностью их
+    удалить.</p>
+
+    <p style="margin-top:48px; color:var(--muted); font-size:13px;">
+      Вопросы о конфиденциальности — пишите через раздел поддержки в интерфейсе продукта.
+    </p>
+  </div>
+</body>
+</html>

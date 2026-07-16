@@ -651,8 +651,8 @@ function Footer() {
       borderTop: "1px solid var(--hairline)", fontSize: 12, color: "var(--faint)", flexWrap: "wrap", gap: 12 }}>
       <span>© {new Date().getFullYear()} AI Office</span>
       <span style={{ display: "flex", gap: 18 }}>
-        <a href="#" style={{ color: "var(--faint)", textDecoration: "none" }}>Условия</a>
-        <a href="#" style={{ color: "var(--faint)", textDecoration: "none" }}>Конфиденциальность</a>
+        <a href="/webapp/legal/terms.html" target="_blank" rel="noreferrer" style={{ color: "var(--faint)", textDecoration: "none" }}>Условия</a>
+        <a href="/webapp/legal/privacy.html" target="_blank" rel="noreferrer" style={{ color: "var(--faint)", textDecoration: "none" }}>Конфиденциальность</a>
       </span>
     </footer>
   )
