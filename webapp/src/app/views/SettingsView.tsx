@@ -527,7 +527,15 @@ function LimitsTab() {
 function AccountTab() {
   const { state } = useOffice()
   const [businessName, setBusinessName] = useState<string>("")
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
   useEffect(() => { api.briefStatus().then(d => setBusinessName(d?.brief?.niche || "")) }, [])
+
+  async function doReset() {
+    setResetting(true)
+    await api.briefReset()
+    window.location.reload()
+  }
 
   return (
     <ViewBody style={{ maxWidth: 560 }}>
@@ -564,6 +572,39 @@ function AccountTab() {
             background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap" }}>
           ↓ Скачать логи
         </a>
+      </Card>
+
+      <Card style={{ marginTop: 16, borderColor: confirmingReset ? "rgba(207,102,121,0.4)" : undefined }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, color: "var(--text)" }}>Начать заново с другим бизнесом</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+              Полный сброс: бриф, код, стратегия, команда и вся история этого рабочего
+              пространства удаляются безвозвратно — офис запускается с чистого листа.
+            </div>
+          </div>
+          {!confirmingReset ? (
+            <button onClick={() => setConfirmingReset(true)}
+              style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-pill)", padding: "9px 18px",
+                background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
+              Начать заново
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              <button onClick={() => setConfirmingReset(false)} disabled={resetting}
+                style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-pill)", padding: "9px 14px",
+                  background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 13 }}>
+                Отмена
+              </button>
+              <button onClick={doReset} disabled={resetting}
+                style={{ border: "none", borderRadius: "var(--radius-pill)", padding: "9px 14px",
+                  background: "#cf6679", color: "#1a0a0a", cursor: resetting ? "default" : "pointer",
+                  fontSize: 13, fontWeight: 600, opacity: resetting ? 0.6 : 1, whiteSpace: "nowrap" }}>
+                {resetting ? "Стираю…" : "Да, удалить всё"}
+              </button>
+            </div>
+          )}
+        </div>
       </Card>
 
       <Card style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

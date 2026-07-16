@@ -58,6 +58,7 @@ async function getText(url: string): Promise<string> {
 export const api = {
   me: () => getJSON<any>("/api/me", {}),
   briefStatus: () => getJSON<{ ready: boolean; demo: boolean; brief: any }>("/api/brief/status", { ready: false, demo: false, brief: null }),
+  briefReset: () => postJSON<{ ok: boolean }>("/api/brief/reset", {}, { ok: false }),
   agents: () => getJSON<any[]>("/api/agents", []),
   history: () => getJSON<{ events: any[]; results: Record<string, string> }>("/api/history", { events: [], results: {} }),
   progress: () => getJSON<any>("/api/progress", { percent: 0, note: "", stages: [], current: "" }),
