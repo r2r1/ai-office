@@ -69,10 +69,20 @@ def brief_block() -> str:
         parts.append(f"Что есть: {b['assets']}")
     stage = b.get("business_stage") or {}
     if stage.get("label"):
-        # Гипотеза (LLM/эвристика по автоскану сайта, issue #19/#21), владелец мог
-        # подтвердить/поправить на лендинге — НЕ факт из брифа, поэтому явная пометка.
-        confirmed = " (подтверждено владельцем)" if stage.get("confirmed") else " (предположение, не факт)"
-        parts.append(f"Вероятная стадия бизнеса{confirmed}: {stage['label']}"
+        # Гипотеза (LLM/эвристика по автоскану сайта или по поиску без URL —
+        # company_scan.search_company, Фаза 1), владелец мог подтвердить/поправить
+        # на лендинге — НЕ факт из брифа, поэтому явная пометка. confidence — единый
+        # источник правды (Фаза 2, docs/first-investigation-plan-2026-07-16.md):
+        # "confirmed"/"inferred"/"unconfirmed". Старые записи брифа без этого поля
+        # (до Фазы 2) — фолбэк на булев confirmed, консервативно "unconfirmed" —
+        # никогда не выдаём БОЛЬШЕ уверенности, чем реально есть.
+        confidence = stage.get("confidence") or ("confirmed" if stage.get("confirmed") else "unconfirmed")
+        tag = {
+            "confirmed": " (подтверждено владельцем)",
+            "inferred": " (предположение по реальным сигналам, не факт)",
+            "unconfirmed": " (предположение почти без сигналов, не факт — не выдумывай детали сверх этого)",
+        }.get(confidence, " (предположение, не факт)")
+        parts.append(f"Вероятная стадия бизнеса{tag}: {stage['label']}"
                      + (f" — {stage['reason']}" if stage.get("reason") else ""))
     if b.get("constraints"):
         # Раньше тонуло внутри summary (одной строкой среди прочего) — архитектор/

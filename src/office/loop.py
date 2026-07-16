@@ -323,8 +323,11 @@ async def _run_office(tid: str) -> None:
         except Exception as e:
             await publish({"type": "error", "agent_id": "orchestrator_1", "text": str(e)[:100]})
         if not tasks:
-            stage_key = (brief.get().get("business_stage") or {}).get("key", "")
-            tasks = planning_engine.fallback_plan(goal, business_stage=stage_key)
+            stage_data = brief.get().get("business_stage") or {}
+            stage_key = stage_data.get("key", "")
+            stage_confidence = stage_data.get("confidence", "inferred")
+            tasks = planning_engine.fallback_plan(goal, business_stage=stage_key,
+                                                  stage_confidence=stage_confidence)
             await publish({"type": "system",
                            "text": "📋 План собран по умолчанию (LLM-генерация недоступна)"})
         plan.set_tasks(tasks)

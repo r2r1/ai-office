@@ -166,6 +166,19 @@ def test_stage_heuristic_none_when_detected_empty():
     assert company_scan._stage_heuristic({}) is None
 
 
+def test_stage_heuristic_always_carries_inferred_confidence():
+    """Фаза 2 (docs/first-investigation-plan-2026-07-16.md): стадия НИКОГДА не
+    выставляется без явной пометки уверенности — эвристика по сайту не факт из
+    брифа, пока владелец сам не подтвердит."""
+    for detected in (
+        {"crm_widgets": {"amocrm": True}, "analytics": {"ga4": True}, "has_reviews": True},
+        {"crm_widgets": {}, "analytics": {"ga4": True}, "has_reviews": False},
+        {"crm_widgets": {}, "analytics": {}, "has_form": True},
+        {"crm_widgets": {}, "analytics": {}, "has_form": False, "has_cta": False},
+    ):
+        assert company_scan._stage_heuristic(detected)["confidence"] == "inferred"
+
+
 def test_stage_hypothesis_uses_llm_result_when_valid_json():
     """Мокаем llm.run_agent — реальный API не вызываем ни разу, проверяем только
     что валидный JSON-ответ используется вместо эвристики."""
@@ -174,7 +187,8 @@ def test_stage_hypothesis_uses_llm_result_when_valid_json():
     detected = {"crm_widgets": {}, "analytics": {"ga4": True}, "has_reviews": False}
     with patch("src.core.llm.run_agent", side_effect=fake_run_agent):
         stage = asyncio.run(company_scan._stage_hypothesis(detected, [], []))
-    assert stage == {"key": "growth", "label": "растёте быстро", "reason": "аналитика уже подключена"}
+    assert stage == {"key": "growth", "label": "растёте быстро", "reason": "аналитика уже подключена",
+                     "confidence": "inferred"}
 
 
 def test_stage_hypothesis_falls_back_to_heuristic_on_llm_error():

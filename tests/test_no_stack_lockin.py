@@ -102,6 +102,48 @@ def test_brief_block_marks_confirmed_business_stage_differently():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+# ── Фаза 2 (docs/first-investigation-plan-2026-07-16.md): явное поле confidence ──
+
+def test_brief_block_uses_explicit_confidence_field_over_legacy_boolean():
+    ctx.set_tenant("brief_stage_confidence_unit1")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "мебель", "goal": "сайт",
+        "business_stage": {"key": "growth", "label": "в активном росте",
+                            "reason": "нашёл в 2ГИС", "confidence": "confirmed"},
+    })
+    block = prompt_builder.brief_block()
+    assert "подтверждено владельцем" in block
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_brief_block_unconfirmed_confidence_gets_strongest_caution():
+    ctx.set_tenant("brief_stage_confidence_unit2")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "мебель", "goal": "сайт",
+        "business_stage": {"key": "idea", "label": "на стадии идеи",
+                            "reason": "не нашёл сигналов в сети", "confidence": "unconfirmed"},
+    })
+    block = prompt_builder.brief_block()
+    assert "почти без сигналов" in block
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_brief_block_missing_confidence_falls_back_conservatively():
+    """Старые записи брифа (до Фазы 2) без поля confidence вообще — не должны
+    получить БОЛЬШЕ уверенности, чем реально есть (см. brief.py/prompt_builder)."""
+    ctx.set_tenant("brief_stage_confidence_unit3")
+    from src.saas import context
+    context.write_json("brief.json", {
+        "niche": "мебель", "goal": "сайт",
+        "business_stage": {"key": "launch", "label": "на стадии запуска"},
+    })
+    block = prompt_builder.brief_block()
+    assert "почти без сигналов" in block
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):

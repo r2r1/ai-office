@@ -67,6 +67,15 @@ def test_fallback_plan_mature_stage_same_as_growth():
     assert [t["role"] for t in plan] == ["analyst", "developer"]
 
 
+def test_fallback_plan_ignores_growth_stage_when_unconfirmed():
+    """Фаза 2 (docs/first-investigation-plan-2026-07-16.md): "growth" почти без
+    сигналов (например search_company нашёл только рынок, не саму компанию) не
+    должен включать ветку "у клиента уже есть сайт" — это реальный риск, что
+    разработчик будет искать несуществующий сайт для анализа."""
+    plan = pe.fallback_plan("нужен сайт", business_stage="growth", stage_confidence="unconfirmed")
+    assert [t["role"] for t in plan] == ["marketer", "developer"]  # обычный путь "собери с нуля"
+
+
 def test_fallback_plan_ignores_stage_when_no_site_requested():
     """business_stage не должна влиять на бот-путь или общий путь — только на явную
     просьбу сайта, иначе "growth"-клиент, просящий бота, получил бы неправильный план."""

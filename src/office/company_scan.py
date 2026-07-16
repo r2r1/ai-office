@@ -301,17 +301,23 @@ async def _stage_hypothesis(detected: dict, findings: list[str], pain_points: li
         start, end = raw.find("{"), raw.rfind("}")
         parsed = _json.loads(raw[start:end + 1]) if start >= 0 and end > start else {}
         if parsed.get("key") in _STAGES and parsed.get("label") and parsed.get("reason"):
-            return {"key": parsed["key"], "label": parsed["label"], "reason": parsed["reason"]}
+            # confidence: Фаза 2 (docs/first-investigation-plan-2026-07-16.md) — стадия
+            # НИКОГДА не выставляется без явной пометки уверенности, даже когда её
+            # выставила LLM: это по-прежнему гипотеза, не факт из брифа, пока владелец
+            # сам не подтвердит (см. LandingView.tsx correctStage → "confirmed").
+            return {"key": parsed["key"], "label": parsed["label"], "reason": parsed["reason"],
+                    "confidence": "inferred"}
     except Exception:
         pass
     return heuristic
 
 
 def _stage_heuristic(detected: dict) -> dict | None:
-    """Возвращает {key, label, reason} или None, если сигналов мало (например
-    сайт недоступен — detected пуст). Safety-фолбэк для _stage_hypothesis (см. её
-    докстринг) — если LLM недоступна/упала, гипотеза всё равно приходит, просто
-    менее гибкая."""
+    """Возвращает {key, label, reason, confidence} или None, если сигналов мало
+    (например сайт недоступен — detected пуст). Safety-фолбэк для _stage_hypothesis
+    (см. её докстринг) — если LLM недоступна/упала, гипотеза всё равно приходит,
+    просто менее гибкая. confidence всегда "inferred" — эвристика по реальным
+    HTML-сигналам сайта, но не владельцем подтверждённый факт (см. Фаза 2)."""
     if not detected:
         return None
     has_crm = any((detected.get("crm_widgets") or {}).values())
@@ -322,15 +328,15 @@ def _stage_heuristic(detected: dict) -> dict | None:
     has_contacts = bool(detected.get("emails") or detected.get("phones"))
 
     if has_crm and has_analytics and has_reviews:
-        return {"key": "mature", "label": _STAGE_LABELS["mature"],
+        return {"key": "mature", "label": _STAGE_LABELS["mature"], "confidence": "inferred",
                 "reason": "на сайте есть CRM, аналитика и отзывы — обычно так выглядит уже отлаженный бизнес"}
     if has_crm or has_analytics:
-        return {"key": "growth", "label": _STAGE_LABELS["growth"],
+        return {"key": "growth", "label": _STAGE_LABELS["growth"], "confidence": "inferred",
                 "reason": ("CRM" if has_crm else "аналитика") + " на сайте — значит, вы уже считаете заявки и клиентов"}
     if has_form or has_cta or has_contacts:
-        return {"key": "launch", "label": _STAGE_LABELS["launch"],
+        return {"key": "launch", "label": _STAGE_LABELS["launch"], "confidence": "inferred",
                 "reason": "сайт уже принимает заявки, но без CRM и аналитики"}
-    return {"key": "idea", "label": _STAGE_LABELS["idea"],
+    return {"key": "idea", "label": _STAGE_LABELS["idea"], "confidence": "inferred",
             "reason": "на сайте нет ни формы заявки, ни аналитики, ни контактов — скорее визитка под будущий продукт"}
 
 

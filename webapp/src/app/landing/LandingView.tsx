@@ -183,8 +183,13 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
   const timers = useRef<number[]>([])
   const loadingInterval = useRef<number | undefined>(undefined)
 
-  function correctStage(key: string) {
-    const corrected = { key, label: STAGE_LABELS[key], reason: "уточнено вами", confirmed: true }
+  // confidence — явная пометка уверенности (Фаза 2, docs/first-investigation-plan-
+  // 2026-07-16.md): и "поправил на другую стадию", и "подтвердил как есть" —
+  // оба владельческих действия, оба должны переводить стадию в "confirmed".
+  // Раньше "Верно" (см. кнопку ниже) только прятал кнопки в UI, но НЕ обновлял
+  // сам объект stage — бэкенд получал ту же "предположительную" стадию, как будто
+  // владелец её не подтверждал вообще.
+  function applyStage(corrected: any) {
     setResult((r: any) => r ? { ...r, stage: corrected } : r)
     setStageCorrected(true)
     try {
@@ -195,6 +200,15 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
         sessionStorage.setItem("aioffice_landing_scan", JSON.stringify(parsed))
       }
     } catch { /* приватный режим браузера */ }
+  }
+
+  function correctStage(key: string) {
+    applyStage({ key, label: STAGE_LABELS[key], reason: "уточнено вами", confirmed: true, confidence: "confirmed" })
+  }
+
+  function confirmStage() {
+    if (!result?.stage) return
+    applyStage({ ...result.stage, confirmed: true, confidence: "confirmed" })
   }
 
   const discoveries = buildDiscoveries(result)
@@ -364,7 +378,7 @@ function ScanBox({ onLogin }: { onLogin: () => void }) {
                 </div>
                 {!stageCorrected && !result.stage.confirmed && (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                    <button onClick={() => { setStageCorrected(true); setPhase("done") }}
+                    <button onClick={() => { confirmStage(); setPhase("done") }}
                       style={{ fontSize: 11, padding: "4px 10px", borderRadius: "var(--radius-pill)", cursor: "pointer",
                         border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "#a0e0ab" }}>
                       Верно

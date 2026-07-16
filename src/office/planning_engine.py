@@ -68,13 +68,18 @@ async def _set_progress_note(note: str, publish) -> None:
     await publish({"type": "progress", **payload})
 
 
-def fallback_plan(goal: str, business_stage: str = "") -> list[dict]:
+def fallback_plan(goal: str, business_stage: str = "", stage_confidence: str = "inferred") -> list[dict]:
     """Детерминированный план под типовой результат, когда LLM-генерация плана недоступна.
     Гарантирует, что офис всегда plan-driven (а не уходит в LLM-хаос).
 
     `business_stage` — ключ гипотезы о стадии бизнеса (issue #19/#21/#22:
     "idea"/"launch"/"growth"/"mature", из brief.get()["business_stage"]["key"]) —
     пусто, если гипотезы нет (сайт не сканировали или сигналов не хватило).
+    `stage_confidence` — Фаза 2 (docs/first-investigation-plan-2026-07-16.md):
+    "confirmed"/"inferred"/"unconfirmed" — при "unconfirmed" веры в growth/mature
+    почти нет (например search_company нашёл только рынок, не саму компанию),
+    ветка "у клиента уже есть сайт" не включается: дефолт "inferred" сохраняет
+    прежнее поведение для старых записей брифа без этого поля.
     Единственное реальное разветвление сейчас: growth/mature компания уже
     ПОЛЬЗУЕТСЯ сайтом (это и есть признак, по которому стадия определена, см.
     company_scan._stage_heuristic) — план по умолчанию НЕ должен пересобирать
@@ -87,7 +92,7 @@ def fallback_plan(goal: str, business_stage: str = "") -> list[dict]:
     wants_site = any(p in g for p in ("нужен сайт", "нужен лендинг", "сделай сайт", "сделай лендинг",
                                       "сделать сайт", "сделать лендинг", "хочу сайт", "хочу лендинг",
                                       "одностраничник", "landing page", "собери лендинг", "собери сайт"))
-    if wants_site and business_stage in ("growth", "mature"):
+    if wants_site and business_stage in ("growth", "mature") and stage_confidence != "unconfirmed":
         # У клиента уже ЕСТЬ рабочий сайт (иначе стадия не определилась бы как
         # growth/mature — эвристика требует CRM/аналитику НА сайте). "Сделай
         # сайт" от такого клиента почти всегда значит "улучши то, что есть", не
