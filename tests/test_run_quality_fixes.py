@@ -4,8 +4,12 @@
 1. «Давайте посмотрим…» сдавалось как результат задачи и публиковалось как описание
    правки сайта → acceptance._is_process_chatter + llm (преамбула ≠ final_text).
 2. Ниша «то же самое, что и на сайте» доходила до всех промптов, критик ВЫДУМАЛ
-   бизнес («ремонт квартир» вместо доходной недвижимости) → onboarding подставляет
-   title/meta_description из автоскана; summary_line включает их.
+   бизнес («ремонт квартир» вместо доходной недвижимости) → summary_line включает
+   title/meta_description автоскана в бриф. (Исходный фикс жил в
+   onboarding.build_brief_structured — удалён в Фазе 6 first-investigation-plan
+   вместе со всем MODES-интервью; сама причина бага — обходится по-другому: живой
+   агент в office/investigation.py верифицирует бизнес через web_search вместо
+   доверия текстовой отсылке "то же самое".)
 3. Сайт всегда строился на vanilla HTML → сначала лечили ротацией 4 стеков
    (design_style.STACKS + Vue/Alpine скиллы), потом консолидировали в ОДИН
    системный стек платформы (React + Vite + Framer Motion, vite_react_site) —
@@ -23,7 +27,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.office import acceptance, design_style, skills, company_scan
-from src.agents import onboarding
 from src.saas import context as ctx
 
 
@@ -47,30 +50,6 @@ def test_real_reports_not_flagged_as_chatter():
         "Сделал полный редизайн. " + "Детали правок по секциям. " * 30 + "Посмотрим на метрики через неделю.",
     ):
         assert not acceptance._is_process_chatter(good), f"ложное срабатывание: {good!r}"
-
-
-def test_self_referential_niche_enriched_from_scan():
-    """«то же самое, что и на сайте» → реальное описание бизнеса из скана."""
-    answers = [
-        {"dimension": "product", "answer": "то же самое, что и на сайте"},
-        {"dimension": "client", "answer": "владельцы квартир"},
-        {"dimension": "goal", "answer": "новый сайт"},
-    ]
-    scan = {"ok": True, "url": "https://marco-kmv.ru/",
-            "detected": {"title": "MARCO | Эксперты в доходной недвижимости",
-                         "meta_description": "MARCO — эксперты в доходной недвижимости. "
-                                             "Управление посуточной и долгосрочной арендой."}}
-    brief = onboarding.build_brief_structured("business", answers, scan_result=scan)
-    assert "доходной недвижимости" in brief["niche"], brief["niche"]
-    # Сырой ответ клиента сохранён рядом — вдруг он имел в виду что-то ещё
-    assert "то же самое" in brief["niche"]
-
-
-def test_meaningful_product_not_replaced_by_scan():
-    answers = [{"dimension": "product", "answer": "Натяжные потолки под ключ"}]
-    scan = {"ok": True, "detected": {"title": "Другой заголовок"}}
-    brief = onboarding.build_brief_structured("business", answers, scan_result=scan)
-    assert brief["niche"].startswith("Натяжные потолки")
 
 
 def test_summary_line_includes_title_and_description():

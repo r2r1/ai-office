@@ -39,7 +39,6 @@ from src.office import bot_engine as bot_engine_module
 from src.office import models as models_module
 from src.office import llm_settings as llm_settings_module
 from src.office import plan as plan_module
-from src.agents import onboarding
 from src.agents import orchestrator
 from src.office import org
 from src.office import investigation
@@ -673,67 +672,6 @@ async def brief_status():
     return {"ready": brief.is_ready(), "demo": DEMO_MODE, "brief": brief.get()}
 
 
-@app.post("/api/brief/questions")
-async def brief_questions(request: Request):
-    """Шаг 1: клиент прислал ввод → офис задаёт уточняющие вопросы."""
-    data = await request.json()
-    client_input = (data.get("input") or "").strip()
-    if not client_input:
-        return JSONResponse({"error": "пустой ввод"}, status_code=400)
-    try:
-        questions = await onboarding.make_questions(client_input, publish=bus.publish)
-        return {"questions": questions}
-    except Exception as e:
-        return JSONResponse({"error": str(e)[:200]}, status_code=500)
-
-
-@app.post("/api/brief/start")
-async def brief_start(request: Request):
-    """Минимальный онбординг (BOS §5): 1 необязательное поле + необязательная
-    ссылка → бриф и старт офиса. Уточняющие вопросы (make_questions) больше не
-    обязательный шаг — answers пуст в большинстве случаев, build_brief() уже
-    умеет работать с пустым qa_pairs (см. докстринг). Пустой client_input и url
-    одновременно раньше отклонялись 400 — теперь честно "разбирайтесь сами":
-    build_brief() имеет подстраховку (summary = client_input[:500]), просто
-    даём ей плейсхолдер вместо ошибки — иначе кнопка "Пропустить" в UI была бы
-    ложью."""
-    data = await request.json()
-    client_input = (data.get("input") or "").strip()
-    url = (data.get("url") or "").strip()
-    qa_pairs = data.get("answers", [])
-    # Клиент мог уже увидеть скан на лендинге (issue #19, публичный /api/onboarding/
-    # scan ДО регистрации) — если фронт прислал готовый результат, не сканируем
-    # тот же сайт второй раз (лишний сетевой поход + задержка онбординга ради
-    # данных, которые уже есть).
-    precomputed_scan = data.get("scan") or None
-
-    effective_input = client_input
-    scan_url = ""
-    from src.office import company_scan
-    scan_result = precomputed_scan if (precomputed_scan and precomputed_scan.get("ok")) else None
-    if scan_result is None and url:
-        scan_result = await company_scan.scan(url)
-    if scan_result and scan_result.get("ok"):
-        scan_url = scan_result.get("url", "")
-        effective_input = (effective_input + "\n\n" + company_scan.summary_line(scan_result)).strip()
-    if not effective_input:
-        effective_input = "Клиент не описал бизнес словами — общий старт, офис исследует сам."
-
-    try:
-        brief_data = await onboarding.build_brief(effective_input, qa_pairs, publish=bus.publish)
-        # Гипотеза о стадии бизнеса (issue #21) — если владелец её видел/поправил на
-        # лендинге, она уже часть scan_result.stage (ScanBox мутирует sessionStorage
-        # при клике на кнопку-корректировку); не переспрашиваем и не теряем правку.
-        if scan_result and scan_result.get("stage"):
-            brief_data["business_stage"] = scan_result["stage"]
-        if scan_url:
-            brief_data["scan_url"] = scan_url
-        brief.set_brief(brief_data)  # сигналит офису о старте
-        return {"ok": True, "brief": brief_data}
-    except Exception as e:
-        return JSONResponse({"error": str(e)[:200]}, status_code=500)
-
-
 @app.post("/api/onboarding/scan")
 async def onboarding_scan(request: Request):
     """Instant Learning: клиент даёт URL сайта → офис изучает его за секунды,
@@ -755,42 +693,6 @@ async def onboarding_scan(request: Request):
     result = await company_scan.scan(url)
     return result
 
-
-@app.get("/api/onboarding/modes")
-async def onboarding_modes():
-    """3 сценария входа + вопросы интервью по каждому (для онбординг-флоу)."""
-    out = []
-    for key, meta in onboarding.MODES.items():
-        out.append({
-            "key": key,
-            "title": meta["title"],
-            "icon": meta["icon"],
-            "intro": meta["intro"],
-            "questions": onboarding.interview_questions(key),
-        })
-    return {"modes": out}
-
-
-@app.post("/api/onboarding/finish")
-async def onboarding_finish(request: Request):
-    """Завершение интервью: {mode, answers} → детерминированный бриф → старт офиса."""
-    data = await request.json()
-    mode = (data.get("mode") or "business").strip()
-    answers = data.get("answers", [])
-    scan_result = data.get("scan") or None
-    if not any((a.get("answer") or "").strip() for a in answers):
-        return JSONResponse({"error": "нет ответов"}, status_code=400)
-    brief_data = onboarding.build_brief_structured(mode, answers, scan_result=scan_result)
-    # Сохраняем ответы интервью в память — слой USER для retrieval (knowledge.py)
-    from src.office import memory as memory_module
-    for a in answers:
-        q, ans = (a.get("question") or "").strip(), (a.get("answer") or "").strip()
-        if q and ans:
-            memory_module.remember(q, ans)
-    brief.set_brief(brief_data)  # сигналит офису о старте
-    await bus.publish({"type": "speech", "agent_id": "orchestrator_1",
-                       "text": f"Компания изучена. Запускаю офис: {brief_data.get('goal', '')[:80]}"})
-    return {"ok": True, "brief": brief_data}
 
 
 @app.get("/api/onboarding/result")

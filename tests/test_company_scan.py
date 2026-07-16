@@ -16,7 +16,6 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.office import company_scan
-from src.agents import onboarding
 from src.saas import context as ctx
 
 
@@ -46,33 +45,6 @@ def test_summary_line_for_successful_scan():
     line = company_scan.summary_line(fake)
     assert "WordPress" in line
     assert "example.com" in line
-
-
-def test_build_brief_structured_merges_scan_into_constraints_and_summary():
-    """Прод-требование (пользователь): онбординг не должен становиться длиннее —
-    скан подмешивается ДОПОЛНИТЕЛЬНО к тем же 5 вопросам, не как новый вопрос."""
-    answers = [
-        {"dimension": "product", "answer": "Кухни на заказ"},
-        {"dimension": "client", "answer": "Семьи"},
-        {"dimension": "revenue", "answer": "1000000"},
-        {"dimension": "goal", "answer": "Больше лидов"},
-        {"dimension": "constraints", "answer": "Бюджет ограничен"},
-    ]
-    scan_result = {"ok": True, "url": "https://kuhni.ru",
-                   "detected": {"cms": "Tilda", "emails": ["info@kuhni.ru"]}}
-    brief = onboarding.build_brief_structured("business", answers, scan_result=scan_result)
-    assert "Tilda" in brief["constraints"]
-    assert "Бюджет ограничен" in brief["constraints"]
-    assert "Tilda" in brief["summary"]
-    assert brief["summary"].count("Автоскан") == 1, "скан не должен дублироваться в summary"
-    assert brief["scan"] == scan_result
-
-
-def test_build_brief_structured_without_scan_unaffected():
-    answers = [{"dimension": "product", "answer": "Кухни"}]
-    brief = onboarding.build_brief_structured("business", answers, scan_result=None)
-    assert brief["scan"] is None
-    assert "Автоскан" not in brief["summary"]
 
 
 def test_pain_points_speak_business_not_tech():
