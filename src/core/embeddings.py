@@ -35,10 +35,15 @@ def _get_client():
     if _client is not None:
         return _client
     try:
+        import httpx
         from openai import OpenAI
-        from src.core.llm import _resolve_creds
+        from src.core.llm import _resolve_creds, LLM_PROXY_URL
         base_url, api_key = _resolve_creds()
-        _client = OpenAI(base_url=base_url, api_key=api_key)
+        if LLM_PROXY_URL:
+            _client = OpenAI(base_url=base_url, api_key=api_key,
+                              http_client=httpx.Client(proxy=LLM_PROXY_URL))
+        else:
+            _client = OpenAI(base_url=base_url, api_key=api_key)
     except Exception:
         _client = False  # помечаем «недоступно», чтобы не пересоздавать клиент каждый вызов
     return _client

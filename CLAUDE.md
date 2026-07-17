@@ -74,6 +74,11 @@ Frontend (React/Vite) живёт в `webapp/`, билдится в `static/webap
 LLM_BASE_URL=https://apinet.cloud/v1
 LLM_API_KEY=sk-...
 LLM_MODEL=gpt-5.4 | glm-4.5-flash | qwen3-vl-plus | ...
+LLM_PROXY_URL=                  # опционально: socks5://user:pass@host:port или http(s)://...
+                                 # — прокси ТОЛЬКО для исходящих LLM/embeddings-запросов
+                                 # (src/core/llm.py, src/core/embeddings.py), не для всего
+                                 # сервера. Нужен, если сервер на РФ-IP, а провайдер оттуда
+                                 # напрямую не принимает запросы.
 DEMO_MODE=0
 LOOP_INTERVAL_SECONDS=10
 AGENT_COOLDOWN_SECS=25

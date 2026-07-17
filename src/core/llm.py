@@ -9,6 +9,7 @@
     LLM_BASE_URL=https://apinet.cloud/v1
     LLM_API_KEY=sk-...
     LLM_MODEL=qwen3-vl-plus
+    LLM_PROXY_URL=socks5://user:pass@host:port   # опционально, см. _client()
 """
 
 import json
@@ -17,6 +18,7 @@ import re
 import time
 from typing import Optional, Callable, Awaitable, Any
 
+import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
@@ -107,6 +109,11 @@ def _parse_tool_args(raw: str) -> dict:
 BASE_URL = os.getenv("LLM_BASE_URL", "https://apinet.cloud/v1")
 API_KEY = os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "glm-4.5-flash")
+# Опционально: если провайдер недоступен напрямую с сервера (например, апстрим
+# режет РФ-IP), исходящие LLM-запросы можно завернуть через прокси — без VPN на
+# весь сервер, который потянул бы за собой и обслуживание пользователей.
+# Схема http(s):// или socks5://user:pass@host:port. Не задан → обычный прямой клиент.
+LLM_PROXY_URL = os.getenv("LLM_PROXY_URL", "").strip()
 # Жёсткий потолок на ОДИН вызов API: без него зависший запрос к провайдеру висит
 # бесконечно (watchdog офиса лишь метит агента idle, но саму корутину не убивает),
 # продолжая держать соединение. wait_for гарантирует, что вызов завершится.
@@ -145,6 +152,9 @@ WEB_SEARCH_TOOL = {
 
 def _client() -> AsyncOpenAI:
     base_url, api_key = _resolve_creds()
+    if LLM_PROXY_URL:
+        http_client = httpx.AsyncClient(proxy=LLM_PROXY_URL)
+        return AsyncOpenAI(base_url=base_url, api_key=api_key, http_client=http_client)
     return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
 
