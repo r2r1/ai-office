@@ -77,11 +77,22 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
 
       {/* Связь + расход + модель + тема */}
       <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, flexShrink: 0 }}>
-        <span title={connected ? "онлайн" : "подключение…"} style={{
-          width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-          background: connected ? "#a0e0ab" : "var(--whisper)",
-          boxShadow: connected ? "0 0 6px rgba(160,224,171,0.6)" : "none",
-        }} />
+        {/* Раньше разрыв связи был виден только по title-тултипу на точке (легко
+            пропустить) — аудит §4.4: пользователь не понимал, что интерфейс
+            "замер" из-за обрыва SSE, а не завис. Текстовая подпись появляется
+            только когда реально не подключено — не занимает место в норме. */}
+        <div title={connected ? "онлайн" : "переподключение…"}
+          style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {!connected && !isMobile && (
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>переподключение…</span>
+          )}
+          <span style={{
+            width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+            background: connected ? "#a0e0ab" : "#ffac2e",
+            boxShadow: connected ? "0 0 6px rgba(160,224,171,0.6)" : "0 0 6px rgba(255,172,46,0.6)",
+            animation: connected ? "none" : "mercury-pulse 1.2s ease-in-out infinite",
+          }} />
+        </div>
          {!isMobile && cost > 0 && (
           <div style={{
             padding: "5px 12px", borderRadius: "var(--radius-pill)",

@@ -262,10 +262,27 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
       const minfo = await api.models()
       if (!cancelled && minfo?.default) dispatch({ t: "seed", partial: { model: minfo.default } })
 
-      // живой поток
+      // живой поток. EventSource переподключается сам (браузерная реализация
+      // SSE-протокола) — но раньше это было ЕДИНСТВЕННОЕ, что происходило при
+      // разрыве: события, случившиеся в окне обрыва (агент что-то сделал, пока
+      // связи не было), терялись безвозвратно — agents/plan/costs/leads/sites
+      // оставались устаревшими до ручной перезагрузки страницы (аудит §4.4).
+      // Теперь при КАЖДОМ повторном onopen (не первом) — полный ресинк среза
+      // состояния, не только "зелёная точка".
+      let hasConnectedBefore = false
       const es = new EventSource("/events")
       esRef.current = es
-      es.onopen = () => dispatch({ t: "connected", v: true })
+      es.onopen = () => {
+        dispatch({ t: "connected", v: true })
+        if (hasConnectedBefore) {
+          void (async () => {
+            dispatch({ t: "agents", list: await api.agents() })
+            await refresh(["progress", "costs", "leads", "sites", "plan"])
+            await loadThreads()
+          })()
+        }
+        hasConnectedBefore = true
+      }
       es.onerror = () => dispatch({ t: "connected", v: false })
       es.onmessage = (m) => {
         let e: any
