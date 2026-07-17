@@ -54,6 +54,45 @@ def set_cur_ms(v: str) -> None:
     _current_ms[ctx.get_tenant()] = v
 
 
+def reconcile_after_restart() -> list[str]:
+    """Сверяет `registry.json` (переживает рестарт — файл на диске) с живостью
+    ТЕКУЩЕГО процесса (`_thinking_since` — только память, обнуляется на рестарте).
+
+    Реальный найденный баг: если сервер перезапускается (reload при правке кода,
+    краш, обновление) ровно когда агент был в статусе "thinking", запись на диске
+    остаётся "thinking" навсегда — НОВЫЙ процесс никогда не заводил для него таймер
+    в _thinking_since, поэтому heal_stuck_agents() (обычный watchdog по таймауту)
+    никогда его не увидит и не сбросит. При MAX_PER_ROLE=1 роль (developer/
+    marketer/sales_lead/...) остаётся занятой навсегда — застревал не один агент,
+    а весь отдел, и офис выглядел полностью зависшим клиенту. Зомби-корутина в
+    ЭТОМ случае в принципе не может существовать (процесс, где она жила, уже
+    мёртв) — поэтому, в отличие от heal_stuck_agents, сбрасываем СРАЗУ при
+    старте цикла, без ожидания MAX_THINK_SECS: ждать нечего, эта работа гарантированно
+    потеряна вместе со старым процессом.
+
+    Вызывается ОДИН раз в начале _run_office(tid), ДО первого цикла — pending-вопросы
+    (ask_user) не считаются зависанием (агент может легитимно ждать клиента с прошлого
+    запуска), эти статусы не трогаем."""
+    from src.office import questions as questions_mod
+    if questions_mod.list_pending():
+        return []
+    prefix = f"{ctx.get_tenant()}:"
+    healed: list[str] = []
+    for rec in registry.all_agents():
+        if rec.status != "thinking":
+            continue
+        key = prefix + rec.agent_id
+        if key in _thinking_since:
+            continue  # реально живая задача в ЭТОМ процессе — не трогаем
+        registry.update_status(rec.agent_id, "idle")
+        if plan.is_generated():
+            for t in plan.all_tasks():
+                if t.get("status") == "in_progress" and t.get("assignee") == rec.agent_id:
+                    plan.revert(t["id"])
+        healed.append(rec.agent_id)
+    return healed
+
+
 def forget_tenant(tid: str) -> None:
     """Чистит per-tenant живость этого модуля (вызывается loop.forget_tenant)."""
     prefix = f"{tid}:"

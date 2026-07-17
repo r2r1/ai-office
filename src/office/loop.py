@@ -257,6 +257,7 @@ async def run() -> None:
                     _lock_tokens[tid] = token
                     new_task = asyncio.create_task(_run_office(tid))
                     new_task.add_done_callback(lambda _t, tid=tid: _release_tenant_lock(tid))
+                    new_task.add_done_callback(lambda t, tid=tid: _log_office_task_death(t, tid))
                     _office_tasks[tid] = new_task
             except Exception:
                 # Один сломанный тенант раньше обрывал проверку ВСЕХ остальных
@@ -264,6 +265,38 @@ async def run() -> None:
                 # тенанта не мешает остальным запуститься в этом же цикле.
                 logging.exception("[office.loop] сбой запуска офиса тенанта %s", tid)
         await asyncio.sleep(MANAGER_POLL)
+
+
+def _log_office_task_death(task: "asyncio.Task", tid: str) -> None:
+    """Реальный найденный баг: необработанное исключение внутри _run_office
+    убивало asyncio.Task тенанта молча — Python печатал "Task exception was
+    never retrieved" только в stderr процесса (никто не читает), в trace.jsonl
+    (что видит пользователь через UI) не попадало НИЧЕГО. Менеджер честно
+    respawn'ит новую задачу на следующем поллинге (см. run()), но если причина
+    детерминированная — новый _run_office падает на том же месте и цикл
+    выглядит "зависшим" без единой подсказки, что происходит. Не отменённая
+    задача (по паузе/остановке сервера) и не завершившаяся штатно (never
+    happens — _run_office это `while True`) — единственный обычный случай
+    завершения ДО отмены/остановки сервера и есть необработанное исключение."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    import logging
+    logging.exception("[office.loop] задача тенанта %s упала необработанным исключением", tid, exc_info=exc)
+    try:
+        from src.saas import context as ctx_mod
+        prev = ctx_mod.get_tenant()
+        ctx_mod.set_tenant(tid)
+        try:
+            from src.office import trace as trace_mod
+            trace_mod.log("error", agent="office_loop",
+                          text=f"Цикл офиса упал целиком: {str(exc)[:200]}")
+        finally:
+            ctx_mod.set_tenant(prev)
+    except Exception:
+        pass
 
 
 def _release_tenant_lock(tid: str) -> None:
@@ -280,6 +313,15 @@ async def _run_office(tid: str) -> None:
     """Полный жизненный цикл офиса одного тенанта."""
     ctx.set_tenant(tid)
     publish = bus.publish
+
+    # Реальный найденный баг: агент, застрявший в "thinking" на момент рестарта
+    # сервера (reload/краш/обновление), никогда не попадал под обычный watchdog
+    # по таймауту — его роль оставалась занятой навсегда, весь отдел вставал,
+    # офис выглядел полностью зависшим (см. execution.reconcile_after_restart).
+    _healed = execution.reconcile_after_restart()
+    if _healed:
+        await publish({"type": "system",
+                       "text": f"🔧 После перезапуска сброшены зависшие агенты: {', '.join(_healed)}"})
 
     # «Это рестарт?» смотрим ДО bootstrap.hire_initial: он сам публикует hired-события,
     # которые попадают в state.saved_agents() — из-за этого СВЕЖИЙ офис всегда выглядел
@@ -575,7 +617,24 @@ async def _run_office(tid: str) -> None:
                            "text": "Офис восстановлен. Директор продолжит управление в следующем цикле."})
             await asyncio.sleep(LOOP_INTERVAL)
             continue
-        await execution.heal_stuck_agents(publish)  # самолечение: сбросить зависших
+        # Реальный найденный баг («офис завис»): heal_stuck_agents (и весь
+        # preamble цикла выше) не был защищён try/except — ЛЮБОЕ необработанное
+        # исключение здесь тихо убивало asyncio.Task ВСЕГО цикла тенанта НАВСЕГДА
+        # (менеджер run() видит task.done()==True и в принципе может пересоздать
+        # задачу, но если исключение детерминированное — новый _run_office падает
+        # на том же месте, и цикл эффективно мёртв без единой видимой пользователю
+        # записи в trace.jsonl: Python лишь печатает "Task exception was never
+        # retrieved" в stderr процесса, который никто не читает). heal_stuck_agents
+        # — самое вероятное место: он трогает состояние сразу нескольких агентов
+        # за раз, одна "плохая" запись рушит цикл ДЛЯ ВСЕХ, включая тех, кто
+        # реально не завис.
+        try:
+            await execution.heal_stuck_agents(publish)  # самолечение: сбросить зависших
+        except Exception as e:
+            from src.office import trace as trace_mod
+            trace_mod.log("error", agent="watchdog", text=f"heal_stuck_agents упал: {str(e)[:200]}")
+            await publish({"type": "error", "agent_id": "orchestrator_1",
+                           "text": f"⚠ Сбой самолечения зависших агентов: {str(e)[:150]}"})
         if not planning_engine.has_actionable_move():
             await _heartbeat_if_blocked(publish)
             await asyncio.sleep(LOOP_INTERVAL)

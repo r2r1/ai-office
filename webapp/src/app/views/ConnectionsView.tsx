@@ -17,6 +17,41 @@ const GOOGLE_ICON = (
 
 const GOOGLE_SERVICES = new Set(["google_sheets", "gmail", "google_calendar"])
 
+/** Открывает OAuth-согласие в ОТДЕЛЬНОМ окне вместо той же вкладки (реальный
+ * найденный баг: window.location.href уводил всю SPA на страницу Google, и
+ * если последний шаг подключения зависал, пользователь давил «назад» в
+ * браузере — история и состояние SPA ломались, выглядело как «всё зависло»).
+ * main.tsx перехватывает финальный редирект (/webapp/?connected=X) внутри
+ * popup'а и шлёт postMessage сюда — эта вкладка ни разу не покидает текущий
+ * экран. Если браузер заблокировал popup (строгие настройки) — откатываемся
+ * на прежнее поведение (переход в этой же вкладке), а не молча ничего не делаем. */
+function openOAuthPopup(url: string, onDone: (result: string) => void): void {
+  const popup = window.open(url, "ai_office_oauth", "width=520,height=680,menubar=no,toolbar=no")
+  if (!popup) {
+    window.location.href = url  // popup заблокирован — прежнее поведение
+    return
+  }
+  let done = false
+  const onMessage = (e: MessageEvent) => {
+    if (e.origin !== window.location.origin || e.data?.source !== "ai-office-oauth") return
+    done = true
+    window.removeEventListener("message", onMessage)
+    clearInterval(poll)
+    onDone(e.data.result || "")
+  }
+  window.addEventListener("message", onMessage)
+  // Подстраховка: пользователь закрыл popup сам (крестиком, Esc) ДО того, как
+  // тот успел отправить postMessage — без этого список интеграций не обновился
+  // бы, пока не случится что-то ещё (следующий refresh() по таймеру).
+  const poll = setInterval(() => {
+    if (popup.closed) {
+      clearInterval(poll)
+      window.removeEventListener("message", onMessage)
+      if (!done) onDone("")
+    }
+  }, 500)
+}
+
 /** Модалка входа в личный Telegram-аккаунт — интерактивный флоу (телефон → код
  * → опционально 2FA-пароль), НЕ обычная форма одного ключа: см. how_to интеграции
  * и office/telegram_login.py на бэкенде. */
@@ -123,11 +158,11 @@ function TelegramPersonalLoginModal({ open, onClose, onDone }: { open: boolean; 
 /** Bitrix24 — единственный OAuth-провайдер здесь без единой страницы согласия
  * (портал клиента multi-tenant, *.bitrix24.ru у каждого свой) — спрашиваем
  * домен перед редиректом на /auth/bitrix24/login, а не сразу window.location. */
-function Bitrix24PortalModal({ open, onClose, portal, setPortal }:
-  { open: boolean; onClose: () => void; portal: string; setPortal: (v: string) => void }) {
+function Bitrix24PortalModal({ open, onClose, portal, setPortal, onDone }:
+  { open: boolean; onClose: () => void; portal: string; setPortal: (v: string) => void; onDone: () => void }) {
   const go = () => {
     if (!portal.trim()) return
-    window.location.href = `/auth/bitrix24/login?portal=${encodeURIComponent(portal.trim())}`
+    openOAuthPopup(`/auth/bitrix24/login?portal=${encodeURIComponent(portal.trim())}`, () => { onClose(); onDone() })
   }
   return (
     <Modal open={open} onClose={onClose} title="Подключить Bitrix24">
@@ -166,8 +201,7 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
     if (isBitrix24) {
       setPortalOpen(true)
     } else if (isOAuth) {
-      // OAuth: редирект на страницу согласия
-      window.location.href = integ.oauth_url
+      openOAuthPopup(integ.oauth_url, onRefresh)
     } else if (isTgPersonal) {
       setLoginOpen(true)
     }
@@ -268,7 +302,7 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
         <TelegramPersonalLoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onDone={onRefresh} />
       )}
       {isBitrix24 && (
-        <Bitrix24PortalModal open={portalOpen} onClose={() => setPortalOpen(false)} portal={portal} setPortal={setPortal} />
+        <Bitrix24PortalModal open={portalOpen} onClose={() => setPortalOpen(false)} portal={portal} setPortal={setPortal} onDone={onRefresh} />
       )}
     </Card>
   )
