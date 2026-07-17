@@ -94,30 +94,48 @@
 
 <div id="gate" class="gate">
   <h2>Вход в админку</h2>
-  <div class="hint">Адрес сервера AI-Office и ADMIN_API_KEY из его .env</div>
+  <div class="hint">По умолчанию сервер и супервайзор — localhost (адреса ниже уже подставлены).
+    Для входа нужен только ключ (ADMIN_API_KEY из .env).</div>
   <div class="stack">
     <div>
-      <label>Адрес сервера</label>
-      <input id="serverUrl" placeholder="https://office.example.com" />
-    </div>
-    <div>
       <label>Admin key</label>
-      <input id="adminKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="X-Admin-Key" />
+      <input id="adminKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+        placeholder="X-Admin-Key" onkeydown="if(event.key==='Enter')enter()" autofocus />
     </div>
     <button class="primary" onclick="enter()">Войти</button>
     <div id="gateError" class="muted"></div>
+    <a href="#" onclick="toggleAdvanced();return false" class="muted" style="font-size:11px">Другой сервер (не localhost) ▾</a>
+    <div id="advancedGate" style="display:none" class="stack">
+      <div>
+        <label>Адрес сервера</label>
+        <input id="serverUrl" placeholder="https://office.example.com" />
+      </div>
+      <div>
+        <label>Адрес супервайзора</label>
+        <input id="supervisorUrl" placeholder="http://127.0.0.1:8001" />
+      </div>
+    </div>
   </div>
 </div>
 
 <div id="app" style="display:none">
   <header>
     <h1>AI-Office — админка</h1>
-    <div class="row" style="gap:14px">
-      <button class="danger" onclick="shutdownServer()">⏻ Остановить сервер</button>
-      <div class="server"><span id="serverLabel"></span> · <a href="#" onclick="logout();return false" style="color:var(--text-dim)">выйти</a></div>
-    </div>
+    <div class="server"><span id="serverLabel"></span> · <a href="#" onclick="logout();return false" style="color:var(--text-dim)">выйти</a></div>
   </header>
   <main>
+    <div class="panel">
+      <h3>Сервер</h3>
+      <div class="row" style="justify-content:space-between">
+        <div>Статус: <span id="serverStatus" class="pill">—</span></div>
+        <div class="row" style="gap:8px">
+          <button onclick="checkServerStatus()">Обновить статус</button>
+          <button class="primary" onclick="startServer()">▶ Запустить</button>
+          <button class="danger" onclick="stopServer()">⏻ Остановить</button>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <h3>Прокси всем тенантам сразу</h3>
       <div class="broadcast">
@@ -127,7 +145,7 @@
     </div>
 
     <div class="toolbar">
-      <div>Тенантов: <span id="tenantCount">—</span></div>
+      <div>Тенантов: <span id="tenantCount">—</span> <span id="tenantSourceNote" class="muted"></span></div>
       <button onclick="loadTenants()">Обновить</button>
     </div>
 
@@ -166,10 +184,19 @@
 <div id="toast" class="toast"></div>
 
 <script>
-let SERVER = localStorage.getItem('admin_server') || '';
+const DEFAULT_SERVER = 'http://127.0.0.1:8000';
+const DEFAULT_SUPERVISOR = 'http://127.0.0.1:8001';
+let SERVER = localStorage.getItem('admin_server') || DEFAULT_SERVER;
+let SUPERVISOR = localStorage.getItem('admin_supervisor') || DEFAULT_SUPERVISOR;
 let KEY = localStorage.getItem('admin_key') || '';
+
+function toggleAdvanced() {
+  const el = document.getElementById('advancedGate');
+  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+}
 let tenants = [];
 let drawerTid = null;
+let tenantsSource = 'server';  // 'server' (богатый список, /admin/api) | 'supervisor' (фоллбэк, когда сервер не отвечает)
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -178,10 +205,10 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 2200);
 }
 
-async function api(path, opts) {
+async function _call(base, path, opts) {
   let res;
   try {
-    res = await fetch(SERVER.replace(/\/$/, '') + path, {
+    res = await fetch(base.replace(/\/$/, '') + path, {
       ...opts,
       headers: { 'X-Admin-Key': KEY, ...(opts && opts.headers) },
     });
@@ -189,7 +216,7 @@ async function api(path, opts) {
     // Сеть недоступна / сервер не отвечает / CORS отверг запрос — типичная
     // причина "страница как будто зависла": fetch кидает TypeError без
     // внятного сообщения, а не HTTP-ошибку.
-    throw new Error('Не удалось подключиться к серверу: ' + e.message);
+    throw new Error('Не удалось подключиться: ' + e.message);
   }
   const body = await res.text().catch(() => '');
   if (!res.ok) {
@@ -198,18 +225,33 @@ async function api(path, opts) {
   try {
     return body ? JSON.parse(body) : {};
   } catch (e) {
-    throw new Error('Сервер ответил не JSON-ом (проверьте адрес сервера)');
+    throw new Error('Ответ не JSON (проверьте адрес)');
   }
 }
 
+// Основной сервер (routers/admin.py внутри server.py) — работает, ТОЛЬКО
+// когда сервер запущен: пауза/прокси/логи конкретных тенантов.
+function api(path, opts) { return _call(SERVER, path, opts); }
+// Супервайзор (scripts/supervisor.py) — отдельный, всегда работающий процесс:
+// старт/стоп/статус сервера + список/удаление тенантов (не требует, чтобы
+// сам сервер был жив, — именно это чинит "не могу зайти, пока сервер лежит").
+function supervisorApi(path, opts) { return _call(SUPERVISOR, path, opts); }
+
 function enter() {
-  SERVER = document.getElementById('serverUrl').value.trim();
+  // Поля адресов — необязательные ("Другой сервер"): пустое значение значит
+  // "используй localhost по умолчанию", а не "адрес не задан". Раньше вход
+  // требовал заполнить оба URL руками при каждом заходе — для обычного
+  // случая (супервайзор/сервер на этой же машине) это лишний шаг, вход
+  // должен требовать только ключ.
+  SERVER = document.getElementById('serverUrl').value.trim() || DEFAULT_SERVER;
+  SUPERVISOR = document.getElementById('supervisorUrl').value.trim() || DEFAULT_SUPERVISOR;
   KEY = document.getElementById('adminKey').value.trim();
-  if (!SERVER || !KEY) return;
+  if (!KEY) return;
   localStorage.setItem('admin_server', SERVER);
+  localStorage.setItem('admin_supervisor', SUPERVISOR);
   localStorage.setItem('admin_key', KEY);
   document.getElementById('gateError').textContent = '';
-  loadTenants(true);
+  tryEnter();
 }
 
 function logout() {
@@ -219,37 +261,117 @@ function logout() {
   document.getElementById('gate').style.display = 'block';
 }
 
-async function loadTenants(fromGate) {
+// Реальный найденный баг: раньше вход в админку требовал успешного ответа
+// ОСНОВНОГО сервера (/admin/api/tenants) — если сервер был остановлен, зайти
+// было НЕЧЕМ, а значит и некому было нажать "Запустить". Теперь пускаем
+// внутрь, если ответил ХОТЯ БЫ ОДИН из двух (сервер ИЛИ супервайзор) — раз
+// внутри уже можно достучаться до супервайзора и включить сервер.
+async function tryEnter() {
+  let serverOk = false, supervisorOk = false;
+  if (SERVER) {
+    try { await api('/admin/api/tenants'); serverOk = true; } catch (e) {}
+  }
+  if (SUPERVISOR) {
+    try { await supervisorApi('/supervisor/status'); supervisorOk = true; } catch (e) {}
+  }
+  if (!serverOk && !supervisorOk) {
+    document.getElementById('gateError').textContent =
+      'Не удалось подключиться ни к серверу, ни к супервайзору — проверьте адреса и ключ.';
+    return;
+  }
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('serverLabel').textContent = SERVER || '(сервер не указан)';
+  if (SUPERVISOR) checkServerStatus();
+  loadTenants();
+}
+
+async function checkServerStatus() {
+  const el = document.getElementById('serverStatus');
+  if (!SUPERVISOR) { el.textContent = 'супервайзор не настроен'; el.className = 'pill'; return; }
+  try {
+    const s = await supervisorApi('/supervisor/status');
+    el.textContent = s.running ? 'работает' : 'остановлен';
+    el.className = 'pill ' + (s.running ? 'ok' : 'paused');
+  } catch (e) {
+    el.textContent = 'супервайзор недоступен';
+    el.className = 'pill';
+  }
+}
+
+async function startServer() {
+  if (!SUPERVISOR) { toast('Укажите адрес супервайзора на входе'); return; }
+  try {
+    const r = await supervisorApi('/supervisor/start', { method: 'POST' });
+    toast(r.already_running ? 'Уже запущен' : 'Сервер запускается…');
+    setTimeout(() => { checkServerStatus(); loadTenants(); }, 3000);
+  } catch (e) { toast('Ошибка: ' + e.message); }
+}
+
+async function stopServer() {
+  if (!SUPERVISOR) { toast('Укажите адрес супервайзора на входе'); return; }
+  if (!confirm('Остановить весь сервер? Все тенанты перестанут работать, пока его не запустят заново.')) return;
+  try {
+    await supervisorApi('/supervisor/stop', { method: 'POST' });
+    toast('Сервер остановлен');
+    setTimeout(checkServerStatus, 1500);
+  } catch (e) { toast('Ошибка: ' + e.message); }
+}
+
+async function loadTenants() {
+  // Основной путь — сервер (богатые данные: расход, пауза, прокси). Если он
+  // не отвечает, но супервайзор жив — список тенантов оттуда (голый, без
+  // расхода/паузы), этого достаточно, чтобы хотя бы увидеть и удалить.
   try {
     const data = await api('/admin/api/tenants');
     tenants = data.tenants;
-    document.getElementById('gate').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    document.getElementById('serverLabel').textContent = SERVER;
-    renderTenants();
+    tenantsSource = 'server';
   } catch (e) {
-    if (fromGate) {
-      document.getElementById('gateError').textContent = 'Не удалось подключиться: ' + e.message;
-    } else {
-      toast('Ошибка: ' + e.message);
-    }
+    if (!SUPERVISOR) { toast('Ошибка: ' + e.message); return; }
+    try {
+      const data = await supervisorApi('/supervisor/tenants');
+      tenants = data.tenants;
+      tenantsSource = 'supervisor';
+    } catch (e2) { toast('Ошибка: ' + e2.message); return; }
   }
+  renderTenants();
 }
 
 function renderTenants() {
   document.getElementById('tenantCount').textContent = tenants.length;
+  document.getElementById('tenantSourceNote').textContent =
+    tenantsSource === 'supervisor' ? '(сервер не отвечает — данные от супервайзора, только имя/id)' : '';
+  const isFull = tenantsSource === 'server';
   const rows = tenants.map(t => `
     <tr>
       <td><b>${escapeHtml(t.name || t.id)}</b><div class="muted">${t.id}</div></td>
-      <td>${t.paused ? `<span class="pill paused">пауза</span><div class="muted">${escapeHtml(t.pause_reason||'')}</div>` : `<span class="pill ok">работает</span>`}</td>
-      <td>$${(t.cost_total || 0).toFixed(4)}</td>
-      <td>${t.calls_total}</td>
-      <td>${t.has_proxy ? 'свой' : '<span class="muted">общий</span>'}</td>
-      <td>${t.has_own_llm_key ? 'да' : '<span class="muted">нет</span>'}</td>
-      <td><button onclick="openDrawer('${t.id}')">Управление</button></td>
+      <td>${isFull
+        ? (t.paused ? `<span class="pill paused">пауза</span><div class="muted">${escapeHtml(t.pause_reason||'')}</div>` : `<span class="pill ok">работает</span>`)
+        : '<span class="muted">—</span>'}</td>
+      <td>${isFull ? '$' + (t.cost_total || 0).toFixed(4) : '<span class="muted">—</span>'}</td>
+      <td>${isFull ? t.calls_total : '<span class="muted">—</span>'}</td>
+      <td>${isFull ? (t.has_proxy ? 'свой' : '<span class="muted">общий</span>') : '<span class="muted">—</span>'}</td>
+      <td>${isFull ? (t.has_own_llm_key ? 'да' : '<span class="muted">нет</span>') : '<span class="muted">—</span>'}</td>
+      <td class="row" style="gap:6px">
+        ${isFull ? `<button onclick="openDrawer('${t.id}')">Управление</button>` : ''}
+        <button class="danger" onclick="deleteTenant('${t.id}', '${escapeHtml(t.name || t.id)}')">Удалить</button>
+      </td>
     </tr>
   `).join('');
   document.getElementById('tenantRows').innerHTML = rows || '<tr><td colspan="7" class="muted">Нет тенантов</td></tr>';
+}
+
+async function deleteTenant(tid, name) {
+  if (!confirm(`Удалить тенанта «${name}» НАВСЕГДА? Все данные (проекты, лиды, сайты, ключи) будут стёрты без возможности восстановления.`)) return;
+  try {
+    if (tenantsSource === 'server') {
+      await api(`/admin/api/tenant/${tid}`, { method: 'DELETE' });
+    } else {
+      await supervisorApi(`/supervisor/tenant/${tid}`, { method: 'DELETE' });
+    }
+    toast('Тенант удалён');
+    loadTenants();
+  } catch (e) { toast('Ошибка: ' + e.message); }
 }
 
 function escapeHtml(s) {
@@ -325,23 +447,10 @@ async function broadcastProxy() {
   } catch (e) { toast('Ошибка: ' + e.message); }
 }
 
-async function shutdownServer() {
-  if (!confirm('Остановить весь сервер? Все тенанты перестанут работать, пока сервер не запустят заново.')) return;
-  try {
-    await api('/admin/api/shutdown', { method: 'POST' });
-    toast('Сервер останавливается…');
-  } catch (e) {
-    // Сервер мог оборваться раньше, чем успел ответить — это ожидаемо,
-    // не показываем как ошибку, если соединение просто пропало.
-    toast('Сервер остановлен (или уже недоступен)');
-  }
-}
-
-if (SERVER && KEY) {
-  document.getElementById('serverUrl').value = SERVER;
-  document.getElementById('adminKey').value = KEY;
-  loadTenants(true);
-}
+document.getElementById('serverUrl').value = SERVER === DEFAULT_SERVER ? '' : SERVER;
+document.getElementById('supervisorUrl').value = SUPERVISOR === DEFAULT_SUPERVISOR ? '' : SUPERVISOR;
+document.getElementById('adminKey').value = KEY;
+if (KEY) tryEnter();
 </script>
 </body>
 </html>

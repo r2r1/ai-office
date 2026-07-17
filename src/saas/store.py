@@ -132,6 +132,28 @@ def all_workspaces() -> list[dict]:
     return rows
 
 
+def delete_workspace(tid: str) -> bool:
+    """Полное удаление тенанта — оператор (админка), не сам клиент: строка
+    workspaces, все её users (обычно один владелец), и все данные на диске
+    (context.wipe(), тот же путь, что у клиентского «сбросить и начать
+    заново», просто без необходимости быть залогиненным ИМЕННО этим
+    тенантом — вызывающий явно передаёт tid, а не берёт из ContextVar)."""
+    ws = db.query_one("SELECT * FROM workspaces WHERE id = ?", (tid,))
+    if not ws:
+        return False
+    db.execute("DELETE FROM workspaces WHERE id = ?", (tid,))
+    db.execute("DELETE FROM users WHERE id = ?", (ws["owner_user_id"],))
+    from src.saas import context as ctx
+    prev = ctx.get_tenant()
+    ctx.set_tenant(tid)
+    try:
+        ctx.wipe()
+    finally:
+        ctx.set_tenant(prev)
+    _invalidate_workspaces_cache()
+    return True
+
+
 def public_user(user: dict) -> dict:
     """Безопасная проекция пользователя для фронта."""
     return {
