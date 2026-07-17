@@ -24,6 +24,7 @@ sqlite/файлами тенанта). Оба защищены одним и т�
 порт, и остановить дерево процессов.
 """
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -73,35 +74,67 @@ async def cors_middleware(request: Request, call_next):
     return response
 
 
-def _pids_on_port(port: int) -> list[int]:
-    """PID'ы процессов, слушающих порт (Windows). Пустой список — порт свободен."""
+def _pids_on_port_sync(port: int) -> list[int]:
+    """PID'ы процессов, слушающих порт (Windows). Пустой список — порт свободен.
+
+    Реальный найденный баг: изначально использовал PowerShell (Get-NetTCPConnection)
+    — на этой машине холодный запуск powershell.exe занимал ~5 СЕКУНД на вызов
+    (профиль/антивирус/что угодно — не важно почему, важно что это ощущалось как
+    "статус завис", хотя технически asyncio.to_thread уже не блокировал event loop).
+    netstat — тот же cmd.exe-инструмент без загрузки PowerShell-рантайма,
+    тот же результат за ~0.1-0.2с вместо ~5с (замерено живьём)."""
     try:
         out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"(Get-NetTCPConnection -LocalPort {port} -State Listen "
-             f"-ErrorAction SilentlyContinue).OwningProcess"],
+            ["netstat", "-ano", "-p", "TCP"],
             capture_output=True, text=True, timeout=10,
         ).stdout
-        return sorted({int(x) for x in out.split() if x.strip().isdigit()})
+        pids = set()
+        for line in out.splitlines():
+            parts = line.split()
+            # Формат: Proto  Local-адрес  Внешний-адрес  Состояние  PID
+            if len(parts) != 5 or parts[3] != "LISTENING":
+                continue
+            if not parts[1].endswith(f":{port}"):
+                continue
+            if parts[4].isdigit():
+                pids.add(int(parts[4]))
+        return sorted(pids)
     except Exception:
         return []
 
 
-def _kill_pid_tree(pid: int) -> None:
-    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+def _kill_pid_tree_sync(pid: int) -> None:
+    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=10)
+
+
+# Реальный найденный баг (живой прогон): _pids_on_port/_kill_pid_tree раньше
+# вызывались СИНХРОННО прямо внутри async-обработчиков — subprocess.run()
+# блокирует ВЕСЬ event loop (uvicorn здесь однопоточный), пока PowerShell не
+# ответит. Если запуск PowerShell завис/затормозил (что реально бывает —
+# у процесса есть свой холодный старт, ~100-300мс и больше под нагрузкой),
+# ВЕСЬ супервайзор переставал отвечать вообще на ЛЮБЫЕ запросы, включая
+# /supervisor/status — то есть сам "всегда доступный" процесс переставал
+# быть доступным. asyncio.to_thread уносит блокирующий вызов в отдельный
+# поток — event loop остаётся живым для остальных запросов.
+async def _pids_on_port(port: int) -> list[int]:
+    return await asyncio.to_thread(_pids_on_port_sync, port)
+
+
+async def _kill_pid_tree(pid: int) -> None:
+    await asyncio.to_thread(_kill_pid_tree_sync, pid)
 
 
 @app.get("/supervisor/status")
 async def status(x_admin_key: str | None = Header(default=None)) -> dict:
     _require_admin(x_admin_key)
-    pids = _pids_on_port(APP_PORT)
+    pids = await _pids_on_port(APP_PORT)
     return {"running": bool(pids), "pids": pids, "port": APP_PORT}
 
 
 @app.post("/supervisor/start")
 async def start(x_admin_key: str | None = Header(default=None)) -> dict:
     _require_admin(x_admin_key)
-    if _pids_on_port(APP_PORT):
+    if await _pids_on_port(APP_PORT):
         return {"ok": True, "already_running": True}
     log_path = ROOT / "data" / "server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,9 +157,9 @@ async def start(x_admin_key: str | None = Header(default=None)) -> dict:
 @app.post("/supervisor/stop")
 async def stop(x_admin_key: str | None = Header(default=None)) -> dict:
     _require_admin(x_admin_key)
-    pids = _pids_on_port(APP_PORT)
+    pids = await _pids_on_port(APP_PORT)
     for pid in pids:
-        _kill_pid_tree(pid)
+        await _kill_pid_tree(pid)
     return {"ok": True, "killed": pids}
 
 
