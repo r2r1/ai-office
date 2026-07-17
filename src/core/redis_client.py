@@ -15,11 +15,15 @@ import os
 
 try:
     import redis as _redis_lib
+    import redis.asyncio as _redis_async_lib
 except ImportError:
     _redis_lib = None
+    _redis_async_lib = None
 
 _client = None
 _tried = False
+_async_client = None
+_async_tried = False
 
 
 def get_client():
@@ -47,13 +51,37 @@ def available() -> bool:
     return get_client() is not None
 
 
+async def get_async_client():
+    """Асинхронный клиент — нужен для SSE pub/sub (bus.py), где события
+    публикуются и слушаются внутри asyncio-корутин; синхронный клиент
+    заблокировал бы event loop на каждый вызов. Тот же принцип деградации:
+    без REDIS_URL/пакета redis — None."""
+    global _async_client, _async_tried
+    if _async_tried:
+        return _async_client
+    _async_tried = True
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url or _redis_async_lib is None:
+        return None
+    try:
+        c = _redis_async_lib.Redis.from_url(
+            url, decode_responses=True, socket_connect_timeout=2, socket_timeout=5)
+        await c.ping()
+        _async_client = c
+    except Exception:
+        _async_client = None
+    return _async_client
+
+
 def reset_for_tests() -> None:
     """Сбрасывает кеш попытки подключения — тесты переключают REDIS_URL
     между сценариями "доступен"/"недоступен" и должны видеть актуальное
     состояние, не залипшее с первого вызова в процессе."""
-    global _client, _tried
+    global _client, _tried, _async_client, _async_tried
     _client = None
     _tried = False
+    _async_client = None
+    _async_tried = False
 
 
 # ---- Распределённые локи (docs/technical-due-diligence-2026-07-17.md §2.1) ----
