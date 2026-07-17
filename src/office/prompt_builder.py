@@ -163,7 +163,7 @@ def portfolio_block(role: str) -> str:
 
 
 def task_context(role: str, task: str, skill: str = "",
-                 department: str = "", objective: str = "") -> str:
+                 department: str = "", objective: str = "", touches_site: bool = True) -> str:
     """Контекст задачи (user-сообщение воркера): бизнес → цель → этап → отдел →
     задача → знания → уроки → формат результата. Перенесено из loop._task_with_context —
     теперь итоговый промпт собирается в одном модуле и виден целиком."""
@@ -208,7 +208,7 @@ def task_context(role: str, task: str, skill: str = "",
     # Карта сайта (issue #13 "Не в этой итерации" → реализовано) — только
     # designer/developer: тем, кто решает/строит по многостраничной структуре.
     sitemap_section = ""
-    if role in ("designer", "developer"):
+    if role == "designer" or (role == "developer" and touches_site):
         from src.office import sitemap
         sblock = sitemap.prompt_block()
         sitemap_section = f"\n{sblock}\n" if sblock else ""
@@ -221,8 +221,16 @@ def task_context(role: str, task: str, skill: str = "",
     # ⚠️ ТОЛЬКО developer — designer вернулась как отдельная роль (2026-07-14),
     # но она НЕ пишет в site/ (см. roles.py.ROLE_META["designer"]) — эта подсказка
     # раньше толкала и designer строить сайт, что напрямую нарушало её границу.
+    # Реальный найденный баг (живой прогон): эта подсказка раньше подмешивалась
+    # ЛЮБОЙ задаче developer'а безусловно — включая задачи вообще не про сайт
+    # (фоновый скрипт, повторяющийся процесс метрики). Итог: developer, которому
+    # поручили "завести процесс курса USD/RUB", вместо этого несколько раз
+    # подряд собрал и переделал целый сайт под чужим слагом — часы работы и
+    # реальные деньги в никуда, настоящая задача так и не была выполнена.
+    # touches_site — тот же критерий, что уже использует routers/work.py при
+    # решении, куда положить задачи инициативы (plan.touches_site).
     stack_line = ""
-    if role == "developer":
+    if role == "developer" and touches_site:
         from src.office import site_builder
         if site_builder.build_allowed():
             stack_line = ("Строишь/правишь сайт — вызови use_skill за системным стеком платформы "

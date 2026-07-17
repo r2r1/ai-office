@@ -135,12 +135,17 @@ def engagement_needs_bot() -> bool:
 
 
 def task_with_context(role: str, task: str, skill: str = "",
-                      department: str = "", objective: str = "") -> str:
+                      department: str = "", objective: str = "",
+                      touches_site: bool = True) -> str:
     """Контекст задачи собирает Prompt Builder — единая точка сборки промптов
-    (docs/bos-architecture.md §7). Обёртка сохранена для читаемости вызовов."""
+    (docs/bos-architecture.md §7). Обёртка сохранена для читаемости вызовов.
+    `touches_site` по умолчанию True — вызовы из фикс-цикла критика (см. call
+    sites выше) всегда реально про сайт; единственный вызов, который считает
+    его явно (run_task выше) — обычное исполнение задачи плана."""
     from src.office import prompt_builder
     return prompt_builder.task_context(role, task, skill,
-                                       department=department, objective=objective)
+                                       department=department, objective=objective,
+                                       touches_site=touches_site)
 
 
 def attribute_result(agent_id: str, role: str, result: str) -> None:
@@ -433,6 +438,16 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
     функцию (захватывала только параметры _assign, скрытых локалей нет)."""
     from src.office import trace
     t_rec_policy = (plan.get_task(task_id) if task_id and plan.is_generated() else None) or {"title": task}
+    # Реальный найденный баг (живой прогон): и подсказка «строишь/правишь сайт»
+    # в промпте (prompt_builder.task_context), и ensure_style_line/design_tokens
+    # ниже включались для ЛЮБОЙ задачи developer/designer безусловно — включая
+    # задачи вообще не про сайт (фоновый скрипт, повторяющийся процесс метрики).
+    # Итог: developer, которому поручили "завести процесс курса USD/RUB",
+    # вместо этого несколько раз подряд собрал и переделал целый сайт под
+    # чужим слагом — часы работы и реальные деньги в никуда, а настоящая
+    # задача так и не была выполнена. touches_site — тот же критерий, что уже
+    # использует routers/work.py при решении, куда положить задачи инициативы.
+    touches_site = plan.touches_site(t_rec_policy) if role in ("designer", "developer") else False
     # Параллельные Work (Фаза 3): переключаем workspace на подпапку ПРОЕКТА этой
     # задачи ДО первого write_file/read_file — run_task целиком выполняется в
     # своём asyncio.Task (создан в assign()), поэтому contextvars.ContextVar
@@ -489,7 +504,7 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
         elif role == "strategist":
             result = await strategist.run_async(task, publish=publish, agent_id=agent_id, save=False)
         else:
-            if role in ("designer", "developer"):
+            if role in ("designer", "developer") and touches_site:
                 # Гарантируем «Стиль: …» ДО того, как модель начнёт строить сайт —
                 # инструкция в скилле («marketer пишет строку, designer читает») не
                 # гарантия: в проде marketer пропускал этот необязательный шаг под
@@ -508,7 +523,8 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 # designer/developer придумывали hover/active-цвета на глаз —
                 # несогласованно между файлами одной и той же страницы.
                 design_style.ensure_design_tokens(b.get("niche", ""), b.get("audience", ""))
-            ctx_task = task_with_context(role, task, skill, department=department, objective=objective)
+            ctx_task = task_with_context(role, task, skill, department=department, objective=objective,
+                                        touches_site=touches_site)
             # title — короткая подпись для «Артефактов»/«Готовых результатов», НЕ
             # весь ctx_task/task: task здесь — уже составленный planning_engine
             # текст ("заголовок\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: ...\n<фидбек>"), а не

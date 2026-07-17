@@ -51,6 +51,31 @@ _LEADER_REPEAT_LIMIT = 3  # столько одинаковых решений �
 # ту же мысль, состояние не менялось, лента и токены засорялись.
 _last_delegate_sig: dict[str, str] = {}
 
+# Анти-шум CEO-тира (дополняет _last_delegate_sig выше — тот глушит только
+# повторную ПУБЛИКАЦИЮ решения, этот — сам LLM-вызов decide_company): tid →
+# (отпечаток состояния компании на момент решения, само решение).
+_last_company_fp: dict[str, tuple] = {}
+
+
+def _company_fingerprint() -> tuple:
+    """Дёшево (без LLM/промпта) — только то, от чего решение CEO вообще МОЖЕТ
+    зависеть: какие отделы открыты и кто там чем занят, доска задач каждого
+    открытого отдела, необработанные события. Если всё это совпадает с прошлым
+    гейтом — новый ответ LLM гарантированно был бы тем же самым по сути."""
+    open_depts = tuple(sorted(org.open_departments()))
+    members_sig = tuple(
+        (did, tuple(sorted((a.agent_id, a.status) for a in registry.members_of(did))))
+        for did in open_depts
+    )
+    board_sig = tuple(
+        (did, plan.board_summary(did) if plan.is_generated() else "")
+        for did in open_depts
+    )
+    events_sig = tuple(sorted(e["id"] for e in events_mod.pending()))
+    needed = tuple(sorted(plan.departments_needed())) if plan.is_generated() else ()
+    orphan = has_orphan_tasks() if plan.is_generated() else False
+    return (open_depts, members_sig, board_sig, events_sig, needed, orphan)
+
 
 def forget_tenant(tid: str) -> None:
     """Чистит анти-цикл состояние этого модуля (вызывается loop.forget_tenant)."""
@@ -60,6 +85,7 @@ def forget_tenant(tid: str) -> None:
         _last_leader_sig.pop(k, None)
     for k in [k for k in _last_delegate_sig if k.startswith(prefix)]:
         _last_delegate_sig.pop(k, None)
+    _last_company_fp.pop(tid, None)
 
 
 async def _set_progress_note(note: str, publish) -> None:
@@ -466,8 +492,25 @@ async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int 
     # ---- CEO-тир (гейт по необходимости — экономия токенов) ----
     need_ceo = (not org.open_departments()) or (cycle % CEO_REASSESS_EVERY == 0)
     if need_ceo:
-        company = await orchestrator.decide_company(goal, strategy, ms, publish)
-        await apply_company_decision(company, publish)
+        # Реальный найденный баг (живой прогон): _last_delegate_sig ниже глушит
+        # только ПОВТОРНУЮ публикацию «CEO обновил цель», но сам LLM-вызов
+        # decide_company() при этом всё равно происходит каждый гейт — если
+        # состав компании и доски отделов не менялись 3+ гейта подряд, CEO
+        # платно спрашивал LLM «что делать» и раз за разом получал то же
+        # «delegate» без единого реального изменения (наблюдалось: 3 вызова
+        # подряд с идентичным по смыслу решением, пока единственный developer
+        # был занят той же задачей). Пропускаем САМ вызов, если с прошлого
+        # раза не изменилось ничего, от чего решение вообще могло бы зависеть —
+        # состав/статусы отделов, доски задач, необработанные события.
+        fp = _company_fingerprint()
+        tid = ctx.get_tenant()
+        cached = _last_company_fp.get(tid)
+        if cached and cached[0] == fp and cached[1].get("action") in ("delegate", "wait"):
+            pass  # ничего не изменилось с прошлого решения — не тратим LLM-вызов
+        else:
+            company = await orchestrator.decide_company(goal, strategy, ms, publish)
+            _last_company_fp[tid] = (fp, company)
+            await apply_company_decision(company, publish)
 
     # ---- Блок 4: Инициативы из opportunity-событий ----
     # CEO превращает наблюдённые возможности отделов в конкретные предложения

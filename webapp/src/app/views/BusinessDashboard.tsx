@@ -241,6 +241,16 @@ function ChartWidget({ widget: w, onRemove }: { widget: any; onRemove: (id: stri
       </div>
       {series.length === 0 ? (
         <div style={{ fontSize: 11.5, color: "var(--faint)", padding: "16px 0", textAlign: "center", flex: 1 }}>Пока нет данных за выбранный период</div>
+      ) : series.length === 1 ? (
+        // С одной точкой линию математически не построить (нечего соединять) —
+        // раньше здесь рисовалась одинокая точка в углу пустого холста без
+        // единой подписи, что выглядело как сломанный график, а не как «рано,
+        // подождите ещё одно измерение» (реальная находка на живом тенанте).
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 6, padding: "16px 0", textAlign: "center", flex: 1 }}>
+          <div style={{ fontSize: 20, fontWeight: 500, color: "var(--text)" }}>{series[0].value}</div>
+          <div style={{ fontSize: 11.5, color: "var(--faint)" }}>Только 1 измерение — график появится после следующего</div>
+        </div>
       ) : (
         <div style={{ flex: 1, minHeight: 0 }}><MiniChart series={series} type={w.chart_type === "bar" ? "bar" : "line"} /></div>
       )}
