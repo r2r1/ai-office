@@ -89,7 +89,12 @@ def _derive_artifacts(role: str, title: str) -> list[str]:
         return ["bot"]
     if role == "developer":
         # developer по умолчанию пишет в site/ (тот же инвертированный
-        # безопасный принцип, что был в touches_site) — кроме бот-задач (выше).
+        # безопасный принцип, что был в touches_site) — кроме бот-задач (выше)
+        # и фоновых скриптов/процессов (реальный найденный баг: см. docstring
+        # needs.is_process_reference — иначе такая задача ложно считалась
+        # «тоже про сайт» и accept_initiative молча сливал её в чужой проект).
+        if needs.is_process_reference(t):
+            return ["doc"]
         return ["site"]
     if role == "designer":
         # designer вернулась (2026-07-14) как отдельная роль, но артефакт — НЕ

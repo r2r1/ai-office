@@ -451,7 +451,25 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
 
 // ── Интеграции в момент пиковой мотивации (не спрятаны в настройках) ─────────
 function IntegrationsScreen({ integrations, onContinue }: { integrations: any[]; onContinue: () => void }) {
-  const [, force] = useState(0)
+  // Реальный найденный баг: onRefresh раньше был "const [, force] = useState(0)"
+  // — чистая перерисовка без повторного запроса. IntegCard после успешного OAuth
+  // зовёт onRefresh(), рассчитывая увидеть connected:true, но карточка брала это
+  // поле из ТОГО ЖЕ пропса integrations (снятого один раз в начале онбординга,
+  // ДО подключения) — кнопка «Подключить» оставалась активной даже после
+  // реального успешного подключения. Теперь держим свою копию списка и правда
+  // перезапрашиваем статус (api.integrations() — тот же источник, что и
+  // ConnectionsView в «Ресурсы → Доступы»), обновляя только поле connected.
+  const [items, setItems] = useState(integrations)
+  useEffect(() => { setItems(integrations) }, [integrations])
+  const refreshOne = () => {
+    api.integrations().then(d => {
+      const fresh = d.integrations || []
+      setItems(prev => prev.map(i => {
+        const f = fresh.find((x: any) => x.name === i.name)
+        return f ? { ...i, connected: f.connected } : i
+      }))
+    }).catch(() => {})
+  }
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
       style={{ position: "relative", width: "100%", maxWidth: 520, textAlign: "center" }}>
@@ -461,8 +479,8 @@ function IntegrationsScreen({ integrations, onContinue }: { integrations: any[];
         По вашему описанию офису пригодятся эти сервисы — можно позже, в «Ресурсы → Доступы»
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, textAlign: "left", marginBottom: 20 }}>
-        {integrations.map(i => (
-          <IntegCard key={i.name} integ={i} onRefresh={() => force(n => n + 1)} />
+        {items.map(i => (
+          <IntegCard key={i.name} integ={i} onRefresh={refreshOne} />
         ))}
       </div>
       <motion.button onClick={onContinue} whileTap={{ scale: 0.97 }}
