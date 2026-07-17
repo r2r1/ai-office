@@ -337,13 +337,17 @@ async function loadTenants() {
   renderTenants();
 }
 
-function renderTenants() {
-  document.getElementById('tenantCount').textContent = tenants.length;
-  document.getElementById('tenantSourceNote').textContent =
-    tenantsSource === 'supervisor' ? '(сервер не отвечает — данные от супервайзора, только имя/id)' : '';
-  const isFull = tenantsSource === 'server';
-  const rows = tenants.map(t => `
-    <tr>
+// Реальный найденный баг ("дёргается при каждом обновлении"): полная замена
+// tbody.innerHTML на каждый loadTenants() пересоздавала ВСЕ <tr> заново, даже
+// когда изменилась одна цифра у одного тенанта — визуально дёргалась вся
+// таблица, а :hover под курсором мыши слетал и переприменялся к новому узлу
+// (браузер не может анимировать/удержать hover на элементе, которого больше
+// нет). Теперь строки — постоянные DOM-узлы (по data-tid), у них точечно
+// обновляется только содержимое ячеек; узлы, которых не стало, удаляются,
+// новые — добавляются в конец. Один и тот же <tr> под курсором остаётся
+// тем же <tr> между обновлениями.
+function rowHtml(t, isFull) {
+  return `
       <td><b>${escapeHtml(t.name || t.id)}</b><div class="muted">${t.id}</div></td>
       <td>${isFull
         ? (t.paused ? `<span class="pill paused">пауза</span><div class="muted">${escapeHtml(t.pause_reason||'')}</div>` : `<span class="pill ok">работает</span>`)
@@ -355,10 +359,44 @@ function renderTenants() {
       <td class="row" style="gap:6px">
         ${isFull ? `<button onclick="openDrawer('${t.id}')">Управление</button>` : ''}
         <button class="danger" onclick="deleteTenant('${t.id}', '${escapeHtml(t.name || t.id)}')">Удалить</button>
-      </td>
-    </tr>
-  `).join('');
-  document.getElementById('tenantRows').innerHTML = rows || '<tr><td colspan="7" class="muted">Нет тенантов</td></tr>';
+      </td>`;
+}
+
+function renderTenants() {
+  document.getElementById('tenantCount').textContent = tenants.length;
+  document.getElementById('tenantSourceNote').textContent =
+    tenantsSource === 'supervisor' ? '(сервер не отвечает — данные от супервайзора, только имя/id)' : '';
+  const isFull = tenantsSource === 'server';
+  const tbody = document.getElementById('tenantRows');
+  tbody.querySelector('tr.empty-row')?.remove();
+
+  if (tenants.length === 0) {
+    tbody.querySelectorAll('tr[data-tid]').forEach(tr => tr.remove());
+    if (!tbody.querySelector('tr.empty-row')) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="muted">Нет тенантов</td></tr>';
+    }
+    return;
+  }
+
+  const seen = new Set();
+  for (const t of tenants) {
+    seen.add(t.id);
+    let tr = tbody.querySelector(`tr[data-tid="${t.id}"]`);
+    const html = rowHtml(t, isFull);
+    if (!tr) {
+      tr = document.createElement('tr');
+      tr.setAttribute('data-tid', t.id);
+      tbody.appendChild(tr);
+      tr.innerHTML = html;
+    } else if (tr.innerHTML !== html) {
+      // Меняем только если содержимое реально другое — иначе даже присвоение
+      // ТОГО ЖЕ innerHTML сбросило бы фокус/выделение внутри строки.
+      tr.innerHTML = html;
+    }
+  }
+  tbody.querySelectorAll('tr[data-tid]').forEach(tr => {
+    if (!seen.has(tr.getAttribute('data-tid'))) tr.remove();
+  });
 }
 
 async function deleteTenant(tid, name) {
