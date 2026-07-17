@@ -5,6 +5,7 @@
 между файлами и лимит перестал бы быть общим для всего приложения.
 """
 
+import os
 import time
 
 from fastapi.requests import Request
@@ -13,6 +14,15 @@ from fastapi.responses import HTMLResponse, Response
 from src.office import workspace as workspace_module
 from src.saas import auth as saas_auth, store as saas_store
 from src.saas import context as saas_context
+
+# Единый источник правды (PR-5, docs/technical-due-diligence-2026-07-17.md
+# §3.2.1): раньше DEMO_MODE был локальной константой server.py, и после
+# разбивки на routers/*.py два роутера (team.py, comms.py) продолжали на
+# неё ссылаться, не импортируя — реальный баг, найденный живой браузерной
+# проверкой (NameError на /api/brief/status, /api/chat, /api/ask), не
+# статическим анализом. server.py импортирует это отсюда же, а не определяет
+# заново — иначе снова разъедется при следующей правке.
+DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 # ---- Rate limiting ----
 # Один универсальный bucket на (namespace, key): /auth/*, /api/terminal, /api/run
@@ -70,6 +80,56 @@ def _rate_limited_memory(namespace: str, key: str, max_per_min: int) -> bool:
         return True
     bucket[key].append(now)
     return False
+
+
+# ---- Идемпотентность ----
+# docs/technical-due-diligence-2026-07-17.md §5.6: двойной клик/ретрай сети на
+# рискованном действии (принять инициативу, вебхук от Telegram/GitHub) раньше
+# мог выполнить побочный эффект дважды. Точечно — не для вообще всех запросов
+# (у большинства повтор и так безвреден: GET ничего не меняет, "поставить на
+# паузу" дважды подряд не создаёт вторую паузу), а там, где повтор реально
+# порождает новую сущность. Ключ ("Idempotency-Key") генерирует КЛИЕНТ на
+# конкретное действие — не платформа проставляет id всему подряд.
+_idem_memory: dict[str, tuple[float, object]] = {}
+
+
+async def idempotent(namespace: str, key: str, ttl_seconds: float, compute):
+    """Если (namespace, key) уже видели — вернуть закешированный результат
+    БЕЗ повторного вызова compute() (значит, без повторных побочных эффектов).
+    Иначе — вызвать compute() (может делать что угодно: писать в план,
+    публиковать события), закешировать результат и вернуть его.
+
+    key="" (клиент не прислал Idempotency-Key) — дедупликации нет, compute()
+    вызывается всегда: не можем дедуплицировать то, что нечем отличить."""
+    if not key:
+        return await compute()
+    import json as _json
+    full_key = f"idem:{namespace}:{key}"
+    from src.core import redis_client
+    client = redis_client.get_client()
+    if client is not None:
+        cached = client.get(full_key)
+        if cached is not None:
+            return _json.loads(cached)
+        result = await compute()
+        # Кешируем только сериализуемый JSON-результат (обычный ответ). Ветки
+        # ошибок/отказов иногда возвращают готовый Response-объект (например
+        # JSONResponse со status_code=409) — те не мутируют состояние, поэтому
+        # безопасно НЕ дедуплицировать: пересчитать при повторе не страшно.
+        if isinstance(result, (dict, list)):
+            client.set(full_key, _json.dumps(result, ensure_ascii=False), ex=int(ttl_seconds))
+        return result
+    now = time.time()
+    entry = _idem_memory.get(full_key)
+    if entry and entry[0] > now:
+        return entry[1]
+    result = await compute()
+    if isinstance(result, (dict, list)):
+        _idem_memory[full_key] = (now + ttl_seconds, result)
+        if len(_idem_memory) > 2000:
+            for stale in [k for k, (exp, _v) in _idem_memory.items() if exp <= now]:
+                _idem_memory.pop(stale, None)
+    return result
 
 
 def client_ip(request: Request) -> str:

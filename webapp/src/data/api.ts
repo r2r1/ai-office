@@ -9,11 +9,13 @@ async function getJSON<T>(url: string, fallback: T): Promise<T> {
   }
 }
 
-async function postJSON<T>(url: string, body: unknown, fallback: T): Promise<T> {
+async function postJSON<T>(
+  url: string, body: unknown, fallback: T, extraHeaders?: Record<string, string>,
+): Promise<T> {
   try {
     const r = await fetch(url, {
       method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
     })
     if (!r.ok) return fallback
@@ -21,6 +23,17 @@ async function postJSON<T>(url: string, body: unknown, fallback: T): Promise<T> 
   } catch {
     return fallback
   }
+}
+
+// Один случайный ключ на один клик — backend (docs/technical-due-diligence-
+// 2026-07-17.md §5.6) дедуплицирует по нему: если сеть отвалится и клик уйдёт
+// повторно (браузер сам ретраит fetch, или пользователь тыкнет дважды, пока
+// первый запрос ещё летит), сервер вернёт ПРЕЖНИЙ результат вместо повторного
+// создания проекта/задач.
+export function newIdempotencyKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 // Как postJSON, но читает JSON-тело даже при !ok (403 и т.п.) — эндпоинты вроде
@@ -133,7 +146,8 @@ export const api = {
   reorderProjectsQueue: (order: string[]) => postJSON<any>("/api/projects/reorder", { order }, null),
   initiatives: () => getJSON<{ pending: any[]; researching: any[]; pending_count: number; total: number }>("/api/initiatives", { pending: [], researching: [], pending_count: 0, total: 0 }),
   proposeInitiative: (title: string, idea: string) => postJSON<any>("/api/initiatives", { title, idea }, null),
-  acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null),
+  acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null,
+    { "Idempotency-Key": newIdempotencyKey() }),
   rejectInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/reject`, {}, null),
   gap: () => getJSON<{ gaps: any[] }>("/api/gap", { gaps: [] }),
   decisions: () => getJSON<{ decisions: any[] }>("/api/decisions", { decisions: [] }),
@@ -179,7 +193,8 @@ export const api = {
   githubDevicePoll: (device_code: string) => postJSON<any>("/auth/github/device/poll", { device_code }, null),
   logout: () => postJSON<any>("/auth/logout", {}, null),
   get: (url: string) => getJSON<any>(url, null),
-  post: (url: string, body: unknown = {}) => postJSON<any>(url, body, null),
+  post: (url: string, body: unknown = {}, extraHeaders?: Record<string, string>) =>
+    postJSON<any>(url, body, null, extraHeaders),
   // ── Приложения тенанта (office/tenant_apps.py) — постоянный self-host сторонних сервисов ──
   hostedApps: () => getJSON<{ apps: any[] }>("/api/apps", { apps: [] }),
   hostedAppDetail: (id: string) => getJSON<any>(`/api/apps/${id}`, null),

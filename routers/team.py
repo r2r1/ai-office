@@ -13,6 +13,7 @@ from src.office import demo
 from src.office import initiatives as initiatives_module
 from src.integrations import registry as integrations_registry
 from src.office import memory
+from routers.shared import DEMO_MODE
 from src.office import milestones
 from src.office import models as models_module
 from src.office import loop as office_loop

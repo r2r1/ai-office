@@ -55,7 +55,10 @@ async def get_async_client():
     """Асинхронный клиент — нужен для SSE pub/sub (bus.py), где события
     публикуются и слушаются внутри asyncio-корутин; синхронный клиент
     заблокировал бы event loop на каждый вызов. Тот же принцип деградации:
-    без REDIS_URL/пакета redis — None."""
+    без REDIS_URL/пакета redis — None.
+
+    socket_timeout=5 годится для обычных команд (publish и т.п.), но НЕ для
+    pubsub — используй get_async_pubsub_client() для долгого прослушивания."""
     global _async_client, _async_tried
     if _async_tried:
         return _async_client
@@ -71,6 +74,25 @@ async def get_async_client():
     except Exception:
         _async_client = None
     return _async_client
+
+
+async def get_async_pubsub_client():
+    """Отдельный асинхронный клиент БЕЗ socket_timeout — для pubsub.listen(),
+    который блокируется в ожидании следующего сообщения сколько угодно долго.
+    Реальный найденный баг: общий клиент с socket_timeout=5 обрывал listener
+    TimeoutError'ом после первых же 5 секунд тишины в канале — фоновая
+    доставка SSE-событий между серверами молча умирала после первого же
+    спокойного момента (см. src/office/bus.py:_redis_listen_loop)."""
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url or _redis_async_lib is None:
+        return None
+    try:
+        c = _redis_async_lib.Redis.from_url(
+            url, decode_responses=True, socket_connect_timeout=2, socket_timeout=None)
+        await c.ping()
+        return c
+    except Exception:
+        return None
 
 
 def reset_for_tests() -> None:

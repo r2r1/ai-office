@@ -36,9 +36,7 @@ from routers.work import router as work_router
 from routers.settings import router as settings_router
 from routers.results import router as results_router
 from routers.comms import router as comms_router
-from routers.shared import serve_site_file
-
-DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
+from routers.shared import serve_site_file, DEMO_MODE
 
 
 def _warn_if_unsandboxed_execution_in_prod() -> None:

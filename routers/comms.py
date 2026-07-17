@@ -15,6 +15,7 @@ from src.office import investigation
 from src.office import memory
 from src.office import milestones
 from src.office import bootstrap as office_bootstrap
+from routers.shared import DEMO_MODE
 from src.office import office_channel
 from src.office import loop as office_loop
 from src.agents import orchestrator

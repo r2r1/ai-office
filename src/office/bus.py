@@ -99,25 +99,46 @@ def _ensure_redis_listener() -> None:
 
 
 async def _redis_listen_loop() -> None:
+    """Реальный найденный баг: клиент с socket_timeout=5 обрывал listener
+    TimeoutError'ом после первых же 5с тишины в канале — фоновая доставка
+    SSE-событий между серверами молча умирала после первого спокойного
+    момента (процесс не падал, просто переставал доставлять live-события,
+    что незаметно без специальной проверки). Два слоя защиты: 1) отдельный
+    pubsub-клиент БЕЗ таймаута чтения (get_async_pubsub_client) — не должно
+    случаться в норме; 2) внешний retry-цикл на случай РЕАЛЬНОГО обрыва
+    сети/Redis — не должен требовать ручного перезапуска сервера, чтобы SSE
+    снова заработал."""
+    import logging
     from src.core import redis_client
-    r = await redis_client.get_async_client()
-    if r is None:
-        return
-    pubsub = r.pubsub()
-    await pubsub.psubscribe("sse:*")
-    try:
-        async for msg in pubsub.listen():
-            if msg.get("type") != "pmessage":
-                continue
-            channel = msg.get("channel") or ""
-            if not channel.startswith("sse:"):
-                continue
-            tid = channel[len("sse:"):]
+    while True:
+        r = await redis_client.get_async_pubsub_client()
+        if r is None:
+            return
+        pubsub = r.pubsub()
+        try:
+            await pubsub.psubscribe("sse:*")
+            async for msg in pubsub.listen():
+                if msg.get("type") != "pmessage":
+                    continue
+                channel = msg.get("channel") or ""
+                if not channel.startswith("sse:"):
+                    continue
+                tid = channel[len("sse:"):]
+                try:
+                    event = json.loads(msg["data"])
+                except (TypeError, ValueError):
+                    continue
+                for q in list(_subs.get(tid, [])):
+                    await q.put(event)
+        except Exception:
+            logging.exception("[bus] Redis pub/sub listener оборвался — переподключаюсь через 2с")
+            await asyncio.sleep(2)
+        finally:
             try:
-                event = json.loads(msg["data"])
-            except (TypeError, ValueError):
-                continue
-            for q in list(_subs.get(tid, [])):
-                await q.put(event)
-    finally:
-        await pubsub.aclose()
+                await pubsub.aclose()
+            except Exception:
+                pass
+            try:
+                await r.aclose()
+            except Exception:
+                pass

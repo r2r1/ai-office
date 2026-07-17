@@ -245,6 +245,13 @@ async def telegram_webhook(tenant: str, secret: str, request: Request):
 
     Безопасность: secret в URL должен совпадать с конфигом тенанта. Движок один
     (bot_engine), поведение бота определяется конфигом этого тенанта.
+
+    Идемпотентность (docs/technical-due-diligence-2026-07-17.md §5.6): Telegram
+    ретраит вебхук, если не получил 200 вовремя (медленный handle_update) — тот
+    же update_id мог обработаться дважды (два ответа боту, задвоенный лид).
+    Ключ дедупликации берём из САМОГО апдейта (update_id — Telegram гарантирует
+    его уникальность и монотонный рост на бота), не от клиента: это server-to-
+    server вебхук, а не действие владельца в UI, спрашивать заголовок не у кого.
     """
     saas_context.set_tenant(tenant)
     cfg = bot_config_module.get()
@@ -254,11 +261,19 @@ async def telegram_webhook(tenant: str, secret: str, request: Request):
         update = await request.json()
     except Exception:
         return {"ok": True}
-    try:
-        await bot_engine_module.handle_update(update)
-    except Exception:
-        pass  # не отдаём Telegram ошибку, чтобы он не ретраил бесконечно
-    return {"ok": True}
+
+    async def _handle():
+        try:
+            await bot_engine_module.handle_update(update)
+        except Exception:
+            pass  # не отдаём Telegram ошибку, чтобы он не ретраил бесконечно
+        return {"ok": True}
+
+    update_id = update.get("update_id")
+    if update_id is None:
+        return await _handle()
+    from routers.shared import idempotent
+    return await idempotent(f"tg_update:{tenant}", str(update_id), 600, _handle)
 
 @router.get("/api/bot")
 async def get_bot_config():

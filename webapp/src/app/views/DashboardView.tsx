@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useOffice } from "../../data/OfficeProvider"
-import { api } from "../../data/api"
+import { api, newIdempotencyKey } from "../../data/api"
 import { ViewShell, ViewHead, ViewBody, SubTabs, Card, SectionLabel, Pill, MercuryBar, ShowMore } from "./ui"
 import { BusinessDashboard } from "./BusinessDashboard"
 import { useThrottled } from "../hooks"
@@ -30,6 +30,13 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
   const [gaps, setGaps] = useState<any[]>([])
   // Результат последнего accept — показываем "стало проектом «X»" вместо тишины.
   const [acceptedResult, setAcceptedResult] = useState<{ title: string; projectId: string; projectTitle: string } | null>(null)
+  // Защита от двойного клика (docs/technical-due-diligence-2026-07-17.md §5.6):
+  // это ВТОРАЯ, независимая реализация той же кнопки «Принять» (первая —
+  // ProjectView.tsx) — найдено живой браузерной проверкой: правка одного места
+  // не защищала другое, потому что тут своя копия handleInitiative/api.post,
+  // не использующая api.acceptInitiative(). Один Idempotency-Key на всю цепочку
+  // (включая override-переспрос) — сеть/двойной клик не создадут проект дважды.
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
 
   // Раньше зависел от СЫРОГО state.feed.length — при активном офисе SSE
   // шлёт события постоянно, и этот эффект рефетчил health/autonomy/gap/
@@ -57,24 +64,45 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
     { label: "Расход",   value: `$${state.cost.toFixed(4)}` },
   ]
 
-  async function handleInitiative(iid: string, action: "accept" | "reject", override = false) {
-    const ini = initiatives.find(i => i.id === iid)
-    const r = await api.post(`/api/initiative/${iid}/${action}`, action === "accept" ? { override } : {})
-    // Гейт вердикта (docs/product-capability-gaps.md п.6): исследование сказало
-    // "не стоит" — сервер отказал без override. Не тихо проглатываем, а явно
-    // переспрашиваем: владелец видит рекомендацию и решает сам ещё раз.
-    if (r?.error === "initiative_blocked") {
-      const confirmed = window.confirm(
-        `⚠️ Офис рекомендует НЕ делать эту инициативу.\n\n${r.research || r.message}\n\nВсё равно принять?`
-      )
-      if (confirmed) {
-        await handleInitiative(iid, "accept", true)
-      }
-      return
+  async function handleInitiative(iid: string, action: "accept" | "reject", override = false, idemKey?: string) {
+    // idemKey уже задан — это ПРОДОЛЖЕНИЕ той же попытки (override-переспрос
+    // из ветки initiative_blocked ниже), не новый клик: busy уже выставлен
+    // внешним вызовом, повторно проверять/выставлять не нужно (иначе этот
+    // вложенный вызов увидел бы iid как "занято" и молча вышел бы, обрывая
+    // ретрай с override=true).
+    const isTopLevelCall = action !== "accept" || !idemKey
+    if (action === "accept" && isTopLevelCall) {
+      if (busyIds.has(iid)) return
+      idemKey = newIdempotencyKey()
+      setBusyIds(prev => new Set(prev).add(iid))
     }
-    setInitiatives(prev => prev.filter(i => i.id !== iid))
-    if (action === "accept" && r?.project_id && ini) {
-      setAcceptedResult({ title: ini.title, projectId: r.project_id, projectTitle: r.project_title || ini.title })
+    try {
+      const ini = initiatives.find(i => i.id === iid)
+      const headers = action === "accept" ? { "Idempotency-Key": idemKey! } : undefined
+      const r = await api.post(`/api/initiative/${iid}/${action}`, action === "accept" ? { override } : {}, headers)
+      // Гейт вердикта (docs/product-capability-gaps.md п.6): исследование сказало
+      // "не стоит" — сервер отказал без override. Не тихо проглатываем, а явно
+      // переспрашиваем: владелец видит рекомендацию и решает сам ещё раз.
+      if (r?.error === "initiative_blocked") {
+        const confirmed = window.confirm(
+          `⚠️ Офис рекомендует НЕ делать эту инициативу.\n\n${r.research || r.message}\n\nВсё равно принять?`
+        )
+        if (confirmed) {
+          // Тот же idemKey — это продолжение ОДНОЙ попытки принятия, не новое
+          // действие: override-переспрос не должен создать второй проект,
+          // если пользователь как-то умудрится подтвердить дважды.
+          await handleInitiative(iid, "accept", true, idemKey)
+        }
+        return
+      }
+      setInitiatives(prev => prev.filter(i => i.id !== iid))
+      if (action === "accept" && r?.project_id && ini) {
+        setAcceptedResult({ title: ini.title, projectId: r.project_id, projectTitle: r.project_title || ini.title })
+      }
+    } finally {
+      if (action === "accept") {
+        setBusyIds(prev => { const next = new Set(prev); next.delete(iid); return next })
+      }
     }
   }
 
@@ -164,11 +192,15 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                       {ini.estimated_effort && <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: 8 }}>Усилий: {ini.estimated_effort}</span>}
                     </div>
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                      <button onClick={() => handleInitiative(ini.id, "accept")}
-                        style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
-                          border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)" }}>✅ Принять</button>
-                      <button onClick={() => handleInitiative(ini.id, "reject")}
-                        style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11, cursor: "pointer",
+                      <button onClick={() => handleInitiative(ini.id, "accept")} disabled={busyIds.has(ini.id)}
+                        style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11,
+                          cursor: busyIds.has(ini.id) ? "default" : "pointer", opacity: busyIds.has(ini.id) ? 0.6 : 1,
+                          border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)" }}>
+                        {busyIds.has(ini.id) ? "⏳" : "✅ Принять"}
+                      </button>
+                      <button onClick={() => handleInitiative(ini.id, "reject")} disabled={busyIds.has(ini.id)}
+                        style={{ padding: "6px 12px", borderRadius: "var(--radius-pill)", fontSize: 11,
+                          cursor: busyIds.has(ini.id) ? "default" : "pointer", opacity: busyIds.has(ini.id) ? 0.6 : 1,
                           border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>✖</button>
                     </div>
                   </div>

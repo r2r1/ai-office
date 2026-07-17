@@ -82,16 +82,29 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
     }
   }, [focusProjectId, projects]) // eslint-disable-line
 
+  // Защита от двойного клика (docs/technical-due-diligence-2026-07-17.md §5.6):
+  // без этого второй клик до ответа сервера ушёл бы ОТДЕЛЬНЫМ запросом со своим
+  // Idempotency-Key (генерируется в api.acceptInitiative на каждый вызов) — сам
+  // ключ дедуплицирует сетевые ретраи одного запроса, но не спасает от того, что
+  // кнопка вообще осталась активной и породила второй, самостоятельный запрос.
+  const [acceptingId, setAcceptingId] = useState<string | null>(null)
+
   async function acceptInitiative(iid: string) {
-    const r = await api.acceptInitiative(iid)
-    setInitiatives(prev => prev.filter(i => i.id !== iid))
-    const d = await api.projects()
-    setProjects(d.projects || [])
-    // Принятая инициатива стала конкретным проектом — переключаемся на вкладку
-    // «Проекты» и сразу открываем его экран, не заставляя искать глазами в
-    // списке (BOS §5: decision spawn_project).
-    if (r?.project_id) { setTab("projects"); setSelected({ kind: "project", id: r.project_id }) }
-    else setSelected(null)
+    if (acceptingId) return
+    setAcceptingId(iid)
+    try {
+      const r = await api.acceptInitiative(iid)
+      setInitiatives(prev => prev.filter(i => i.id !== iid))
+      const d = await api.projects()
+      setProjects(d.projects || [])
+      // Принятая инициатива стала конкретным проектом — переключаемся на вкладку
+      // «Проекты» и сразу открываем его экран, не заставляя искать глазами в
+      // списке (BOS §5: decision spawn_project).
+      if (r?.project_id) { setTab("projects"); setSelected({ kind: "project", id: r.project_id }) }
+      else setSelected(null)
+    } finally {
+      setAcceptingId(null)
+    }
   }
 
   async function rejectInitiative(iid: string) {
@@ -152,7 +165,7 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
               selected={selected} onBack={() => setSelected(null)}
               initiatives={initiatives} processes={processes} projects={projects}
               details={details} leadsSummary={leadsSummary}
-              onAccept={acceptInitiative} onReject={rejectInitiative}
+              onAccept={acceptInitiative} onReject={rejectInitiative} acceptingId={acceptingId}
               onPause={pauseProcess} onResume={resumeProcess} onDelete={deleteProcess}
               onPauseProject={pauseProject} onResumeProject={resumeProject}
               onOpenStorage={onOpenStorage}
@@ -229,7 +242,7 @@ function DetailHeader({ badge, statusPill, title, sub, onBack, actions }: {
 // ── Роутер детального экрана: по selected.kind достаёт нужную сущность из уже
 // загруженных списков и рендерит её экран. Сущность могла исчезнуть (принята/
 // отклонена/удалена только что) — тогда мягкий фолбэк вместо пустого экрана. ──
-function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject, onOpenStorage }: {
+function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject, onOpenStorage, acceptingId }: {
   selected: Selected; onBack: () => void
   initiatives: any[]; processes: any[]; projects: any[]; details: Record<string, any>
   leadsSummary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
@@ -237,12 +250,14 @@ function DetailScreen({ selected, onBack, initiatives, processes, projects, deta
   onPause: (id: string) => void; onResume: (id: string) => void; onDelete: (id: string) => void
   onPauseProject: (id: string) => void; onResumeProject: (id: string) => void
   onOpenStorage?: (workspaceDir: string) => void
+  acceptingId?: string | null
 }) {
   if (selected.kind === "initiative") {
     const ini = initiatives.find(i => i.id === selected.id)
     if (!ini) return <GoneScreen onBack={onBack} text="Эта инициатива уже обработана." />
     return <InitiativeDetailScreen initiative={ini} onBack={onBack}
-      onAccept={() => onAccept(ini.id)} onReject={() => onReject(ini.id)} />
+      onAccept={() => onAccept(ini.id)} onReject={() => onReject(ini.id)}
+      busy={acceptingId === ini.id} />
   }
   if (selected.kind === "process") {
     const proc = processes.find(p => p.id === selected.id)
@@ -582,8 +597,8 @@ function NewProcessForm({ onCreate }: { onCreate: (title: string, role: string, 
 }
 
 // ── Экран инициативы: обоснование + анализ + предпросмотр задач + решение. ──
-function InitiativeDetailScreen({ initiative: ini, onBack, onAccept, onReject }: {
-  initiative: any; onBack: () => void; onAccept: () => void; onReject: () => void
+function InitiativeDetailScreen({ initiative: ini, onBack, onAccept, onReject, busy }: {
+  initiative: any; onBack: () => void; onAccept: () => void; onReject: () => void; busy?: boolean
 }) {
   return (
     <>
@@ -591,13 +606,15 @@ function InitiativeDetailScreen({ initiative: ini, onBack, onAccept, onReject }:
         statusPill={<Pill accent>Ждёт решения</Pill>}
         actions={
           <>
-            <button onClick={onAccept}
-              style={{ padding: "9px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+            <button onClick={onAccept} disabled={busy}
+              style={{ padding: "9px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5,
+                cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
                 border: "1px solid var(--success)", background: "rgba(160,224,171,0.15)", color: "var(--success)", fontWeight: 500 }}>
-              ✅ Принять → создать проект
+              {busy ? "⏳ Принимаю…" : "✅ Принять → создать проект"}
             </button>
-            <button onClick={onReject}
-              style={{ padding: "9px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+            <button onClick={onReject} disabled={busy}
+              style={{ padding: "9px 18px", borderRadius: "var(--radius-pill)", fontSize: 12.5,
+                cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
                 border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
               ✖ Отклонить
             </button>

@@ -364,7 +364,20 @@ async def accept_initiative(iid: str, request: Request):
     (раньше вторая инициатива молча растворялась в задачах первой, если та
     была активна и непуста). Если слоты параллельных проектов заняты
     (projects.get_limit(), по умолчанию 3) — новый Work встаёт в очередь
-    (status="queued") и активируется сам, когда что-то закроется."""
+    (status="queued") и активируется сам, когда что-то закроется.
+
+    Идемпотентность (docs/technical-due-diligence-2026-07-17.md §5.6): двойной
+    клик или ретрай сети на этой кнопке раньше мог создать проект и задачи
+    ДВАЖДЫ. Если фронт прислал заголовок Idempotency-Key — второй запрос с
+    тем же ключом вернёт ПРЕЖНИЙ результат, не тронув план повторно."""
+    from routers.shared import idempotent
+    idem_key = (request.headers.get("idempotency-key") or "").strip()
+    tid = saas_context.get_tenant()
+    return await idempotent(f"accept_initiative:{tid}", f"{iid}:{idem_key}", 300,
+                             lambda: _do_accept_initiative(iid, request))
+
+
+async def _do_accept_initiative(iid: str, request: Request) -> dict:
     from src.office import projects as projects_module
     initiative = next((i for i in initiatives_module.pending() if i["id"] == iid), None)
 
