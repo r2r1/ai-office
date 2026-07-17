@@ -54,3 +54,68 @@ def reset_for_tests() -> None:
     global _client, _tried
     _client = None
     _tried = False
+
+
+# ---- Распределённые локи (docs/technical-due-diligence-2026-07-17.md §2.1) ----
+# Классический паттерн SET NX PX + токен: acquire ставит ключ, только если его
+# ещё нет (NX), с TTL (PX) — если процесс, взявший лок, упадёт молча, лок сам
+# истечёт и не будет держать ресурс вечно. release/renew проверяют токен через
+# Lua-скрипт (атомарно "прочитать-и-сравнить-и-удалить/продлить"), чтобы один
+# процесс не мог случайно снять/продлить чужой лок, если его собственный уже
+# истёк и был перехвачен другим процессом — иначе гонка: A держит лок, TTL
+# истекает, B перехватывает, A (не зная об этом) продлевает УЖЕ ЧУЖОЙ лок.
+_RELEASE_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+_RENEW_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("pexpire", KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
+
+def try_acquire_lock(key: str, ttl_seconds: float) -> str | None:
+    """Пытается взять лок `key` на ttl_seconds. Возвращает уникальный токен
+    (нужен для release/renew) при успехе, или None если уже занят кем-то
+    другим. Если Redis не настроен/недоступен — возвращает пустой токен ""
+    (не None!): вызывающий код должен трактовать "" как "лока нет, но и
+    конкурентов тоже нет — работай, как раньше, в один процесс"."""
+    import uuid
+    client = get_client()
+    if client is None:
+        return ""
+    token = uuid.uuid4().hex
+    ok = client.set(key, token, nx=True, px=int(ttl_seconds * 1000))
+    return token if ok else None
+
+
+def renew_lock(key: str, token: str, ttl_seconds: float) -> bool:
+    """Продлевает TTL уже взятого лока — только если токен совпадает (это
+    всё ещё НАШ лок, не чужой, перехваченный после истечения)."""
+    if not token:
+        return True  # Redis недоступен — локи не используются, всегда "ок"
+    client = get_client()
+    if client is None:
+        return True
+    try:
+        return bool(client.eval(_RENEW_LUA, 1, key, token, int(ttl_seconds * 1000)))
+    except Exception:
+        return False
+
+
+def release_lock(key: str, token: str) -> None:
+    if not token:
+        return
+    client = get_client()
+    if client is None:
+        return
+    try:
+        client.eval(_RELEASE_LUA, 1, key, token)
+    except Exception:
+        pass

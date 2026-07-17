@@ -42,6 +42,13 @@ BLOCKED_HEARTBEAT_SECS = int(os.getenv("BLOCKED_HEARTBEAT_SECS", "600"))
 # с состоянием живости исполнения (execution.py) и анти-циклом маршрутизации (planning_engine.py)).
 _first_cycle_done: dict[str, bool] = {} # tid -> прошёл ли первый цикл
 _office_tasks: dict[str, asyncio.Task] = {}
+# Распределённый лок офис-цикла тенанта (docs/technical-due-diligence-2026-07-17.md
+# §2.1) — token пуст (""), если Redis не настроен: тогда единственная защита от
+# двойного запуска — сам _office_tasks (достаточно для одного процесса). Если
+# REDIS_URL задан, лок не даёт ВТОРОМУ серверу параллельно вести того же тенанта
+# (иначе оба списывали бы деньги за одну и ту же работу).
+_lock_tokens: dict[str, str] = {}
+_OFFICE_LOCK_TTL = LOOP_INTERVAL * 3  # запас на 2 пропущенных продления подряд
 _completion_announced: dict[str, bool] = {}  # tid -> объявлено ли «цель достигнута»
 _last_blocked_heartbeat: dict[str, float] = {}  # tid -> ts последнего напоминания о блокере
 _net_fail_streak: dict[str, int] = {}   # tid -> подряд идущих сетевых сбоев цикла
@@ -242,13 +249,31 @@ async def run() -> None:
                     continue
                 ctx.set_tenant(tid)
                 if brief.is_ready():
-                    _office_tasks[tid] = asyncio.create_task(_run_office(tid))
+                    from src.core import redis_client
+                    token = redis_client.try_acquire_lock(f"office_lock:{tid}", _OFFICE_LOCK_TTL)
+                    if token is None:
+                        # Другой сервер уже ведёт этого тенанта прямо сейчас — не лезем.
+                        continue
+                    _lock_tokens[tid] = token
+                    new_task = asyncio.create_task(_run_office(tid))
+                    new_task.add_done_callback(lambda _t, tid=tid: _release_tenant_lock(tid))
+                    _office_tasks[tid] = new_task
             except Exception:
                 # Один сломанный тенант раньше обрывал проверку ВСЕХ остальных
                 # в этом проходе (общий try на весь for) — теперь ошибка одного
                 # тенанта не мешает остальным запуститься в этом же цикле.
                 logging.exception("[office.loop] сбой запуска офиса тенанта %s", tid)
         await asyncio.sleep(MANAGER_POLL)
+
+
+def _release_tenant_lock(tid: str) -> None:
+    """done_callback офис-задачи — освобождает распределённый лок независимо
+    от того, ПОЧЕМУ задача завершилась (нормальный возврат/исключение/отмена),
+    иначе истёкший-но-не-освобождённый лок держал бы слот до TTL впустую."""
+    token = _lock_tokens.pop(tid, "")
+    if token:
+        from src.core import redis_client
+        redis_client.release_lock(f"office_lock:{tid}", token)
 
 
 async def _run_office(tid: str) -> None:
@@ -387,6 +412,11 @@ async def _run_office(tid: str) -> None:
     cycle = 0
     while True:
         cycle += 1
+
+        # Продление распределённого лока (см. _lock_tokens/_OFFICE_LOCK_TTL выше) —
+        # без REDIS_URL renew_lock() возвращает True мгновенно (не используется).
+        from src.core import redis_client
+        redis_client.renew_lock(f"office_lock:{tid}", _lock_tokens.get(tid, ""), _OFFICE_LOCK_TTL)
 
         # World Model кешируется НА ЦИКЛ (docs/prompts/system-audit-prompt.md,
         # Шаг 3): snapshot() вызывается минимум трижды за один decision-цикл
