@@ -220,6 +220,7 @@ async def _set_progress_note(note: str, publish) -> None:
 # МЕНЕДЖЕР: запускает офис для каждого тенанта с готовым брифом
 # ============================================================
 async def run() -> None:
+    import logging
     while True:
         try:
             # Тенанты-воркспейсы + «default» (анонимный/демо) — иначе у демо-юзера
@@ -227,15 +228,26 @@ async def run() -> None:
             tids = [ws["id"] for ws in saas_store.all_workspaces()]
             if "default" not in tids:
                 tids.append("default")
-            for tid in tids:
+        except Exception:
+            # docs/technical-due-diligence-2026-07-17.md §5.8: раньше глоталось
+            # молча — если это стабильно падает (напр. БД недоступна), офис
+            # НИКОГДА не запускается ни для одного тенанта, и никто этого не видит.
+            logging.exception("[office.loop] не удалось получить список тенантов")
+            await asyncio.sleep(MANAGER_POLL)
+            continue
+        for tid in tids:
+            try:
                 task = _office_tasks.get(tid)
                 if task and not task.done():
                     continue
                 ctx.set_tenant(tid)
                 if brief.is_ready():
                     _office_tasks[tid] = asyncio.create_task(_run_office(tid))
-        except Exception:
-            pass
+            except Exception:
+                # Один сломанный тенант раньше обрывал проверку ВСЕХ остальных
+                # в этом проходе (общий try на весь for) — теперь ошибка одного
+                # тенанта не мешает остальным запуститься в этом же цикле.
+                logging.exception("[office.loop] сбой запуска офиса тенанта %s", tid)
         await asyncio.sleep(MANAGER_POLL)
 
 

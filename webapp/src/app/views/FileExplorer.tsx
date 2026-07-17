@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { marked } from "marked"
+import DOMPurify from "dompurify"
 import { api } from "../../data/api"
 import { Empty, ViewBody } from "./ui"
 
@@ -237,7 +238,13 @@ function TreeView({ nodes, depth, selected, expanded, onToggle, onOpen }: {
 // ── Рендер .md-файлов, которые пишут агенты (offer.md, tech_design.md, strategy.md…) —
 // раньше показывались сырым текстом с "#"/"**" вместо форматирования.
 function MarkdownView({ content }: { content: string }) {
-  const html = useMemo(() => marked.parse(content || "") as string, [content])
+  // content — .md-файл, который пишет LLM-агент (write_file), не пользователь
+  // напрямую: промпт-инъекция (через web_search/бриф) может заставить агента
+  // записать HTML-payload в offer.md/strategy.md — sanitize обязателен, не
+  // опционален (аудит docs/technical-due-diligence-2026-07-17.md §4.2).
+  const html = useMemo(
+    () => DOMPurify.sanitize(marked.parse(content || "") as string),
+    [content])
   return (
     <div className="md-preview" style={{ flex: 1, overflow: "auto", padding: "20px 28px" }}
       dangerouslySetInnerHTML={{ __html: html }} />

@@ -62,6 +62,36 @@ from src.office import roles as roles_module
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 
+def _warn_if_unsandboxed_execution_in_prod() -> None:
+    """Аудит docs/technical-due-diligence-2026-07-17.md §5.2: ALLOW_CODE_EXECUTION=1
+    + SANDBOX_MODE=direct даёт любому тенанту шелл на хосте с правами процесса
+    (path traversal через `cat ../../<tenant>/.env` — читает APP_SECRET, которым
+    зашифрованы секреты ВСЕХ тенантов). Опасно только вне localhost-разработки —
+    APP_BASE_URL, похожий на прод (https, не localhost/127.0.0.1), с этой
+    комбинацией флагов не должен уехать в прод молча. Не hard-fail: staging может
+    осознанно держать direct-режим на переходный период до готового Docker-образа
+    (docs §5.2 п.2) — но это должно быть громко видно в логе при каждом старте,
+    не тихим дефолтом.
+    """
+    import logging
+    allow_exec = os.getenv("ALLOW_CODE_EXECUTION", "0") == "1"
+    sandbox_direct = os.getenv("SANDBOX_MODE", "direct") == "direct"
+    base_url = os.getenv("APP_BASE_URL", "")
+    looks_like_prod = base_url.startswith("https") and "localhost" not in base_url \
+        and "127.0.0.1" not in base_url
+    if allow_exec and sandbox_direct and looks_like_prod:
+        logging.critical(
+            "⚠️ НЕБЕЗОПАСНАЯ КОНФИГУРАЦИЯ: ALLOW_CODE_EXECUTION=1 и SANDBOX_MODE=direct "
+            "с прод-подобным APP_BASE_URL=%s — /api/terminal и /api/run исполняют "
+            "команды тенанта БЕЗ изоляции от файловой системы хоста, включая .env "
+            "с APP_SECRET (шифрует секреты ВСЕХ тенантов). Собери docker/sandbox."
+            "Dockerfile и выставь SANDBOX_MODE=docker до реального трафика — "
+            "см. docs/technical-due-diligence-2026-07-17.md §5.2.", base_url)
+
+
+_warn_if_unsandboxed_execution_in_prod()
+
+
 def _with_worker_id(payload):
     """Зеркалит worker_id рядом с agent_id в исходящем JSON (BOS §12 п.4:
     agent_id → worker_id, agent_id остаётся deprecated-алиасом на переходный

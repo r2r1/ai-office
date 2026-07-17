@@ -9,9 +9,12 @@ GitHub OAuth закрывает сразу две задачи: вход в се
     APP_BASE_URL=http://localhost:8000         # для redirect_uri
     GITHUB_CLIENT_ID=...                        # GitHub OAuth App
     GITHUB_CLIENT_SECRET=...
-    ALLOW_DEV_LOGIN=1                           # локальный вход без GitHub (dev)
+    ALLOW_DEV_LOGIN=1                           # локальный вход без GitHub (dev-ТОЛЬКО:
+                                                 # вход по любому email без пароля;
+                                                 # дефолт "0", включать только локально)
 """
 
+import logging
 import os
 import time
 
@@ -31,7 +34,15 @@ APP_SECRET = require_app_secret()
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "")
-ALLOW_DEV_LOGIN = os.getenv("ALLOW_DEV_LOGIN", "1") == "1"
+# Аудит docs/technical-due-diligence-2026-07-17.md §5.4: дефолт "1" означал
+# вход по ЛЮБОМУ email без пароля из коробки — если переменную забыли явно
+# выставить в 0 при деплое (частый человеческий фактор), любой посетитель
+# получает рабочее пространство одним POST-запросом. Дефолт теперь "0";
+# включение — осознанное действие оператора, всегда с явной пометкой в .env.
+ALLOW_DEV_LOGIN = os.getenv("ALLOW_DEV_LOGIN", "0") == "1"
+if ALLOW_DEV_LOGIN:
+    logging.warning("ALLOW_DEV_LOGIN=1 — вход по любому email БЕЗ пароля включён. "
+                     "Не должно быть выставлено вне локальной разработки.")
 
 GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN = "https://github.com/login/oauth/access_token"

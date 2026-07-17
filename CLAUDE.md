@@ -80,6 +80,9 @@ AGENT_COOLDOWN_SECS=25
 AGENT_MAX_THINK_SECS=240
 APP_SECRET=...                  # Fernet-ключ шифрования тенант-секретов
 APP_BASE_URL=...                # для GitHub OAuth / Telegram webhook в проде
+ALLOW_DEV_LOGIN=0               # 1 = вход по любому email без пароля (ТОЛЬКО локальная
+                                # разработка; дефолт "0" — раньше был "1", см.
+                                # docs/technical-due-diligence-2026-07-17.md §5.4)
 APINET_ACCESS_TOKEN=...         # opt-in: автогенерация per-tenant LLM-ключа
 APINET_USER_ID=...
 APINET_TENANT_QUOTA=...
