@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useOffice, refreshData } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { roleName } from "../../data/roles"
@@ -885,39 +886,8 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
       <Card>
         <SectionLabel>Этапы и задачи</SectionLabel>
         <div style={{ display: "flex", flexDirection: narrow ? "column" : "row", gap: narrow ? 24 : 40 }}>
-            <div style={{ width: narrow ? "100%" : 260, flexShrink: 0 }}>
-              {stages.map((s: any) => (
-                <div key={s.id} style={{ marginBottom: 24 }}>
-                  <TreeRow active={sel?.kind === "stage" && sel.id === s.id} onClick={() => setSel({ kind: "stage", id: s.id })}
-                    icon={s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
-                    iconColor={s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)"}
-                    label={s.title} bold />
-                  <div style={{ paddingLeft: 19, display: "flex", flexDirection: "column", marginTop: 2 }}>
-                    {(tasksByStage.get(s.id) || []).map((t: any) => (
-                      <TreeRow key={t.id} active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
-                        icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
-                          : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
-                        label={t.title} strike={t.status === "done"} small />
-                    ))}
-                    {(tasksByStage.get(s.id) || []).length === 0 && (
-                      <div style={{ fontSize: 12, color: "var(--faint)", padding: "4px 8px" }}>пока нет задач</div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {tasksNoStage.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <TreeGroup label="Без этапа" count={tasksNoStage.length}>
-                    {tasksNoStage.map((t: any) => (
-                      <TreeRow key={t.id} active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
-                        icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
-                          : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
-                        label={t.title} strike={t.status === "done"} small />
-                    ))}
-                  </TreeGroup>
-                </div>
-              )}
-            </div>
+            <TaskTree stages={stages} tasksByStage={tasksByStage} tasksNoStage={tasksNoStage}
+              sel={sel} setSel={setSel} narrow={narrow} />
 
             {/* Инспектор — "всегда закреплён", справа. sticky, не модалка. */}
             <div style={{ flex: 1, minWidth: 0, paddingTop: narrow ? 20 : 0,
@@ -1059,13 +1029,109 @@ function MiniStat({ value, label }: { value: number; label: string }) {
   )
 }
 
-function TreeGroup({ label, count, children }: { label: string; count: number; children: ReactNode }) {
-  if (count === 0) return null
+// Строка дерева, приведённая к единому плоскому виду — нужна, чтобы виртуализатор
+// (плоский список фиксированных по типу строк) мог отрисовать и заголовки этапов,
+// и задачи под ними одним списком, без вложенной структуры div-ов.
+type TreeFlatRow =
+  | { kind: "stage"; stage: any }
+  | { kind: "task"; task: any }
+  | { kind: "empty" }
+  | { kind: "no-stage-header"; count: number }
+  | { kind: "spacer" }
+
+const ROW_HEIGHT: Record<TreeFlatRow["kind"], number> = {
+  stage: 42, task: 30, empty: 28, "no-stage-header": 30, spacer: 16,
+}
+
+// Порог, после которого включаем виртуализацию (аудит docs/technical-due-
+// diligence-2026-07-17.md §4.2: ни один длинный список в проекте не был
+// виртуализирован — на десятках-сотнях задач список рендерился в DOM целиком).
+// Ниже порога — обычный рендер без бокса со скроллом: на типичном (небольшом)
+// проекте список должен выглядеть и вести себя ровно как раньше.
+const VIRTUALIZE_THRESHOLD = 40
+const VIRTUAL_BOX_HEIGHT = 480
+
+function TaskTree({ stages, tasksByStage, tasksNoStage, sel, setSel, narrow }: {
+  stages: any[]; tasksByStage: Map<string, any[]>; tasksNoStage: any[]
+  sel: TreeSel; setSel: (s: TreeSel) => void; narrow: boolean
+}) {
+  const rows: TreeFlatRow[] = []
+  stages.forEach((s: any) => {
+    rows.push({ kind: "stage", stage: s })
+    const ts = tasksByStage.get(s.id) || []
+    if (ts.length === 0) rows.push({ kind: "empty" })
+    else ts.forEach((t: any) => rows.push({ kind: "task", task: t }))
+    rows.push({ kind: "spacer" })
+  })
+  if (tasksNoStage.length > 0) {
+    rows.push({ kind: "no-stage-header", count: tasksNoStage.length })
+    tasksNoStage.forEach((t: any) => rows.push({ kind: "task", task: t }))
+  }
+
+  const renderRow = (row: TreeFlatRow) => {
+    if (row.kind === "stage") {
+      const s = row.stage
+      return (
+        <TreeRow active={sel?.kind === "stage" && sel.id === s.id} onClick={() => setSel({ kind: "stage", id: s.id })}
+          icon={s.status === "done" ? "✓" : s.status === "active" ? "▶" : "○"}
+          iconColor={s.status === "done" ? "var(--success)" : s.status === "active" ? "var(--mercury-a)" : "var(--faint)"}
+          label={s.title} bold />
+      )
+    }
+    if (row.kind === "task") {
+      const t = row.task
+      return (
+        <div style={{ paddingLeft: 19 }}>
+          <TreeRow active={sel?.kind === "task" && sel.id === t.id} onClick={() => setSel({ kind: "task", id: t.id })}
+            icon="●" iconColor={t.status === "done" ? "var(--success)" : t.status === "in_progress" ? "var(--mercury-a)"
+              : t.status === "blocked" ? "var(--danger-soft)" : "var(--whisper)"}
+            label={t.title} strike={t.status === "done"} small />
+        </div>
+      )
+    }
+    if (row.kind === "empty") {
+      return <div style={{ fontSize: 12, color: "var(--faint)", padding: "4px 8px 4px 27px" }}>пока нет задач</div>
+    }
+    if (row.kind === "no-stage-header") {
+      return (
+        <div className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase",
+          letterSpacing: "1.5px", padding: "0 8px" }}>Без этапа · {row.count}</div>
+      )
+    }
+    return null
+  }
+
+  const boxRef = useRef<HTMLDivElement>(null)
+  const virtualize = rows.length > VIRTUALIZE_THRESHOLD
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => boxRef.current,
+    estimateSize: i => ROW_HEIGHT[rows[i].kind],
+    overscan: 8,
+  })
+
+  const width = narrow ? "100%" : 260
+
+  if (!virtualize) {
+    return (
+      <div style={{ width, flexShrink: 0 }}>
+        {rows.map((row, i) => <div key={i}>{renderRow(row)}</div>)}
+      </div>
+    )
+  }
+
   return (
-    <div style={{ marginBottom: 28 }}>
-      <div className="mono" style={{ fontSize: 10, color: "var(--faint)", textTransform: "uppercase",
-        letterSpacing: "1.5px", marginBottom: 6, padding: "0 8px" }}>{label} · {count}</div>
-      <div style={{ display: "flex", flexDirection: "column" }}>{children}</div>
+    <div ref={boxRef} style={{ width, flexShrink: 0, height: VIRTUAL_BOX_HEIGHT, overflow: "auto" }}>
+      <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+        {virtualizer.getVirtualItems().map(vi => (
+          <div key={vi.key} style={{
+            position: "absolute", top: 0, left: 0, right: 0,
+            transform: `translateY(${vi.start}px)`, height: vi.size,
+          }}>
+            {renderRow(rows[vi.index])}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
