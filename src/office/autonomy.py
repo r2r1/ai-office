@@ -43,6 +43,14 @@ LEVEL_INFO = {
 _ACTION_MIN_LEVEL: dict[str, str] = {
     # publish_site — самое ответственное (публичный сайт), с отдельным диалогом-одобрением.
     "publish_site":    "trusted",
+    # push_code — тот же уровень строгости, что publish_site: CLAUDE.md §4 обещает
+    # клиенту явно «пушит в GitHub только после одобрения» — раньше это было заявлено
+    # текстом, но действие технически проходило под тем же action_type, что «создать
+    # пустой репозиторий» (create_repo, "guided" = дефолтный уровень), и потому
+    # пушило код БЕЗ вопроса владельцу на дефолтных настройках (аудит
+    # docs/invariant-enforcement-audit-2026-07-17.md). Отдельный тип с более
+    # строгим порогом закрывает разрыв между обещанием и поведением.
+    "push_code":       "trusted",
     # Прочие внешние действия разрешены с «guided» (дефолт) и выше; блокируются только
     # на «scout» («только рекомендации»), где офис не действует во внешнем мире без клиента.
     "launch_bot":      "guided",
@@ -59,7 +67,9 @@ def _action_type_for(action_name: str) -> str:
         return "publish_site"
     if "launch_bot" in a or a in ("start_bot",):
         return "launch_bot"
-    if "repo" in a or a == "push":
+    if a == "push":
+        return "push_code"
+    if "repo" in a:
         return "create_repo"
     if "send" in a or "message" in a or "email" in a:
         return "send_message"
