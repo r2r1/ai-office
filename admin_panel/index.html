@@ -346,20 +346,35 @@ async function loadTenants() {
 // обновляется только содержимое ячеек; узлы, которых не стало, удаляются,
 // новые — добавляются в конец. Один и тот же <tr> под курсором остаётся
 // тем же <tr> между обновлениями.
-function rowHtml(t, isFull) {
-  return `
-      <td><b>${escapeHtml(t.name || t.id)}</b><div class="muted">${t.id}</div></td>
-      <td>${isFull
-        ? (t.paused ? `<span class="pill paused">пауза</span><div class="muted">${escapeHtml(t.pause_reason||'')}</div>` : `<span class="pill ok">работает</span>`)
-        : '<span class="muted">—</span>'}</td>
-      <td>${isFull ? '$' + (t.cost_total || 0).toFixed(4) : '<span class="muted">—</span>'}</td>
-      <td>${isFull ? t.calls_total : '<span class="muted">—</span>'}</td>
-      <td>${isFull ? (t.has_proxy ? 'свой' : '<span class="muted">общий</span>') : '<span class="muted">—</span>'}</td>
-      <td>${isFull ? (t.has_own_llm_key ? 'да' : '<span class="muted">нет</span>') : '<span class="muted">—</span>'}</td>
-      <td class="row" style="gap:6px">
-        ${isFull ? `<button onclick="openDrawer('${t.id}')">Управление</button>` : ''}
-        <button class="danger" onclick="deleteTenant('${t.id}', '${escapeHtml(t.name || t.id)}')">Удалить</button>
-      </td>`;
+// Реальный найденный баг: расход/число вызовов у РЕАЛЬНО работающего
+// тенанта меняется почти на каждое обновление (офис активно тратит токены) —
+// при сравнении rowHtml() ЦЕЛИКОМ это заставляло перерисовывать ВСЮ строку
+// (имя, статус, кнопки) из-за одной цифры, хотя реально изменилась только
+// ячейка "Вызовы". Теперь ячейки — отдельные, сравниваются и обновляются
+// поштучно: тронута только та ячейка, чьё содержимое правда изменилось.
+function rowCells(t, isFull) {
+  return [
+    `<b>${escapeHtml(t.name || t.id)}</b><div class="muted">${t.id}</div>`,
+    isFull
+      ? (t.paused ? `<span class="pill paused">пауза</span><div class="muted">${escapeHtml(t.pause_reason||'')}</div>` : `<span class="pill ok">работает</span>`)
+      : '<span class="muted">—</span>',
+    isFull ? '$' + (t.cost_total || 0).toFixed(4) : '<span class="muted">—</span>',
+    isFull ? String(t.calls_total) : '<span class="muted">—</span>',
+    isFull ? (t.has_proxy ? 'свой' : '<span class="muted">общий</span>') : '<span class="muted">—</span>',
+    isFull ? (t.has_own_llm_key ? 'да' : '<span class="muted">нет</span>') : '<span class="muted">—</span>',
+    `${isFull ? `<button onclick="openDrawer('${t.id}')">Управление</button>` : ''}
+     <button class="danger" onclick="deleteTenant('${t.id}', '${escapeHtml(t.name || t.id)}')">Удалить</button>`,
+  ];
+}
+
+function ensureRowShape(tr) {
+  // 7 постоянных <td> под ячейки — создаются один раз при первом появлении
+  // строки, дальше только их innerHTML точечно обновляется.
+  if (tr.children.length === 7) return;
+  tr.innerHTML = '';
+  for (let i = 0; i < 7; i++) tr.appendChild(document.createElement('td'));
+  tr.children[6].className = 'row';
+  tr.children[6].style.gap = '6px';
 }
 
 function renderTenants() {
@@ -382,16 +397,20 @@ function renderTenants() {
   for (const t of tenants) {
     seen.add(t.id);
     let tr = tbody.querySelector(`tr[data-tid="${t.id}"]`);
-    const html = rowHtml(t, isFull);
     if (!tr) {
       tr = document.createElement('tr');
       tr.setAttribute('data-tid', t.id);
       tbody.appendChild(tr);
-      tr.innerHTML = html;
-    } else if (tr.innerHTML !== html) {
-      // Меняем только если содержимое реально другое — иначе даже присвоение
-      // ТОГО ЖЕ innerHTML сбросило бы фокус/выделение внутри строки.
-      tr.innerHTML = html;
+    }
+    ensureRowShape(tr);
+    const cells = rowCells(t, isFull);
+    for (let i = 0; i < cells.length; i++) {
+      // Точечно, по ячейкам: у активно работающего тенанта "Вызовы"/"Расход"
+      // меняются почти на каждое обновление — раньше это заставляло
+      // перерисовывать ВСЮ строку (кнопки, имя, статус) из-за одной цифры.
+      if (tr.children[i].innerHTML !== cells[i]) {
+        tr.children[i].innerHTML = cells[i];
+      }
     }
   }
   tbody.querySelectorAll('tr[data-tid]').forEach(tr => {
@@ -426,14 +445,23 @@ async function openDrawer(tid) {
   document.getElementById('errorsList').innerHTML = '<div class="muted">загрузка…</div>';
   document.getElementById('drawer').classList.add('open');
   document.getElementById('backdrop').classList.add('open');
-  try {
-    const proxy = await api(`/admin/api/tenant/${tid}/proxy`);
-    document.getElementById('drawerProxy').value = proxy.proxy_url || '';
-  } catch (e) { toast('Ошибка: ' + e.message); }
-  try {
-    const errs = await api(`/admin/api/tenant/${tid}/errors`);
-    renderErrors(errs.errors);
-  } catch (e) { toast('Ошибка: ' + e.message); }
+  // Параллельно, не по очереди — были 2 последовательных запроса вместо
+  // одновременных (каждый лишний виток fetch — лишняя вспышка индикатора
+  // загрузки во вкладке браузера, из-за чего казалось, что "всё дёргается").
+  const [proxyResult, errsResult] = await Promise.allSettled([
+    api(`/admin/api/tenant/${tid}/proxy`),
+    api(`/admin/api/tenant/${tid}/errors`),
+  ]);
+  if (proxyResult.status === 'fulfilled') {
+    document.getElementById('drawerProxy').value = proxyResult.value.proxy_url || '';
+  } else {
+    toast('Ошибка: ' + proxyResult.reason.message);
+  }
+  if (errsResult.status === 'fulfilled') {
+    renderErrors(errsResult.value.errors);
+  } else {
+    toast('Ошибка: ' + errsResult.reason.message);
+  }
 }
 
 function renderErrors(errors) {
@@ -456,22 +484,29 @@ function closeDrawer() {
 async function togglePause() {
   const t = tenants.find(x => x.id === drawerTid);
   try {
-    if (t.paused) {
-      await api(`/admin/api/tenant/${drawerTid}/resume`, { method: 'POST' });
-    } else {
-      await api(`/admin/api/tenant/${drawerTid}/pause?reason=${encodeURIComponent('остановлено администратором')}`, { method: 'POST' });
-    }
-    await loadTenants();
-    openDrawer(drawerTid);
+    // Бэкенд и так возвращает актуальный статус в ответе — раньше после
+    // паузы/резюме шли ЕЩЁ 3 запроса (полный список тенантов + повторное
+    // открытие drawer'а, которое само по себе снова запрашивает прокси
+    // и ошибки, хотя ни то ни другое не могло измениться от паузы).
+    // Патчим локально тем, что уже пришло, без лишних round-trip'ов.
+    const status = t.paused
+      ? await api(`/admin/api/tenant/${drawerTid}/resume`, { method: 'POST' })
+      : await api(`/admin/api/tenant/${drawerTid}/pause?reason=${encodeURIComponent('остановлено администратором')}`, { method: 'POST' });
+    t.paused = status.paused;
+    t.pause_reason = status.reason;
+    document.getElementById('drawerPauseBtn').textContent = t.paused ? 'Возобновить' : 'Поставить на паузу';
+    document.getElementById('drawerPauseBtn').className = t.paused ? 'primary' : 'danger';
+    renderTenants();
   } catch (e) { toast('Ошибка: ' + e.message); }
 }
 
 async function saveProxy() {
   const val = document.getElementById('drawerProxy').value.trim();
   try {
-    await api(`/admin/api/tenant/${drawerTid}/proxy?proxy_url=${encodeURIComponent(val)}`, { method: 'POST' });
+    const res = await api(`/admin/api/tenant/${drawerTid}/proxy?proxy_url=${encodeURIComponent(val)}`, { method: 'POST' });
     toast('Прокси сохранён');
-    await loadTenants();
+    const t = tenants.find(x => x.id === drawerTid);
+    if (t) { t.has_proxy = !!res.proxy_url; renderTenants(); }
   } catch (e) { toast('Ошибка: ' + e.message); }
 }
 
