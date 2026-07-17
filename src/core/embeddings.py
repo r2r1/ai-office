@@ -26,27 +26,35 @@ from src.office import trace
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 _MAX_CHARS = 4000  # грубый лимит на вход — эмбеддинг факта/задачи не требует полного текста
 
-_client = None
+# Кеш ПО ТЕНАНТУ, не один глобальный клиент на процесс: у тенантов бывают разные
+# свои ключи/base_url (llm_settings.py) и теперь разные прокси (admin-панель,
+# per-tenant proxy_url) — единый глобальный `_client` кешировал бы настройки
+# ПЕРВОГО тенанта, обратившегося в этом процессе, и молча раздавал их всем
+# остальным тенантам того же процесса.
+_clients: dict[str, object] = {}
 _unavailable_warned = False
 
 
 def _get_client():
-    global _client
-    if _client is not None:
-        return _client
+    from src.saas import context as ctx
+    tid = ctx.get_tenant() or "_default"
+    if tid in _clients:
+        return _clients[tid]
     try:
         import httpx
         from openai import OpenAI
-        from src.core.llm import _resolve_creds, LLM_PROXY_URL
+        from src.core.llm import _resolve_creds, _resolve_proxy
         base_url, api_key = _resolve_creds()
-        if LLM_PROXY_URL:
-            _client = OpenAI(base_url=base_url, api_key=api_key,
-                              http_client=httpx.Client(proxy=LLM_PROXY_URL))
+        proxy = _resolve_proxy()
+        if proxy:
+            client = OpenAI(base_url=base_url, api_key=api_key,
+                             http_client=httpx.Client(proxy=proxy))
         else:
-            _client = OpenAI(base_url=base_url, api_key=api_key)
+            client = OpenAI(base_url=base_url, api_key=api_key)
     except Exception:
-        _client = False  # помечаем «недоступно», чтобы не пересоздавать клиент каждый вызов
-    return _client
+        client = False  # помечаем «недоступно», чтобы не пересоздавать клиент каждый вызов
+    _clients[tid] = client
+    return client
 
 
 def embed(text: str, agent_id: str = "knowledge_embeddings") -> list[float] | None:

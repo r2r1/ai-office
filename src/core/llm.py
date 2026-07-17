@@ -133,6 +133,21 @@ def _resolve_creds() -> tuple[str, str]:
     except Exception:
         return BASE_URL, API_KEY
 
+
+def _resolve_proxy() -> str:
+    """Прокси для исходящих LLM/embeddings-запросов: свой у тенанта (задаётся
+    из админ-панели, src/office/llm_settings.py:proxy_url) важнее общего
+    LLM_PROXY_URL из .env — админ может выставить прокси КОНКРЕТНОМУ тенанту,
+    не трогая остальных."""
+    try:
+        from src.office import llm_settings
+        p = llm_settings.proxy_url()
+        if p:
+            return p
+    except Exception:
+        pass
+    return LLM_PROXY_URL
+
 # Инструмент веб-поиска в формате OpenAI function calling
 WEB_SEARCH_TOOL = {
     "type": "function",
@@ -152,8 +167,9 @@ WEB_SEARCH_TOOL = {
 
 def _client() -> AsyncOpenAI:
     base_url, api_key = _resolve_creds()
-    if LLM_PROXY_URL:
-        http_client = httpx.AsyncClient(proxy=LLM_PROXY_URL)
+    proxy = _resolve_proxy()
+    if proxy:
+        http_client = httpx.AsyncClient(proxy=proxy)
         return AsyncOpenAI(base_url=base_url, api_key=api_key, http_client=http_client)
     return AsyncOpenAI(base_url=base_url, api_key=api_key)
 

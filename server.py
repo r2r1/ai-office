@@ -18,7 +18,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.requests import Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.office import bus, registry, loop as office_loop, demo, state
@@ -36,6 +36,7 @@ from routers.work import router as work_router
 from routers.settings import router as settings_router
 from routers.results import router as results_router
 from routers.comms import router as comms_router
+from routers.admin import router as admin_router
 from routers.shared import serve_site_file, DEMO_MODE
 
 
@@ -167,6 +168,28 @@ async def custom_domain_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+# admin_panel/index.html — намеренно ОТДЕЛЬНЫЙ статический файл, разворачиваемый
+# на изолированном сервере/URL (см. routers/admin.py), поэтому его запросы к
+# /admin/api/* кросс-доменные — без явного CORS браузер их заблокирует. Открыто
+# для любого origin намеренно: реальная граница доступа — bearer-токен
+# ADMIN_API_KEY в заголовке (не куки), так что широкий CORS не ослабляет
+# защиту — как и у большинства bearer-token API.
+@app.middleware("http")
+async def admin_cors_middleware(request: Request, call_next):
+    if not request.url.path.startswith("/admin/api/"):
+        return await call_next(request)
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "X-Admin-Key, Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    }
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=headers)
+    response = await call_next(request)
+    response.headers.update(headers)
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     # React SPA на /webapp/
@@ -253,5 +276,6 @@ app.include_router(work_router)       # Файлы, план, проекты, п
 app.include_router(settings_router)   # Модели, философия, конституция, автономность
 app.include_router(results_router)    # Лиды, сайты, реестр результатов
 app.include_router(comms_router)      # Знания, память, вопросы, чаты, чат с CEO
+app.include_router(admin_router)      # Админка оператора (ADMIN_API_KEY): тенанты, паузы, прокси, ошибки
 
 

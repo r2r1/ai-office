@@ -52,6 +52,25 @@ def credentials() -> tuple[str, str]:
     return base_url, api_key
 
 
+def set_proxy(proxy_url: str = "") -> None:
+    """Прокси КОНКРЕТНОГО тенанта для исходящих LLM-запросов (админ-панель).
+    Пустая строка снимает override — тенант возвращается к общему LLM_PROXY_URL
+    из .env (core/llm.py:_resolve_proxy)."""
+    cfg = _cfg()
+    if proxy_url and proxy_url.strip():
+        cfg["proxy_url_enc"] = crypto.encrypt(proxy_url.strip())
+    else:
+        cfg.pop("proxy_url_enc", None)
+    ctx.write_json(_FILE, cfg)
+
+
+def proxy_url() -> str:
+    """Прокси текущего тенанта, если задан персонально; иначе пустая строка
+    (вызывающий код — core/llm.py:_resolve_proxy — сам делает fallback на общий)."""
+    cfg = _cfg()
+    return crypto.decrypt(cfg["proxy_url_enc"]) if cfg.get("proxy_url_enc") else ""
+
+
 def provision_tenant_key(tenant_id: str, name: str = "") -> dict:
     """
     Выдаёт тенанту СВОЙ apinet-ключ с лимитом квоты (изоляция расхода).
