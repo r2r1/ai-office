@@ -2506,7 +2506,17 @@ async def accept_initiative(iid: str, request: Request):
         for p in projects_module.active_list():
             if p.get("type") != "project":
                 continue
-            if sites_module.for_project(p["id"]):
+            # Аудит логов 2026-07-17: гейт на sites_module.for_project() (сайт
+            # УЖЕ опубликован) не срабатывает, если вторая site-инициатива
+            # принимается в первые секунды офис-цикла — до того, как ПЕРВЫЙ
+            # (из брифа/BOOTSTRAP) проект успел опубликовать. Оба тогда строят
+            # site/ ПАРАЛЛЕЛЬНО — а site/ на диске один на тенанта (см.
+            # critic.site_dir()), т.е. это не просто путаница в UI, а гонка,
+            # затирающая работу друг друга. Критерий переиспользования — не
+            # «уже опубликован», а «уже есть активный проект, чьи задачи
+            # трогают site/», публикация тут ни при чём.
+            if sites_module.for_project(p["id"]) or any(
+                    plan_module.touches_site(t) for t in plan_module.for_project(p["id"])):
                 reused_site_project = p
                 break
 

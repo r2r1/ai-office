@@ -16,6 +16,14 @@ _pending: dict[str, dict[str, asyncio.Future]] = defaultdict(dict)
 _meta: dict[str, dict[str, dict]] = defaultdict(dict)
 _by_text: dict[str, dict[str, str]] = defaultdict(dict)
 
+# Журнал КАЖДОГО вопроса (не только висящих — _meta теряет запись при answer()).
+# Нужен для программных гейтов приёмки (acceptance.py): «эта роль обязана была
+# спросить владельца перед сдачей» — по факту вызова, а не по тексту в skill.md,
+# который LLM вольна проигнорировать (реальный кейс: designer ни разу за прогон
+# не вызвал ask_user, хотя brand_book.md явно требует). Живёт только в памяти
+# процесса — этого достаточно, приёмка проверяется в рамках того же запуска.
+_asked_log: dict[str, list[dict]] = defaultdict(list)
+
 
 def _normalize(text: str) -> str:
     return " ".join(text.lower().strip().split())
@@ -74,9 +82,20 @@ def ask(question: str, publish_fn=None, agent_id: str = "") -> tuple[str, asynci
     qid = str(uuid.uuid4())[:8]
     fut = asyncio.get_running_loop().create_future()
     pend[qid] = fut
-    meta[qid] = {"text": question, "agent_id": agent_id, "ts": time.time()}
+    ts = time.time()
+    meta[qid] = {"text": question, "agent_id": agent_id, "ts": ts}
     by_text[key] = qid
+    _asked_log[tid].append({"agent_id": agent_id, "text": question, "ts": ts})
     return qid, fut
+
+
+def asked_since(agent_id: str, ts: float = 0.0) -> bool:
+    """Спрашивал ли этот агент владельца (ask_user) начиная с момента ts.
+    Для программных гейтов приёмки — см. acceptance.py."""
+    if not agent_id:
+        return False
+    return any(e["agent_id"] == agent_id and e["ts"] >= ts
+               for e in _asked_log[ctx.get_tenant()])
 
 
 def answer(qid: str, answer: str) -> bool:

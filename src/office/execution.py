@@ -502,7 +502,8 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                                        done_criterion=t_rec.get("done_criterion", ""),
                                        started_ts=_job_t0,
                                        artifacts=plan.artifacts_of(t_rec),
-                                       project_id=t_rec.get("project", ""))
+                                       project_id=t_rec.get("project", ""),
+                                       agent_id=agent_id)
             warns = verdict.get("warnings", [])
             trace.log("acceptance", agent=agent_id, task_id=task_id,
                       passed=verdict["passed"], levels=str(verdict["levels"]),

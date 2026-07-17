@@ -36,6 +36,20 @@ _PREAMBLE_RE = re.compile(
     r"сейчас\s+(посмотрю|проверю|изучу)|мне нужно уточнить|для начала посмотр)",
     re.IGNORECASE)
 
+# Реальный кейс (лог прогона 2026-07-17): integrator сдал задачу текстом «нужно
+# получить от клиента номер счётчика Яндекс.Метрики — без него не смогу...» —
+# приёмка её пропустила (это не пустая сдача и не «реплика процесса», а честный
+# отчёт о блокере), задача закрылась «выполнена», а вопрос владельцу так и не
+# был задан (ask_user не вызван). Отличаем «сказал, что нужно спросить» от
+# «реально спросил» — если сдача заявляет потребность в данных от клиента, но
+# ask_user этим агентом не вызывался, это не готовая сдача, а недоделанная.
+_NEEDS_CLIENT_INPUT_RE = re.compile(
+    r"(нужно (получить|узнать|уточнить|запросить) (от|у) клиент|"
+    r"без (него|этого|номера|id|ключа) не (смогу|получится|подключ)|"
+    r"нужен от клиента|нужен id|нужен ключ|нужен номер счётчика|"
+    r"уточнить у (клиента|владельца))",
+    re.IGNORECASE)
+
 
 def _is_process_chatter(result: str) -> bool:
     """Сдача выглядит как реплика процесса, а не отчёт: обрывается на «:» (подводка
@@ -88,7 +102,8 @@ def _is_bot_task(artifacts: list[str]) -> bool:
 
 def check(task_title: str, role: str, result: str,
           done_criterion: str = "", started_ts: float = 0.0,
-          artifacts: list[str] | None = None, project_id: str = "") -> dict:
+          artifacts: list[str] | None = None, project_id: str = "",
+          agent_id: str = "") -> dict:
     """
     Приёмка сдачи задачи. Возвращает:
       {"passed": bool, "problems": [...], "levels": {level: "ok"|"fail"|"skip"}}
@@ -112,6 +127,14 @@ def check(task_title: str, role: str, result: str,
         problems.append("сдача — реплика процесса («давайте посмотрим…»/обрыв на «:»), "
                         "а не отчёт: напиши, ЧТО сделано и в каких файлах")
         levels["acceptance"] = "fail"
+    elif _NEEDS_CLIENT_INPUT_RE.search(result or ""):
+        from src.office import questions
+        if not questions.asked_since(agent_id, started_ts):
+            problems.append(
+                "сдача заявляет, что нужны данные от клиента, но вопрос ему не "
+                "задан — вызови ask_user с конкретным вопросом (не просто "
+                "напиши об этом в отчёте), задача не готова, пока владелец не ответил")
+            levels["acceptance"] = "fail"
 
     # L1 Specification: критерий готовности задачи сверяется с контрактом приёмки
     # (success_criteria). Расхождение — МЯГКОЕ предупреждение (не проваливает build/
@@ -143,6 +166,21 @@ def check(task_title: str, role: str, result: str,
         site_critical = [p for p in critic.check_site() if critic.is_critical(p)]
         levels["functional"] = "fail" if site_critical else "ok"
         problems += [f"сайт: {critic.text_of(p)}" for p in site_critical[:3]]
+
+    # L1.5 Design confirmation (аудит логов 2026-07-17): brand_book.md/направление
+    # стиля — решение ВЛАДЕЛЬЦА (см. builtin_skills/brand_book.md), не designer'а
+    # самого по себе. Skill текстом требует ask_user, но LLM вправе его
+    # проигнорировать — реальный прогон показал именно это: designer ни разу за
+    # весь прогон не спросил и сдал стиль как решённый факт. Программный гейт,
+    # не текстовая просьба — задача НЕ проходит приёмку без реального вызова
+    # ask_user этим же агентом в рамках текущей попытки.
+    if role == "designer":
+        from src.office import questions
+        if not questions.asked_since(agent_id, started_ts):
+            problems.append(
+                "дизайн-направление не подтверждено владельцем — прежде чем "
+                "сдавать, задай через ask_user вопрос с вариантами стиля "
+                "(см. скилл «Бренд-бук»), не выбирай направление сам")
 
     # L4 Business (BOS §8): двигает ли сдача к цели. ТОЛЬКО для задач-поставок
     # (site/bot) и ТОЛЬКО информационно — попадание в цель оценивается по метрике,

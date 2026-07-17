@@ -103,6 +103,71 @@ def test_business_level_skipped_for_non_deliverable_task():
     assert v["levels"]["business"] == "skip"
 
 
+def test_designer_task_fails_without_ask_user():
+    """Аудит логов 2026-07-17: designer выбирал стиль сам, ни разу не спросив
+    владельца, хотя brand_book.md текстом требует ask_user. Программный гейт:
+    без реального вызова questions.ask() этим агентом задача не проходит приёмку."""
+    _fresh("acc_test_designer_no_ask")
+    v = acceptance.check("Выбрать визуальное направление", "designer",
+                          "Готово: зафиксировал стиль в docs/brand_book.md",
+                          artifacts=["doc"], agent_id="designer_1")
+    assert not v["passed"]
+    assert any("не подтверждено владельцем" in p for p in v["problems"])
+
+
+def test_designer_task_passes_after_ask_user():
+    _fresh("acc_test_designer_asked")
+    from src.office import questions
+    import asyncio
+    import time
+
+    async def _run():
+        started = time.time() - 5
+        qid, fut = questions.ask("Какой стиль вам ближе: А, Б или В?",
+                                  agent_id="designer_1")
+        v = acceptance.check("Выбрать визуальное направление", "designer",
+                              "Готово: зафиксировал стиль в docs/brand_book.md по ответу владельца",
+                              artifacts=["doc"], started_ts=started, agent_id="designer_1")
+        fut.cancel()
+        return v
+
+    v = asyncio.run(_run())
+    assert v["passed"]
+
+
+def test_claims_need_client_input_but_never_asked_fails():
+    """Аудит логов 2026-07-17: integrator сдал «нужно получить от клиента номер
+    счётчика Яндекс.Метрики», ни разу не вызвав ask_user — приёмка это пропустила."""
+    _fresh("acc_test_needs_input_not_asked")
+    v = acceptance.check("task", "integrator",
+                          "Нужно получить от клиента номер счётчика Яндекс.Метрики — "
+                          "без него не смогу подключить аналитику.",
+                          agent_id="integrator_1")
+    assert not v["passed"]
+    assert any("вопрос ему не" in p for p in v["problems"])
+
+
+def test_claims_need_client_input_but_actually_asked_passes():
+    _fresh("acc_test_needs_input_asked")
+    from src.office import questions
+    import asyncio
+    import time
+
+    async def _run():
+        started = time.time() - 5
+        qid, fut = questions.ask("Какой номер счётчика Яндекс.Метрики использовать?",
+                                  agent_id="integrator_1")
+        v = acceptance.check("task", "integrator",
+                              "Нужно получить от клиента номер счётчика Яндекс.Метрики — "
+                              "без него не смогу подключить аналитику.",
+                              started_ts=started, agent_id="integrator_1")
+        fut.cancel()
+        return v
+
+    v = asyncio.run(_run())
+    assert v["passed"]
+
+
 def test_feedback_text_empty_when_passed():
     _fresh("acc_test_feedback_pass")
     v = acceptance.check("task", "marketer", "Готово, оффер в docs/offer.md")
