@@ -10,6 +10,7 @@ import asyncio
 from src.office import brief
 from src.office import bus
 from src.office import chat
+from src.office import control as control_module
 from src.office import demo
 from src.office import investigation
 from src.office import memory
@@ -130,6 +131,18 @@ async def ask_agent(request: Request):
         await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
                            "kind": "msg", "text": reply})
         return {"agent_id": agent_id, "worker_id": agent_id, "reply": reply}
+    # Тот же класс бага, что закрыт для DEMO_MODE выше: пауза (control.py) до этой
+    # правки блокировала только автономный цикл (loop.py) — личный чат с агентом
+    # безусловно дёргал chat.ask() → реальный LLM-запрос, даже когда офис на паузе
+    # (в т.ч. из-за исчерпанного бюджета — платный запрос ПОСЛЕ остановки по деньгам).
+    if control_module.is_paused():
+        reason = control_module.status().get("reason") or ""
+        reply = ("Офис сейчас на паузе" + (f" — {reason}" if reason else "")
+                 + ". Возобновите работу, чтобы продолжить диалог.")
+        threads_module.post(agent_id, "agent", reply)
+        await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
+                           "kind": "msg", "text": reply})
+        return {"agent_id": agent_id, "worker_id": agent_id, "reply": reply}
     try:
         reply = await chat.ask(agent_id, message, publish=bus.publish)
         threads_module.post(agent_id, "agent", reply)
@@ -190,6 +203,21 @@ async def _steer_from_chat(text: str) -> None:
     if DEMO_MODE:
         reply = ("Сейчас я в демо-режиме и работаю по сценарию, а не отвечаю на "
                  "произвольные вопросы — зарегистрируйтесь, чтобы говорить с реальным офисом.")
+        cmsg = office_channel.post("orchestrator_1", "orchestrator", reply)
+        await bus.publish({"type": "office_chat", "from": "orchestrator_1", "role": "orchestrator",
+                           "text": reply, "id": cmsg["id"]})
+        return
+
+    # Тот же класс бага, что закрыт для DEMO_MODE выше: пауза блокировала только
+    # автономный цикл (loop.py) — общий чат с CEO безусловно дёргал реальный LLM
+    # (интерпретацию директивы или discovery-диалог) в обход паузы. Только ПОСЛЕ
+    # discovery (brief.is_ready()) — на этапе интервью офис ещё не "запущен",
+    # у него обычно и не может быть control.json с паузой, но проверяем явно,
+    # а не полагаемся на это.
+    if brief.is_ready() and control_module.is_paused():
+        reason = control_module.status().get("reason") or ""
+        reply = ("Офис сейчас на паузе" + (f" — {reason}" if reason else "")
+                 + ". Возобновите работу, чтобы продолжить диалог.")
         cmsg = office_channel.post("orchestrator_1", "orchestrator", reply)
         await bus.publish({"type": "office_chat", "from": "orchestrator_1", "role": "orchestrator",
                            "text": reply, "id": cmsg["id"]})

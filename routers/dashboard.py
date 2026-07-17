@@ -117,6 +117,11 @@ async def post_dashboard_request(request: Request):
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Опиши, что добавить на дашборд")
+    # Тот же класс бага, что закрыт в routers/comms.py: пауза (control.py) блокирует
+    # только автономный цикл (loop.py), а не прямые LLM-вызовы из HTTP-роутов.
+    from src.office import control as control_module
+    if control_module.is_paused():
+        raise HTTPException(status_code=409, detail="Офис на паузе — возобновите работу, чтобы изменить дашборд")
     result = await orchestrator.interpret_dashboard_request(text)
     if not result.get("ok"):
         iid = ""
