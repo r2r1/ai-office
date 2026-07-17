@@ -5,6 +5,7 @@ Workspace = тенант: единица изоляции данных офис�
 workspace (создаётся автоматически при регистрации/входе).
 """
 
+import os
 import time
 import uuid
 
@@ -54,6 +55,24 @@ def _ensure_workspace(user: dict) -> dict:
     try:
         from src.office import llm_settings
         llm_settings.provision_tenant_key(wid, name=f"office-{wid}")
+    except Exception:
+        pass
+    # Бонусный баланс новому клиенту (BONUS_BALANCE_USD, по умолчанию $5) —
+    # до подключения реальной платёжной системы это единственный способ дать
+    # попробовать офис без ручной настройки лимита; хранится как обычный
+    # бюджетный лимит (costs.py), офис на нём же и остановится, когда бонус
+    # закончится (тот же баннер/индикатор в TopBar, что и у платного лимита).
+    try:
+        from src.saas import context as ctx
+        from src.office import costs
+        prev = ctx.get_tenant()
+        ctx.set_tenant(wid)
+        try:
+            bonus = float(os.getenv("BONUS_BALANCE_USD", "5"))
+            if bonus > 0:
+                costs.set_limits(total_usd=bonus, daily_usd=0)
+        finally:
+            ctx.set_tenant(prev)
     except Exception:
         pass
     _invalidate_workspaces_cache()
