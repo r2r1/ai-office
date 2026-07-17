@@ -15,7 +15,10 @@ office/llm_settings.py:provision_tenant_key и office/loop.py использую
 обращения к данным тенанта вне его собственного HTTP-запроса.
 """
 
+import asyncio
 import os
+import subprocess
+import sys
 
 from fastapi import APIRouter, Header, HTTPException
 
@@ -127,6 +130,35 @@ async def set_tenant_proxy(tid: str, proxy_url: str = "", x_admin_key: str | Non
     with _with_tenant(tid):
         llm_settings.set_proxy(proxy_url)
         return {"proxy_url": llm_settings.proxy_url()}
+
+
+@router.post("/admin/api/shutdown")
+async def shutdown_server(x_admin_key: str | None = Header(default=None)) -> dict:
+    """Останавливает весь процесс сервера (не один тенант) — раньше это можно
+    было сделать только руками из терминала (taskkill/PowerShell), что для
+    оператора без доступа к машине неудобно и негигиенично (забытые процессы
+    держат порт занятым). `python scripts/run.py` (единственный поддерживаемый
+    способ запуска, см. CLAUDE.md) всегда запускает reload-обёртку — этот
+    процесс (worker) её ДОЧЕРНИЙ, поэтому убиваем ПОРОДИТЕЛЯ деревом
+    (taskkill /T), а не только себя: иначе супервизор reload просто поднимет
+    новый worker взамен убитого, и сервер продолжит работать."""
+    _require_admin(x_admin_key)
+    parent_pid = os.getppid()
+    own_pid = os.getpid()
+
+    async def _kill() -> None:
+        await asyncio.sleep(0.5)  # даём ответу уйти клиенту до того, как процесс умрёт
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(parent_pid)],
+                           capture_output=True)
+            subprocess.run(["taskkill", "/F", "/PID", str(own_pid)], capture_output=True)
+        else:
+            import signal
+            os.kill(parent_pid, signal.SIGTERM)
+            os.kill(own_pid, signal.SIGTERM)
+
+    asyncio.create_task(_kill())
+    return {"ok": True, "message": "Сервер останавливается…"}
 
 
 @router.post("/admin/api/proxy/broadcast")
