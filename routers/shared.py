@@ -14,16 +14,51 @@ from src.office import workspace as workspace_module
 from src.saas import auth as saas_auth, store as saas_store
 from src.saas import context as saas_context
 
-# ---- Rate limiting (без внешних зависимостей) ----
+# ---- Rate limiting ----
 # Один универсальный bucket на (namespace, key): /auth/*, /api/terminal, /api/run
 # (дорогое исполнение кода), публичный /api/lead/{tenant}/{slug} и /api/onboarding/
 # scan — все проходят через один и тот же механизм (docs/audit-dd-2026-07-06.md
-# §11/§19 п.10). Чистим мёртвые ключи, только когда bucket раздулся.
+# §11/§19 п.10).
+#
+# Аудит docs/technical-due-diligence-2026-07-17.md §2.1/§5.5: in-memory bucket
+# в процессе не работает на нескольких серверах (каждый считает свой лимит
+# независимо — реальный лимит умножается на число серверов) и обнуляется
+# рестартом. Если REDIS_URL настроен — лимит считается в Redis (общий для
+# всех серверов, скользящее окно 60с через ZSET, та же семантика, что была у
+# in-memory списка таймстампов). Без REDIS_URL — прежнее in-memory поведение,
+# Redis не обязателен для локальной разработки/одного сервера.
 _rate_buckets: dict[str, dict[str, list[float]]] = {}
 
 
 def rate_limited(namespace: str, key: str, max_per_min: int) -> bool:
     """True — лимит превышен (запрос НУЖНО отклонить). Иначе засчитывает попытку."""
+    from src.core import redis_client
+    client = redis_client.get_client()
+    if client is not None:
+        return _rate_limited_redis(client, namespace, key, max_per_min)
+    return _rate_limited_memory(namespace, key, max_per_min)
+
+
+def _rate_limited_redis(client, namespace: str, key: str, max_per_min: int) -> bool:
+    import os
+    now = time.time()
+    rkey = f"ratelimit:{namespace}:{key}"
+    pipe = client.pipeline()
+    pipe.zremrangebyscore(rkey, 0, now - 60)
+    pipe.zcard(rkey)
+    _removed, count = pipe.execute()
+    if count >= max_per_min:
+        client.expire(rkey, 60)
+        return True
+    # member должен быть уникален внутри ZSET — двух попаданий в одну и ту же
+    # миллисекунду достаточно редко, но добавляем нонс на случай гонки.
+    member = f"{now}:{os.urandom(4).hex()}"
+    client.zadd(rkey, {member: now})
+    client.expire(rkey, 60)
+    return False
+
+
+def _rate_limited_memory(namespace: str, key: str, max_per_min: int) -> bool:
     now = time.time()
     bucket = _rate_buckets.setdefault(namespace, {})
     if len(bucket) > 1000:

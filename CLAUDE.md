@@ -83,6 +83,10 @@ APP_BASE_URL=...                # для GitHub OAuth / Telegram webhook в пр
 ALLOW_DEV_LOGIN=0               # 1 = вход по любому email без пароля (ТОЛЬКО локальная
                                 # разработка; дефолт "0" — раньше был "1", см.
                                 # docs/technical-due-diligence-2026-07-17.md §5.4)
+REDIS_URL=...                    # опционально: распределённый rate-limit (дальше — локи/SSE)
+                                # для НЕСКОЛЬКИХ серверов одновременно; без неё — как раньше,
+                                # in-memory, один процесс (docs/technical-due-diligence-
+                                # 2026-07-17.md §2.1, src/core/redis_client.py)
 APINET_ACCESS_TOKEN=...         # opt-in: автогенерация per-tenant LLM-ключа
 APINET_USER_ID=...
 APINET_TENANT_QUOTA=...
