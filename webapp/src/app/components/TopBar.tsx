@@ -22,9 +22,15 @@ interface TopBarProps {
    * ведущие в 2 разных места, плюс отдельный попап — визуальный шум
    * (governance-виджеты, найдено при аудите функционала). */
   onStatusClick?: () => void
+  /** Бюджетный лимит (0 = не задан — платёжная система ещё не подключена,
+   * это временная замена «пополнения»): показываем остаток рядом с расходом,
+   * клик ведёт на «Настройки → Лимиты», где его можно поднять. */
+  limitTotalUsd?: number
+  limitOverLimit?: boolean
+  onOpenLimits?: () => void
 }
 
-export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, officePaused, onToggleOffice, autonomyLevel, health, trust, qualityMode, onStatusClick }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, officePaused, onToggleOffice, autonomyLevel, health, trust, qualityMode, onStatusClick, limitTotalUsd, limitOverLimit, onOpenLimits }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -94,14 +100,19 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
           }} />
         </div>
          {!isMobile && cost > 0 && (
-          <div style={{
+          <div onClick={onOpenLimits} title={limitTotalUsd ? "Потрачено / осталось — открыть Лимиты" : "Расход — открыть Лимиты"}
+            style={{
             padding: "5px 12px", borderRadius: "var(--radius-pill)",
-            background: "var(--surface-soft)", border: "1px solid var(--hairline)",
-            fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-dim)",
-            display: "flex", alignItems: "center", gap: 4
+            background: limitOverLimit ? "rgba(224,85,90,0.12)" : "var(--surface-soft)",
+            border: `1px solid ${limitOverLimit ? "var(--danger)" : "var(--hairline)"}`,
+            fontSize: 11, fontFamily: "var(--font-mono)", color: limitOverLimit ? "var(--danger)" : "var(--text-dim)",
+            display: "flex", alignItems: "center", gap: 4, cursor: onOpenLimits ? "pointer" : "default",
           }}>
             <span style={{ opacity: 0.6 }}>$</span>
             {cost.toFixed(4)}
+            {!!limitTotalUsd && (
+              <span style={{ opacity: 0.7 }}>&nbsp;/ осталось ${Math.max(0, limitTotalUsd - cost).toFixed(2)}</span>
+            )}
           </div>
         )}
         {!isMobile && (understanding != null || health || trust || autonomyLevel || qualityMode) && (

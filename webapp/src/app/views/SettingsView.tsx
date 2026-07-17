@@ -29,8 +29,14 @@ const TABS = [
   { id: "account", label: "Аккаунт" },
 ]
 
-export function SettingsView() {
-  const { active, setActive } = useSubTab(TABS)
+export function SettingsView({ initialTab, onInitialTabHandled }: { initialTab?: string; onInitialTabHandled?: () => void } = {}) {
+  const { active, setActive } = useSubTab(TABS, initialTab)
+  // Открытие «Настроек» из внешнего deep-link'а (например, баннер «недостаточно
+  // средств» ведёт прямо на вкладку «Лимиты») — initialTab меняется, но useSubTab
+  // фиксирует активную вкладку только при МОНТИРОВАНИИ, поэтому переключаем явно.
+  useEffect(() => {
+    if (initialTab) { setActive(initialTab); onInitialTabHandled?.() }
+  }, [initialTab]) // eslint-disable-line
   return (
     <ViewShell>
       <ViewHead title="Настройки" sub="Кто мы, куда идём и как работает интеллект офиса" />

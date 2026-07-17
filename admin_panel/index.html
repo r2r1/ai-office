@@ -102,7 +102,7 @@
     </div>
     <div>
       <label>Admin key</label>
-      <input id="adminKey" type="password" placeholder="X-Admin-Key" />
+      <input id="adminKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="X-Admin-Key" />
     </div>
     <button class="primary" onclick="enter()">Войти</button>
     <div id="gateError" class="muted"></div>
@@ -176,15 +176,27 @@ function toast(msg) {
 }
 
 async function api(path, opts) {
-  const res = await fetch(SERVER.replace(/\/$/, '') + path, {
-    ...opts,
-    headers: { 'X-Admin-Key': KEY, ...(opts && opts.headers) },
-  });
+  let res;
+  try {
+    res = await fetch(SERVER.replace(/\/$/, '') + path, {
+      ...opts,
+      headers: { 'X-Admin-Key': KEY, ...(opts && opts.headers) },
+    });
+  } catch (e) {
+    // Сеть недоступна / сервер не отвечает / CORS отверг запрос — типичная
+    // причина "страница как будто зависла": fetch кидает TypeError без
+    // внятного сообщения, а не HTTP-ошибку.
+    throw new Error('Не удалось подключиться к серверу: ' + e.message);
+  }
+  const body = await res.text().catch(() => '');
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
     throw new Error(`${res.status}: ${body}`);
   }
-  return res.json();
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch (e) {
+    throw new Error('Сервер ответил не JSON-ом (проверьте адрес сервера)');
+  }
 }
 
 function enter() {

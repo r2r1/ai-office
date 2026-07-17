@@ -182,6 +182,11 @@ async def admin_cors_middleware(request: Request, call_next):
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "X-Admin-Key, Content-Type",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        # Chrome Private Network Access: запрос со страницы с "публичного" адреса
+        # (в т.ч. file:// — null origin) к приватному/loopback (127.0.0.1) требует
+        # этот заголовок в ответе на preflight, иначе браузер тихо блокирует запрос —
+        # именно так открывается admin_panel/index.html (см. докстринг выше).
+        "Access-Control-Allow-Private-Network": "true",
     }
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=headers)

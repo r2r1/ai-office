@@ -113,8 +113,15 @@ export default function App() {
   const [health, setHealth] = useState<{ company: number; status: string } | null>(null)
   const [trust, setTrust] = useState<{ company: number; streak: number } | null>(null)
   const [qualityMode, setQualityMode] = useState<{ icon: string; label: string } | null>(null)
-  // Office pause/resume
+  // Office pause/resume — reason различает «остановил администратор» от
+  // «упёрлись в бюджетный лимит», это два разных сообщения клиенту (живой
+  // фидбек: раньше пауза была видна только крошечной иконкой ⏸ в TopBar,
+  // без объяснения ПОЧЕМУ и что делать).
   const [officePaused, setOfficePaused] = useState(false)
+  const [officePauseReason, setOfficePauseReason] = useState("")
+  const [limitInfo, setLimitInfo] = useState<{ spent: number; total_usd: number; over_limit: boolean } | null>(null)
+  const [focusSettingsTab, setFocusSettingsTab] = useState<string | undefined>()
+  const goToLimits = useCallback(() => { setFocusSettingsTab("limits"); setView("settings") }, [])
   // Онбординг показан локально пока бэкенд не подтвердил готовность брифа
   const [onboarded, setOnboarded] = useState(false)
   // Минимальный онбординг (BOS §5) отправляет бриф СРАЗУ (brief.set_brief
@@ -193,7 +200,8 @@ export default function App() {
   // health/trust/capabilities — теперь один цикл, один набор запросов на тик).
   useEffect(() => {
     const load = () => {
-      api.officeStatus().then(s => { if (s) setOfficePaused(s.paused) })
+      api.officeStatus().then(s => { if (s) { setOfficePaused(s.paused); setOfficePauseReason(s.reason || "") } })
+      api.get("/api/limits").then(l => { if (l) setLimitInfo({ spent: l.spent || 0, total_usd: l.total_usd || 0, over_limit: !!l.over_limit }) }).catch(() => {})
       api.understanding().then(u => { if (u) setUnderstanding(u) })
       api.knowledge().then(m => { if (m) setMemory(m) })
       api.get("/api/autonomy").then(a => { if (a?.level) setAutonomyLevel(a.level) }).catch(() => {})
@@ -255,7 +263,42 @@ export default function App() {
           autonomyLevel={autonomyLevel}
           health={health} trust={trust}
           qualityMode={qualityMode}
+          limitTotalUsd={limitInfo?.total_usd} limitOverLimit={limitInfo?.over_limit} onOpenLimits={goToLimits}
           onStatusClick={() => setUnderstandingOpen(o => !o)} />
+
+        {/* Офис остановлен — админом, бюджетным лимитом или самим клиентом.
+            Раньше об этом говорила только крошечная иконка ⏸ в TopBar (легко
+            пропустить); теперь — явная плашка с причиной и, если дело в
+            деньгах, кнопкой на «Лимиты» (реальную оплату подключим отдельно —
+            пока «пополнить» значит поднять total_usd). */}
+        {(officePaused || limitInfo?.over_limit) && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+            padding: "10px 16px", borderRadius: "var(--radius-lg)",
+            background: limitInfo?.over_limit ? "rgba(224,85,90,0.12)" : "var(--surface-card)",
+            border: `1px solid ${limitInfo?.over_limit ? "var(--danger)" : "var(--hairline-strong)"}`,
+            fontSize: 13, color: "var(--text)", flexWrap: "wrap",
+          }}>
+            <span>
+              {officePaused
+                ? `⏸ Офис на паузе${officePauseReason ? ` — ${officePauseReason}` : "."}`
+                : "⚠ Бюджетный лимит исчерпан — офис вот-вот встанет на паузу."}
+            </span>
+            {limitInfo?.over_limit ? (
+              <button onClick={goToLimits}
+                style={{ border: "1px solid var(--danger)", borderRadius: "var(--radius-md)", padding: "6px 14px",
+                  background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>
+                Пополнить
+              </button>
+            ) : (
+              <button onClick={handleToggleOffice}
+                style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "6px 14px",
+                  background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>
+                Возобновить
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Morning Digest — появляется поверх контента при наличии событий */}
         <AnimatePresence>
@@ -507,7 +550,7 @@ export default function App() {
                   {view === "results"     && <ResultsView />}
                   {view === "chats"       && <ChatsView initialAgent={selectedAgent} />}
                   {view === "resources"   && <ResourcesView focusStorageProject={focusStorageProject} onFocusHandled={() => setFocusStorageProject(undefined)} />}
-                  {view === "settings"    && <SettingsView />}
+                  {view === "settings"    && <SettingsView initialTab={focusSettingsTab} onInitialTabHandled={() => setFocusSettingsTab(undefined)} />}
                 </Suspense>
               </motion.div>
             </AnimatePresence>
