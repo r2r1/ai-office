@@ -404,6 +404,7 @@ def complete(task_id: str, acceptance: dict | None = None) -> None:
             t["status"] = "done"
             if acceptance is not None:
                 t["acceptance"] = acceptance
+            t["progress_note"] = ""  # задача закрыта — прогресс внутри неё больше не нужен
             t["updated_ts"] = time.time()
             break
     _save(d)
@@ -457,6 +458,7 @@ def unblock(task_id: str) -> bool:
             t["attempts"] = 0
             t["blocked_reason"] = ""
             t["last_feedback"] = ""
+            t["progress_note"] = ""  # владелец вмешался — исполнитель начинает чисто
             t["updated_ts"] = time.time()
             _save(d)
             return True
@@ -471,6 +473,26 @@ def set_feedback(task_id: str, feedback: str) -> None:
             t["last_feedback"] = (feedback or "")[:500]
             break
     _save(d)
+
+
+def set_progress_note(task_id: str, note: str) -> bool:
+    """Сохранить короткую заметку «что уже сделано / чего жду» — переживает
+    переназначение задачи (см. revert(), где НЕ чистится) тому же или другому
+    агенту. Реальный найденный баг (форензик-аудит прогона 2026-07-18): скилл
+    «Бренд-бук» (внутренний цикл спроси CTO → спроси маркетолога → запиши
+    файл) перезапускался с нуля 5 раз подряд, потому что каждое повторное
+    взятие той же задачи не знало, на каком шаге агент уже был — контекст
+    собирался заново из брифа/памяти/уроков, ни один из которых не хранит
+    прогресс ВНУТРИ конкретной задачи. Возвращает False, если задача не
+    найдена (вызывающий инструмент должен явно сказать агенту об этом, не
+    молчать)."""
+    d = _data()
+    for t in d.get("tasks", []):
+        if t["id"] == task_id:
+            t["progress_note"] = (note or "").strip()[:300]
+            _save(d)
+            return True
+    return False
 
 
 def get_task(task_id: str) -> dict | None:

@@ -355,6 +355,26 @@ def build(agent_id: str, role: str,
                 f"«{instruction[:60]}» будет ставиться заново каждый цикл офиса, как только "
                 f"предыдущая закрыта. Дальше можешь заняться остальным.")
 
+    async def _handle_note_progress(args: dict) -> str:
+        """Записывает короткую заметку прогресса по ТЕКУЩЕЙ задаче — переживает
+        переназначение (см. plan.set_progress_note докстринг: реальный найденный
+        баг, скилл «Бренд-бук» перезапускался с нуля 5 раз подряд, потому что
+        каждое повторное взятие той же задачи не знало, на каком шаге агент уже
+        был). Используй, когда задача многошаговая (например скилл с внутренним
+        циклом «спроси → жди ответа → запиши») и тебя могут прервать/переназначить
+        до завершения — одно предложение: что уже сделано и чего именно ждёшь."""
+        text = (args.get("text") or "").strip()
+        if not text:
+            return "Укажи text — что уже сделано и чего ждёшь (одно предложение)."
+        from src.office import execution as execution_module, plan as plan_module
+        task_id = execution_module.current_task_id(agent_id)
+        if not task_id:
+            return "Сейчас не привязан к конкретной задаче — заметку сохранить некуда."
+        ok = plan_module.set_progress_note(task_id, text)
+        if not ok:
+            return f"Задача {task_id} не найдена — заметка не сохранена."
+        return "Заметка сохранена — увидишь её, если задачу возьмут заново (тобой или коллегой)."
+
     async def _handle_read_office_chat(args: dict) -> str:
         n = args.get("n", 20)
         msgs = office_channel.recent(n)
@@ -385,6 +405,7 @@ def build(agent_id: str, role: str,
         "raise_event": _handle_raise_event,
         "delegate_task": _handle_delegate_task,
         "create_recurring_process": _handle_create_recurring_process,
+        "note_progress": _handle_note_progress,
         "read_office_chat": _handle_read_office_chat,
         "get_connection": _handle_get_connection,
     }

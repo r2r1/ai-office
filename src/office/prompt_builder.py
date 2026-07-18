@@ -163,10 +163,19 @@ def portfolio_block(role: str) -> str:
 
 
 def task_context(role: str, task: str, skill: str = "",
-                 department: str = "", objective: str = "", touches_site: bool = True) -> str:
+                 department: str = "", objective: str = "", touches_site: bool = True,
+                 task_id: str = "") -> str:
     """Контекст задачи (user-сообщение воркера): бизнес → цель → этап → отдел →
-    задача → знания → уроки → формат результата. Перенесено из loop._task_with_context —
-    теперь итоговый промпт собирается в одном модуле и виден целиком."""
+    задача → прогресс → знания → уроки → формат результата. Перенесено из
+    loop._task_with_context — теперь итоговый промпт собирается в одном модуле
+    и виден целиком.
+
+    `task_id` — если указан, читает progress_note задачи (plan.set_progress_note,
+    инструмент note_progress) и показывает её агенту. Реальный найденный баг
+    (форензик-аудит прогона 2026-07-18): многошаговый скилл «Бренд-бук»
+    перезапускался с нуля 5 раз подряд при каждом повторном взятии той же
+    задачи — ни один существующий слой контекста (бриф/память/уроки) не хранит
+    прогресс ВНУТРИ конкретной задачи."""
     from src.office import org, milestones, knowledge, lessons
     from src.agents import architect
 
@@ -259,10 +268,18 @@ def task_context(role: str, task: str, skill: str = "",
                           "сайта, раздел «сборка отключена» — там актуальный способ). Смена стека — "
                           "решение клиента, не твоё: продолжай в том стеке, что уже принят для этой "
                           "страницы.\n")
+    progress_section = ""
+    if task_id:
+        from src.office import plan as plan_module
+        t_rec = plan_module.get_task(task_id) or {}
+        note = (t_rec.get("progress_note") or "").strip()
+        if note:
+            progress_section = (f"\n=== ТВОЙ ПРОГРЕСС ПО ЭТОЙ ЗАДАЧЕ (записан заранее, вероятно тобой же) ===\n"
+                                f"{note}\nПродолжай с этого места, не начинай многошаговый процесс заново.\n")
     return (
         f"{biz_line}Цель ЭТОГО прогона офиса (что должен сделать офис для клиента — "
         f"НЕ то, что продаёт компания конечным покупателям): {goal}\n{stage}{dept_line}{skill_line}{stack_line}"
-        f"Твоя задача от руководителя: {task}\n"
+        f"Твоя задача от руководителя: {task}\n{progress_section}"
         f"{tdd_section}{portfolio_section}{knowledge_section}{lessons_section}{creative_section}{sitemap_section}\n"
         f"Если workspace непуст — начни с list_files, прежде чем писать новый файл, "
         f"чтобы не создать дубликат или не потерять чужую работу.\n"

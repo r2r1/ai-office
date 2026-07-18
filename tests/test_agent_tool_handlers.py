@@ -431,6 +431,38 @@ def test_list_integrations_mentions_website():
     assert "website" in result.lower()
 
 
+# ── _handle_note_progress (Корень 8: прогресс переживает переназначение) ──────
+
+def test_note_progress_rejects_empty_text():
+    _fresh_tenant("af_test_note_progress_empty")
+    handlers, _ = _run_async(_captured_handlers(role="designer"))
+    result = _run_async(handlers["note_progress"]({"text": ""}))
+    assert "укажи" in result.lower()
+
+
+def test_note_progress_without_current_task_reports_no_target():
+    """agent_factory.create() в тесте не проходит через execution.assign() —
+    current_task_id() честно возвращает "" (агент не привязан к задаче)."""
+    _fresh_tenant("af_test_note_progress_no_task")
+    handlers, _ = _run_async(_captured_handlers(role="designer", agent_id="designer_x"))
+    result = _run_async(handlers["note_progress"]({"text": "спросил CTO, жду ответ"}))
+    assert "не привязан" in result.lower()
+
+
+def test_note_progress_saves_to_current_task():
+    from src.office import execution as execution_module
+    _fresh_tenant("af_test_note_progress_saves")
+    t = plan_module.add_task("Собрать бренд-бук", "designer", project_id="p1")
+    handlers, _ = _run_async(_captured_handlers(role="designer", agent_id="designer_1"))
+    execution_module._agent_task[execution_module.tk("designer_1")] = t["id"]
+    try:
+        result = _run_async(handlers["note_progress"]({"text": "спросил CTO, жду ответ"}))
+        assert "сохранена" in result.lower()
+        assert plan_module.get_task(t["id"])["progress_note"] == "спросил CTO, жду ответ"
+    finally:
+        execution_module._agent_task.pop(execution_module.tk("designer_1"), None)
+
+
 def _cleanup_test_tenants() -> None:
     """Тесты создают реальные data/tenants/af_test_* директории (ctx.wipe() в
     _fresh_tenant чистит ПЕРЕД тестом, не после) — без этого шага мусор копится

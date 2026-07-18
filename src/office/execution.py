@@ -46,6 +46,13 @@ def tk(agent_id: str) -> str:
     return f"{ctx.get_tenant()}:{agent_id}"
 
 
+def current_task_id(agent_id: str) -> str:
+    """id задачи, над которой агент работает СЕЙЧАС (или "") — публичный доступ
+    к _agent_task для инструментов вне этого модуля (например note_progress,
+    comms_tool_handlers.py), не лезущих в приватное состояние напрямую."""
+    return _agent_task.get(tk(agent_id), "")
+
+
 def cur_ms() -> str:
     return _current_ms.get(ctx.get_tenant(), "")
 
@@ -136,16 +143,19 @@ def engagement_needs_bot() -> bool:
 
 def task_with_context(role: str, task: str, skill: str = "",
                       department: str = "", objective: str = "",
-                      touches_site: bool = True) -> str:
+                      touches_site: bool = True, task_id: str = "") -> str:
     """Контекст задачи собирает Prompt Builder — единая точка сборки промптов
     (docs/bos-architecture.md §7). Обёртка сохранена для читаемости вызовов.
     `touches_site` по умолчанию True — вызовы из фикс-цикла критика (см. call
     sites выше) всегда реально про сайт; единственный вызов, который считает
-    его явно (run_task выше) — обычное исполнение задачи плана."""
+    его явно (run_task выше) — обычное исполнение задачи плана.
+    `task_id` — прокидывается в progress_note (см. plan.set_progress_note/
+    prompt_builder.task_context: заметка «что уже сделано» переживает
+    переназначение той же задачи)."""
     from src.office import prompt_builder
     return prompt_builder.task_context(role, task, skill,
                                        department=department, objective=objective,
-                                       touches_site=touches_site)
+                                       touches_site=touches_site, task_id=task_id)
 
 
 def attribute_result(agent_id: str, role: str, result: str) -> None:
@@ -569,7 +579,7 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                 # несогласованно между файлами одной и той же страницы.
                 design_style.ensure_design_tokens(b.get("niche", ""), b.get("audience", ""))
             ctx_task = task_with_context(role, task, skill, department=department, objective=objective,
-                                        touches_site=touches_site)
+                                        touches_site=touches_site, task_id=task_id)
             # title — короткая подпись для «Артефактов»/«Готовых результатов», НЕ
             # весь ctx_task/task: task здесь — уже составленный planning_engine
             # текст ("заголовок\n✅ ЗАДАЧА ВЫПОЛНЕНА, КОГДА: ...\n<фидбек>"), а не

@@ -130,6 +130,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
 
         _extra_tools = [_ts.REQUEST_RESEARCH_TOOL, _ask_tool, _ts.ASK_COLLEAGUE_TOOL,
                         _ts.RAISE_EVENT_TOOL, _ts.DELEGATE_TASK_TOOL, _ts.CREATE_RECURRING_PROCESS_TOOL,
+                        _ts.NOTE_PROGRESS_TOOL,
                         _ts.GET_CONNECTION_TOOL,
                         _ts.READ_OFFICE_CHAT_TOOL,
                         _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,
