@@ -18,6 +18,7 @@ import asyncio
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -248,6 +249,41 @@ def test_dept_decision_sig_still_reacts_to_process_task_blocker():
     plan.block(t["id"], "нет доступа к источнику курса")
     sig_after = pe._dept_decision_sig("tech")
     assert sig_before != sig_after, "блокер задачи процесса обязан менять отпечаток"
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_orchestrate_does_not_reopen_department_ceo_just_closed():
+    """Форензик-аудит 2026-07-18: CEO закрывал отдел (close_department), а
+    несколькими строками ниже в ТОМ ЖЕ вызове orchestrate() авто-открытие "по
+    плану задач" тут же открывало его заново — close_department не трогает
+    задачи отдела, и если хоть одна незакрытая задача оставалась,
+    departments_needed() всё ещё её видел. Владелец видел «закрыт → открыт»
+    подряд. orchestrator.decide_company замокан (LLM не вызывается,
+    plan.is_generated()=True после add_task ниже отключает LLM-путь лидеров —
+    см. planning_engine.run_leaders "План — ЕДИНСТВЕННЫЙ источник работы")."""
+    from src.office import plan, org
+
+    async def _test():
+        ctx.set_tenant("pe_unit_no_reopen")
+        org.open_department("marketing", reason="test", objective="test")
+        # Задача отдела остаётся НЕЗАКРЫТОЙ — ровно тот случай, когда
+        # departments_needed() продолжает требовать "marketing" после закрытия.
+        plan.add_task("Написать пост", "marketer", project_id="p1")
+        assert "marketing" in plan.departments_needed()
+
+        events = []
+        async def fake_publish(ev):
+            events.append(ev)
+
+        fake_decision = {"action": "close_department", "department": "marketing",
+                         "thought": "цель отдела достигнута"}
+        with patch("src.agents.orchestrator.decide_company", new=AsyncMock(return_value=fake_decision)):
+            await pe.orchestrate("тест", fake_publish, cycle=0)
+
+        assert "marketing" not in org.open_departments(), \
+            "CEO явно закрыл отдел этим решением — авто-открытие не должно его тут же вернуть"
+
+    asyncio.run(_test())
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 

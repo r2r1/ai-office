@@ -515,6 +515,7 @@ async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int 
                                        f"роль не входит в отделы, сдачу не блокирует"})
 
     # ---- CEO-тир (гейт по необходимости — экономия токенов) ----
+    just_closed = ""  # отдел, который CEO закрыл В ЭТОМ вызове (см. ниже) — авто-открытие его не трогает
     need_ceo = (not org.open_departments()) or (cycle % CEO_REASSESS_EVERY == 0)
     if need_ceo:
         # Реальный найденный баг (живой прогон): _last_delegate_sig ниже глушит
@@ -536,6 +537,20 @@ async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int 
             company = await orchestrator.decide_company(goal, strategy, ms, publish)
             _last_company_fp[tid] = (fp, company)
             await apply_company_decision(company, publish)
+            # Форензик-аудит 2026-07-18: CEO закрывал отдел ("close_department"),
+            # а несколькими строками ниже (в этом же вызове orchestrate) авто-открытие
+            # "по плану задач" тут же открывало его заново — close_department НЕ
+            # трогает задачи отдела (org.close_department только закрывает
+            # орг-состояние), поэтому если в отделе оставалась хоть одна незакрытая
+            # задача, departments_needed() всё ещё её видел и открывал отдел заново
+            # в ту же секунду. Владелец видел "закрыт → закрыт → открыт" подряд —
+            # шум и путаница для только что распущенных и тут же нанятых заново
+            # агентов. just_closed запоминает решение ЭТОГО цикла — авто-открытие
+            # ниже его на один цикл уважает (CEO мог закрыть осознанно, зная про
+            # оставшиеся задачи — например переносит их на другой отдел следующим
+            # решением, не в ту же секунду).
+            if company.get("action") == "close_department":
+                just_closed = company.get("department", "")
 
     # ---- Блок 4: Инициативы из opportunity-событий ----
     # CEO превращает наблюдённые возможности отделов в конкретные предложения
@@ -582,6 +597,8 @@ async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int 
     # ---- Параллелизм: открываем ВСЕ отделы, которых требует план задач ----
     # (независимые ветки плана исполняются параллельно — как в реальной компании).
     for dept_id in plan.departments_needed():
+        if dept_id == just_closed:
+            continue  # CEO только что осознанно закрыл его этим же решением — не открываем тут же
         if dept_id not in org.open_departments():
             obj = (goal or "")[:140]
             org.open_department(dept_id, reason="нужен по плану задач", objective=obj)
