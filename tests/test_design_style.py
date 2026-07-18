@@ -61,6 +61,23 @@ def test_ensure_style_line_is_idempotent_when_marketer_wrote_it():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+def test_is_auto_picked_detects_fallback_marker():
+    """Форензик-аудит 2026-07-18: сайт публиковался с этим ЖЕ текстом строки
+    без подтверждения владельца — is_auto_picked должен ловить ровно её."""
+    ctx.set_tenant("ds_unit_auto_picked")
+    content = design_style.ensure_style_line("кухни на заказ")
+    assert design_style.is_auto_picked(content)
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_is_auto_picked_false_when_marketer_wrote_it():
+    ctx.set_tenant("ds_unit_not_auto_picked")
+    workspace.write_file("docs/site_content.md", "Стиль: Монохромный люкс — моё решение\n\nТекст")
+    content = workspace.read_file("docs/site_content.md")
+    assert not design_style.is_auto_picked(content)
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 # ── Генератор шкалы оттенков (design tokens) ────────────────────────────────
 
 def test_color_scale_500_equals_base_hex():

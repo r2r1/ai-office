@@ -170,6 +170,18 @@ def has_style_line(content: str) -> bool:
     return bool(content) and not content.startswith("Файл не найден") and "Стиль:" in content
 
 
+def is_auto_picked(content: str) -> bool:
+    """True — строка «Стиль: …» стоит, но её поставил ДЕТЕРМИНИРОВАННЫЙ фолбэк
+    (ensure_style_line), а не designer/marketer по итогам реального выбора
+    владельца (builtin_skills/brand_book.md, шаг 4). Метка «подобрано
+    автоматически» — единственный машиночитаемый признак этого (см. строку,
+    которую пишет ensure_style_line ниже). Нужен routers/../execution.py
+    (форензик-аудит 2026-07-18: сайт публиковался с автоподобранной палитрой
+    БЕЗ подтверждения владельца, хотя брендбук с вариантами уже существовал —
+    ни один код-путь не сверялся с этим фактом перед публикацией)."""
+    return has_style_line(content) and "подобрано автоматически" in content
+
+
 def ensure_style_line(niche: str = "", audience: str = "") -> str:
     """Гарантирует строку «Стиль: …» в docs/site_content.md ДО того, как
     designer/developer начнут строить сайт. Идемпотентно: если строка уже

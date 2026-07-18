@@ -177,6 +177,51 @@ async def publish_site_auto(publish, note: str = "") -> bool:
     if sdir is None:
         return False
 
+    # Форензик-аудит 2026-07-18 («Кухни на заказ КМВ»): сайт был опубликован с
+    # автоподобранной палитрой (design_style.ensure_style_line — детерминированный
+    # фолбэк, если marketer/designer пропустили шаг подтверждения владельцем,
+    # builtin_skills/brand_book.md шаг 4), хотя черновик бренд-бука с вариантами
+    # УЖЕ существовал. Публикация не сверялась с этим фактом вообще. Это НЕ то же
+    # самое, что общий гейт autonomy.needs_approval("publish_site") ниже — тот
+    # можно один раз пройти навсегда за весь офис (см. mark_action_approved),
+    # а вопрос стиля специфичен для КАЖДОГО набора кандидатов и не должен
+    # проскакивать вместе с общим разрешением на публикацию.
+    from src.office import design_style
+    style_content = workspace.read_file("docs/site_content.md")
+    if design_style.is_auto_picked(style_content):
+        from src.office import questions as questions_mod, threads as threads_mod
+        question_text = ("Стиль сайта подобран автоматически (владелец не выбирал направление) — "
+                          "опубликовать как есть, или сначала показать варианты на выбор?")
+        pending = [m for m in questions_mod.list_pending() if m.get("text") == question_text]
+        if pending:
+            return False
+        qid, fut = questions_mod.ask(question_text, publish, agent_id="orchestrator_1")
+        threads_mod.post("orchestrator_1", "orchestrator", question_text,
+                         kind="question", question_id=qid)
+        await publish({"type": "agent_message", "agent_id": "orchestrator_1", "from": "agent",
+                       "kind": "question", "question_id": qid, "text": question_text})
+        await publish({"type": "system",
+                       "text": "🎨 Стиль сайта не подтверждён владельцем — жду ответа перед публикацией"})
+        try:
+            answer = await asyncio.wait_for(fut, timeout=600)
+        except asyncio.TimeoutError:
+            questions_mod.answer(qid, "")
+            threads_mod.mark_answered(qid)
+            await publish({"type": "system",
+                           "text": "⌛ Клиент не ответил про стиль — публикацию откладываю"})
+            return False
+        threads_mod.mark_answered(qid)
+        await publish({"type": "question_answered", "question_id": qid, "agent_id": "orchestrator_1"})
+        ok = (answer or "").strip().lower()
+        if not ok or any(no in ok for no in ("нет", "no", "стоп", "поз", "вариант", "покаж")):
+            await publish({"type": "system",
+                           "text": "⛔ Публикация с автостилем отклонена — жду выбор направления"})
+            return False
+        # Явное "опубликовать как есть" — снимаем автометку, чтобы вопрос не
+        # повторялся на каждой следующей ревизии этого же сайта.
+        cleaned = style_content.replace(" — направление подобрано автоматически (маркетинг не указал явно)", "")
+        workspace.write_file("docs/site_content.md", cleaned)
+
     # Блок 2: Если уровень автономности требует разрешения перед публикацией — спрашиваем
     # БЛОКИРУЮЩЕ через personal-thread CEO (как делает agent_factory.ask_user).
     # Но только ПЕРВЫЙ раз за офис: видели в проде 5+ повторных «опубликовать?» за один
