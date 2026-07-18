@@ -548,6 +548,9 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
         trace.log("budget_gate", agent=agent_id, task_id=task_id,
                   est_usd=policy["estimated_usd"])
         await publish({"type": "system", "text": reason})
+        summary = control.summary_text()
+        if summary:
+            await publish({"type": "system", "text": summary})
         return
     trace.log("agent_start", agent=agent_id, role=role,
               model=policy["model"], tier=policy["tier"],
@@ -712,6 +715,9 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
             reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
             control.pause(reason)
             await publish({"type": "system", "text": reason})
+            summary = control.summary_text()
+            if summary:
+                await publish({"type": "system", "text": summary})
         elif llm.is_model_unavailable_error(err_str):
             # Самолечение: назначенная модель недоступна у провайдера. Повтор той же
             # ошибки для того же агента → сбрасываем модель на дефолт офиса.

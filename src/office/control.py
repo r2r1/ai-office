@@ -50,3 +50,35 @@ def status() -> dict:
         "reason": d.get("reason", ""),
         "paused_at": d.get("paused_at", 0),
     }
+
+
+def summary_text() -> str:
+    """Сводка «на чём остановились» — публикуется сразу после постановки на
+    паузу (см. call sites pause() в execution.py/loop.py/routers/*.py).
+
+    Форензик-аудит прогона 2026-07-18 («Кухни на заказ КМВ»): прогон оборвался
+    на автопаузе по отрицательному балансу LLM-провайдера, и последним
+    сообщением в ленте оказался случайный вопрос агента про стиль обложек —
+    владелец, вернувшись после пополнения баланса, должен был сам
+    восстанавливать картину «что было в работе», пролистывая ленту назад.
+    Явная сводка сразу после сообщения о причине паузы закрывает это —
+    не заменяет причину, а дополняет её конкретикой (сколько задач в работе,
+    сколько заблокировано, есть ли неотвеченный вопрос владельцу)."""
+    from src.office import plan as plan_module, questions as questions_module
+    if not plan_module.is_generated():
+        return ""
+    doing = [t for t in plan_module.all_tasks() if t.get("status") == "in_progress"]
+    blocked = plan_module.blocked_tasks()
+    open_qs = questions_module.list_pending()
+    if not doing and not blocked and not open_qs:
+        return ""
+    lines = ["📋 На чём остановились:"]
+    if doing:
+        titles = "; ".join(f"{t['id']} ({t.get('role','?')})" for t in doing[:5])
+        lines.append(f"— в работе: {titles}")
+    if blocked:
+        titles = "; ".join(t["id"] for t in blocked[:5])
+        lines.append(f"— заблокировано, ждёт решения: {titles}")
+    if open_qs:
+        lines.append(f"— неотвеченных вопросов владельцу: {len(open_qs)}")
+    return "\n".join(lines)

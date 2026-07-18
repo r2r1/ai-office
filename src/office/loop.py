@@ -517,6 +517,9 @@ async def _run_office(tid: str) -> None:
             control.pause("Достигнут лимит расхода — офис на паузе. Повысьте лимит в «Компания → Лимиты».")
             await publish({"type": "system",
                            "text": "⛔ Достигнут бюджетный лимит — офис поставлен на паузу."})
+            summary = control.summary_text()
+            if summary:
+                await publish({"type": "system", "text": summary})
             await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
             continue
 
@@ -650,6 +653,9 @@ async def _run_office(tid: str) -> None:
                 reason = "⛔ Недостаточно баланса у LLM-провайдера. Пополните счёт и нажмите «Возобновить»."
                 control.pause(reason)
                 await publish({"type": "system", "text": reason})
+                summary = control.summary_text()
+                if summary:
+                    await publish({"type": "system", "text": summary})
             elif llm.is_network_error(err_str):
                 # Серия сетевых сбоев подряд = сеть/прокси до провайдера лежит.
                 # Пауза с понятной причиной вместо бесконечного спама трейсбеков.
@@ -660,6 +666,9 @@ async def _run_office(tid: str) -> None:
                               "интернет/прокси и нажмите «Возобновить».")
                     control.pause(reason)
                     await publish({"type": "system", "text": reason})
+                    summary = control.summary_text()
+                    if summary:
+                        await publish({"type": "system", "text": summary})
                     _net_fail_streak.pop(tid, None)
                 else:
                     await publish({"type": "error", "agent_id": "orchestrator_1",
