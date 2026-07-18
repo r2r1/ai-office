@@ -10,6 +10,7 @@ from src.integrations.base import Integration
 from src.integrations.telegram          import INTEGRATION as _telegram
 from src.integrations.telegram_personal import INTEGRATION as _telegram_personal
 from src.integrations.website           import INTEGRATION as _website
+from src.integrations.http_fetch        import INTEGRATION as _http_fetch
 from src.integrations.github            import INTEGRATION as _github
 from src.integrations.google_sheets     import INTEGRATION as _gsheets
 from src.integrations.gmail             import INTEGRATION as _gmail
@@ -27,6 +28,7 @@ from src.office import connections
 
 _ALL: dict[str, Integration] = {
     _website.name:          _website,
+    _http_fetch.name:       _http_fetch,
     _telegram.name:         _telegram,
     _telegram_personal.name: _telegram_personal,
     _github.name:           _github,
