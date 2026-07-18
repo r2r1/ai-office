@@ -38,18 +38,26 @@ def _save(items: list[dict]) -> None:
     ctx.write_json(_FILE, {"items": items})
 
 
-def _similar_active(title: str, role: str, project_id: str) -> dict | None:
-    """Уже есть активный процесс той же роли/проекта с похожим названием?
+def _similar_active(title: str, project_id: str) -> dict | None:
+    """Уже есть активный процесс того же проекта с похожим названием?
     Тот же приём, что initiatives.has_pending_similar (word-overlap > 50%).
     Реальный кейс из лога прогона 2026-07-09: salesman завёл ПЯТЬ отдельных
     процессов с названием "Лидогенерация и продажи внедрения ИИ-агентов" за
     один прогон (proc1..proc5) — каждый тикал каждый цикл независимо, впустую
-    тратя бюджет на переписывание одного и того же docs/outreach.md."""
+    тратя бюджет на переписывание одного и того же docs/outreach.md.
+
+    Реальный НАЙДЕННЫЙ баг (форензик-аудит прогона 2026-07-18, «Кухни на
+    заказ КМВ»): раньше дедуп ещё и требовал СОВПАДЕНИЯ роли — процесс
+    "Ежедневный курс USD/RUB" на роли developer и точно такой же процесс на
+    роли analyst считались РАЗНЫМИ и оба остались активны, задваивая работу.
+    Роль исполнителя — не часть идентичности процесса (какой агент СЛУЧАЙНО
+    вызвал create_recurring_process не делает задачу другой задачей) — дедуп
+    по (проект, название), роль в сравнение больше не входит."""
     words_new = set((title or "").lower().split())
     if not words_new:
         return None
     for p in _all():
-        if p.get("status") != "active" or p.get("role") != role:
+        if p.get("status") != "active":
             continue
         if p.get("project_id", "") != (project_id or ""):
             continue
@@ -75,10 +83,11 @@ def create(title: str, role: str, instruction: str, cadence: str = "every_cycle"
     Пусто — прежнее поведение (компания-wide процесс, заведённый вручную из UI
     вне контекста конкретного проекта).
 
-    Дедуп: похожий АКТИВНЫЙ процесс той же роли/проекта — возвращает его вместо
-    создания нового (помечен `_deduped=True`, чтобы вызывающий код мог сказать
-    агенту «уже есть», а не тихо расплодить дубли, см. _similar_active)."""
-    existing = _similar_active(title, role, project_id)
+    Дедуп: похожий АКТИВНЫЙ процесс того же проекта (роль не участвует в
+    сравнении — см. _similar_active) — возвращает его вместо создания нового
+    (помечен `_deduped=True`, чтобы вызывающий код мог сказать агенту «уже
+    есть», а не тихо расплодить дубли)."""
+    existing = _similar_active(title, project_id)
     if existing:
         return {**existing, "_deduped": True}
     items = _all()

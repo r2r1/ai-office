@@ -44,12 +44,20 @@ def test_reworded_similar_title_is_still_deduped():
     assert len(processes.all_processes()) == 1
 
 
-def test_different_role_is_not_deduped():
+def test_same_title_different_role_IS_deduped():
+    """Реальный найденный баг (форензик-аудит прогона 2026-07-18, «Кухни на
+    заказ КМВ»): процесс "Ежедневный курс USD/RUB" на роли developer и точно
+    такой же процесс на роли analyst считались РАЗНЫМИ и оба остались активны
+    одновременно — роль исполнителя не часть идентичности процесса, дедуп
+    больше не смотрит на неё (был баг ровно в обратную сторону — раньше этот
+    тест назывался test_different_role_is_not_deduped и требовал НЕ
+    дедуплицировать, закрепляя баг как ожидаемое поведение)."""
     _fresh("proc_test_diff_role")
-    processes.create("Лидогенерация", "salesman", "Искать лиды", project_id="p1")
+    p1 = processes.create("Лидогенерация", "salesman", "Искать лиды", project_id="p1")
     p2 = processes.create("Лидогенерация", "marketer", "Публиковать посты", project_id="p1")
-    assert not p2.get("_deduped")
-    assert len(processes.all_processes()) == 2
+    assert p2.get("_deduped") is True
+    assert p2["id"] == p1["id"]
+    assert len(processes.all_processes()) == 1
 
 
 def test_different_project_is_not_deduped():
