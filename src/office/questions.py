@@ -1,7 +1,23 @@
 """
 Блокирующие вопросы агентов пользователю — по тенанту.
 
-Futures живут в памяти (на время ожидания ответа), сгруппированы по tenant_id.
+Futures живут в памяти (на время ожидания ответа) — их и не переживают
+перезапуск процесса, это неизбежно (нельзя сериализовать asyncio.Future).
+Но МЕТАДАННЫЕ вопроса (текст, автор, время) — переживают, персистятся в
+questions.json (см. _persist/_ensure_loaded).
+
+Реальный найденный баг (живой прогон 2026-07-18): рестарт сервера во время
+открытого ask_user убивал live future, но thread.json уже показал вопрос
+пользователю с question_id X — при следующей попытке этого же гейта (офис
+ретраит publish_site_auto на каждой сдаче сайт-задачи) создавался НОВЫЙ
+вопрос с ДРУГИМ id, а старый оставался в ленте навечно «неотвеченным».
+Ответ владельца на старый id не находил живого pending_for() и уходил в
+обычный чат-диалог с агентом вместо разблокировки. Теперь ask() при
+совпадении текста с персистентной (но осиротевшей после рестарта) записью
+переоткрывает ТОТ ЖЕ qid новым future, а не минтит дубликат; answer() на
+осиротевшей записи (fut уже мёртв) всё равно снимает её из pending — иначе
+она виснет в списке неотвеченных без единого способа её закрыть.
+
 Дедуп одинаковых вопросов в пределах тенанта: общий future.
 """
 
@@ -12,9 +28,28 @@ from collections import defaultdict
 
 from src.saas import context as ctx
 
+_FILE = "questions.json"
+
 _pending: dict[str, dict[str, asyncio.Future]] = defaultdict(dict)
 _meta: dict[str, dict[str, dict]] = defaultdict(dict)
 _by_text: dict[str, dict[str, str]] = defaultdict(dict)
+# tenant_id'ы, для которых персистентный questions.json уже подгружен в
+# память этого процесса — читаем с диска один раз на тенанта, не на вызов.
+_loaded: set[str] = set()
+
+
+def _ensure_loaded(tid: str) -> None:
+    if tid in _loaded:
+        return
+    _loaded.add(tid)
+    data = ctx.read_json(_FILE, {"pending": {}})
+    for qid, m in data.get("pending", {}).items():
+        _meta[tid][qid] = m
+        _by_text[tid][_normalize(m.get("text", ""))] = qid
+
+
+def _persist(tid: str) -> None:
+    ctx.write_json(_FILE, {"pending": _meta[tid]})
 
 # Журнал КАЖДОГО вопроса (не только висящих — _meta теряет запись при answer()).
 # Нужен для программных гейтов приёмки (acceptance.py): «эта роль обязана была
@@ -61,6 +96,7 @@ def _find_similar(pend: dict, meta: dict, question: str) -> str:
 
 def ask(question: str, publish_fn=None, agent_id: str = "") -> tuple[str, asyncio.Future]:
     tid = ctx.get_tenant()
+    _ensure_loaded(tid)
     pend, meta, by_text = _pending[tid], _meta[tid], _by_text[tid]
     key = _normalize(question)
     existing_qid = by_text.get(key) or _find_similar(pend, meta, question)
@@ -79,6 +115,14 @@ def ask(question: str, publish_fn=None, agent_id: str = "") -> tuple[str, asynci
         orig.add_done_callback(_forward)
         return existing_qid, proxy
 
+    if existing_qid and existing_qid in meta:
+        # Персистентная запись пережила рестарт процесса, а live future — нет
+        # (см. докстринг модуля). Переоткрываем ТОТ ЖЕ id новым future вместо
+        # того, чтобы плодить дубликат вопроса с другим id.
+        fut = asyncio.get_running_loop().create_future()
+        pend[existing_qid] = fut
+        return existing_qid, fut
+
     qid = str(uuid.uuid4())[:8]
     fut = asyncio.get_running_loop().create_future()
     pend[qid] = fut
@@ -86,6 +130,7 @@ def ask(question: str, publish_fn=None, agent_id: str = "") -> tuple[str, asynci
     meta[qid] = {"text": question, "agent_id": agent_id, "ts": ts}
     by_text[key] = qid
     _asked_log[tid].append({"agent_id": agent_id, "text": question, "ts": ts})
+    _persist(tid)
     return qid, fut
 
 
@@ -100,18 +145,25 @@ def asked_since(agent_id: str, ts: float = 0.0) -> bool:
 
 def answer(qid: str, answer: str) -> bool:
     tid = ctx.get_tenant()
+    _ensure_loaded(tid)
     fut = _pending[tid].pop(qid, None)
     meta = _meta[tid].pop(qid, None)
     if meta:
         _by_text[tid].pop(_normalize(meta.get("text", "")), None)
+        _persist(tid)
     if fut and not fut.done():
         fut.set_result(answer)
         return True
-    return False
+    # Осиротевшая запись (рестарт убил future, см. докстринг модуля) — ждать
+    # больше некому, но снять её с pending всё равно нужно: иначе она висит
+    # в списке неотвеченных без единого способа её закрыть.
+    return meta is not None
 
 
 def pending_for(agent_id: str) -> str:
-    meta = _meta[ctx.get_tenant()]
+    tid = ctx.get_tenant()
+    _ensure_loaded(tid)
+    meta = _meta[tid]
     cands = [(m["ts"], qid) for qid, m in meta.items() if m.get("agent_id") == agent_id]
     if not cands:
         return ""
@@ -120,5 +172,7 @@ def pending_for(agent_id: str) -> str:
 
 
 def list_pending() -> list[dict]:
-    meta = _meta[ctx.get_tenant()]
+    tid = ctx.get_tenant()
+    _ensure_loaded(tid)
+    meta = _meta[tid]
     return sorted([{"question_id": qid, **m} for qid, m in meta.items()], key=lambda x: x["ts"])
