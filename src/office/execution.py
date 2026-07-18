@@ -648,6 +648,22 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                     await publish({"type": "agent_message", "agent_id": "orchestrator_1",
                                    "from": "agent", "kind": "msg", "text": note})
                 elif fb:
+                    # Форензик-аудит 2026-07-18: задача (обложки кейсов) отклонялась
+                    # ПОДРЯД по ОДНОЙ И ТОЙ ЖЕ причине ("дизайн-направление не
+                    # подтверждено владельцем") несколько раз, но CEO узнавал об
+                    # этом только на 3-й, финальной блокировке (events_mod.raise_event
+                    # ниже) — Event Layer молчал все предыдущие разы, а CEO тем
+                    # временем 7 раз подряд принимал одно и то же decide-решение
+                    # вслепую, не видя, что реальный блокер не сдвинулся. Раньше
+                    # причина эскалации была видна в теле лога чуть выше как
+                    # "приёмка не проходит" — реальный текст показывает repeat.
+                    prev_fb = (t_rec.get("last_feedback") or "").strip()
+                    if prev_fb and prev_fb == fb.strip():
+                        events_mod.raise_event(
+                            "blocker",
+                            f"Задача {task_id} второй раз подряд отклонена по ТОЙ ЖЕ причине: "
+                            f"{fb[:180]}",
+                            from_role=role, from_agent=agent_id, task_id=task_id)
                     # Фидбек приёмки сохраняется в задаче — попадёт исполнителю при переназначении.
                     plan.set_feedback(task_id, fb)
         # Trust Score: успешная задача повышает доверие к отделу
