@@ -95,14 +95,35 @@ def spend_series(group_by: str = "day", since: float = 0.0) -> list[dict]:
     return _bucket_sum(pts, group_by)
 
 
+def _bucket_last(points: list[tuple[float, float]], group_by: str) -> list[dict]:
+    """Как _bucket_sum, но берёт ПОСЛЕДНЕЕ показание в бакете, а не сумму.
+    Реальный найденный баг (живой прогон 2026-07-18, «Курс USD/RUB»): метрики,
+    которые агент пишет через record_metric, почти всегда — ПОКАЗАНИЯ
+    (courses/остатки/температура — состояние В МОМЕНТ, не событие), а не
+    аддитивные события (лид пришёл, доллар потрачен). Повторяющийся процесс
+    писал курс каждый цикл (несколько раз в день); _bucket_sum складывал все
+    показания за день (78.5+92.0+90.0+90.0+90.0=440.5) — график показывал
+    бессмысленное число вместо реального курса ~90."""
+    buckets: dict[str, tuple[float, float]] = {}  # bucket -> (ts, value) последнего показания
+    for ts, val in points:
+        k = _bucket_key(ts, group_by)
+        prev = buckets.get(k)
+        if prev is None or ts >= prev[0]:
+            buckets[k] = (ts, val)
+    return [{"label": k, "value": round(v, 2)} for k, (_, v) in sorted(buckets.items())]
+
+
 def _generic_series(metric_id: str, group_by: str = "day", since: float = 0.0) -> list[dict]:
     """Ряд для ЛЮБОЙ метрики, записанной агентом через record_metric — общий
     путь расширяемости (см. докстринг модуля), не привязан к конкретному
-    сценарию (валюта/склад/что угодно)."""
+    сценарию (валюта/склад/что угодно). Берём ПОСЛЕДНЕЕ показание за период
+    (см. _bucket_last), а не сумму — record_metric почти всегда используется
+    для показаний, не для аддитивных событий (у тех есть свои builtin-провайдеры
+    выше, leads_series/spend_series, которые суммируют осознанно)."""
     from src.office import metrics as metrics_module
     pts = [(p["ts"], float(p["value"])) for p in metrics_module.series(metric_id, since=since)
            if isinstance(p.get("value"), (int, float))]
-    return _bucket_sum(pts, group_by)
+    return _bucket_last(pts, group_by)
 
 
 _BUILTIN_PROVIDERS = {
