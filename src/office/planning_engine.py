@@ -57,18 +57,43 @@ _last_delegate_sig: dict[str, str] = {}
 _last_company_fp: dict[str, tuple] = {}
 
 
+def _dept_decision_sig(did: str) -> tuple:
+    """Часть доски отдела, от которой решение CEO вообще МОЖЕТ зависеть —
+    без точных счётчиков done/doing и без задач, порождённых повторяющимися
+    процессами (`requested_by` начинается с "process:").
+
+    Реальный найденный баг (форензик-аудит прогона 2026-07-18, «Кухни на
+    заказ КМВ»): старый board_sig был построен на `plan.board_summary()`
+    ("✓9 ⟳1 ☐0 | в работе: ..."), а его "✓N" растёт на КАЖДЫЙ тик
+    повторяющегося процесса (курс USD/RUB тикал каждый цикл офиса) — отпечаток
+    менялся почти каждый цикл из-за фонового шума, не из-за реального
+    изменения ситуации. Итог: 7 CEO-решений подряд за 8 минут, каждое —
+    полноценный оплаченный LLM-вызов, при этом сам аудит цитирует разницу
+    между промптами как "'9' -> '10'" — счётчик, не факт. Задачи процессов
+    полностью исключены здесь: они не про то, что CEO решает на уровне
+    отдела (открыть/закрыть/делегировать), это автономный фон."""
+    b = plan.board(did)
+    def _is_process_task(t: dict) -> bool:
+        return (t.get("requested_by") or "").startswith("process:")
+    todo_ids = tuple(sorted(t["id"] for t in b["todo"] if not _is_process_task(t)))
+    doing_ids = tuple(sorted(t["id"] for t in b["doing"] if not _is_process_task(t)))
+    blocked_ids = tuple(sorted(t["id"] for t in b["blocked"]))  # блокер важен даже у процесса
+    return (todo_ids, doing_ids, blocked_ids)
+
+
 def _company_fingerprint() -> tuple:
     """Дёшево (без LLM/промпта) — только то, от чего решение CEO вообще МОЖЕТ
     зависеть: какие отделы открыты и кто там чем занят, доска задач каждого
-    открытого отдела, необработанные события. Если всё это совпадает с прошлым
-    гейтом — новый ответ LLM гарантированно был бы тем же самым по сути."""
+    открытого отдела (без шума процессов, см. _dept_decision_sig), необработанные
+    события. Если всё это совпадает с прошлым гейтом — новый ответ LLM
+    гарантированно был бы тем же самым по сути."""
     open_depts = tuple(sorted(org.open_departments()))
     members_sig = tuple(
         (did, tuple(sorted((a.agent_id, a.status) for a in registry.members_of(did))))
         for did in open_depts
     )
     board_sig = tuple(
-        (did, plan.board_summary(did) if plan.is_generated() else "")
+        (did, _dept_decision_sig(did) if plan.is_generated() else ())
         for did in open_depts
     )
     events_sig = tuple(sorted(e["id"] for e in events_mod.pending()))

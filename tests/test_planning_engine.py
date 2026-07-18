@@ -215,6 +215,42 @@ def test_has_role_for_project():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+def test_dept_decision_sig_ignores_process_task_ticks():
+    """Форензик-аудит 2026-07-18: старый board_sig (plan.board_summary, счётчик
+    "✓N") менялся на КАЖДЫЙ тик повторяющегося процесса — CEO платно
+    перевызывал LLM 7 раз подряд без единого реального изменения ситуации.
+    _dept_decision_sig должен игнорировать задачи процессов (requested_by
+    начинается с "process:") — тик процесса не меняет отпечаток."""
+    from src.office import plan
+    ctx.set_tenant("pe_unit_dept_sig_process")
+    plan.add_task("Реальная задача разработчика", "developer", project_id="p1")
+    sig_before = pe._dept_decision_sig("tech")
+    # Тик процесса — новая задача, но НЕ от пользователя/CEO, а от процесса.
+    plan.add_task("Ежедневный курс USD/RUB", "developer",
+                  requested_by="process:proc1_123", project_id="p1")
+    sig_after_tick = pe._dept_decision_sig("tech")
+    assert sig_before == sig_after_tick, "тик процесса не должен менять отпечаток решения CEO"
+    # А вот НОВАЯ обычная задача (не от процесса) — меняет.
+    plan.add_task("Ещё одна реальная задача", "developer", project_id="p1")
+    sig_after_real = pe._dept_decision_sig("tech")
+    assert sig_after_real != sig_before, "реальная новая задача обязана менять отпечаток"
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_dept_decision_sig_still_reacts_to_process_task_blocker():
+    """Блокер важен даже у задачи процесса — это НЕ фоновый шум, а реальный
+    сигнал, что процесс застрял (см. Корень 6: эскалация повторных блокеров)."""
+    from src.office import plan
+    ctx.set_tenant("pe_unit_dept_sig_process_blocker")
+    t = plan.add_task("Ежедневный курс USD/RUB", "developer",
+                      requested_by="process:proc1_123", project_id="p1")
+    sig_before = pe._dept_decision_sig("tech")
+    plan.block(t["id"], "нет доступа к источнику курса")
+    sig_after = pe._dept_decision_sig("tech")
+    assert sig_before != sig_after, "блокер задачи процесса обязан менять отпечаток"
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def test_forget_tenant_clears_leader_signature():
     pe._last_leader_sig["pe_unit_forget:tech"] = ("assign|x|developer", 2)
     pe._last_leader_sig["board:pe_unit_forget:tech"] = ("board summary", 0)
