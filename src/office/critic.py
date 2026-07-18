@@ -172,6 +172,40 @@ def check_site() -> list[dict]:
             problems.append(_p("form_stub", "critical",
                 f"{_basename(p)}: форма-заглушка (фраза «подключаем/готово»), реальной отправки нет."))
 
+    # 4b. ЦЕЛОСТНОСТЬ ЛОКАЛЬНЫХ АССЕТОВ: css/js/img по локальному пути (не http(s)://,
+    # не data:) должны реально существовать в папке сайта. Раньше проверка §5 ниже
+    # смотрела ТОЛЬКО на .html-ссылки — реальный найденный баг (форензик-аудит
+    # 2026-07-18): сайт публиковался с <link rel="stylesheet" href="styles.css">,
+    # а файла styles.css нигде не было — страница уходила клиенту полностью без
+    # стилей, и ни одна проверка (эта включительно, до правки) этого не ловила.
+    def _local_asset_refs(text: str) -> set[str]:
+        refs = set()
+        for m in re.finditer(r'<link[^>]+rel=["\']stylesheet["\'][^>]*href=["\']([^"\']+)["\']', text, re.IGNORECASE):
+            refs.add(m.group(1))
+        for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', text, re.IGNORECASE):
+            refs.add(m.group(1))
+        for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', text, re.IGNORECASE):
+            refs.add(m.group(1))
+        return refs
+
+    in_dir_set = set(in_dir)
+    missing_assets = set()
+    for p in html_pages:
+        page_dir = p.rsplit("/", 1)[0] if "/" in p else ""
+        for ref in _local_asset_refs(_read(p)):
+            ref = ref.strip()
+            if not ref or ref.startswith(("http://", "https://", "data:", "//", "#")):
+                continue
+            resolved = posixpath.normpath(posixpath.join(page_dir, ref)) if page_dir else posixpath.normpath(ref)
+            target = _basename(ref)
+            if resolved in in_dir_set or target in existing_names:
+                continue
+            missing_assets.add(f"{_basename(p)} → {ref}")
+    if missing_assets:
+        problems.append(_p("missing_asset", "critical",
+            f"Ссылки на несуществующие локальные файлы (css/js/img): {'; '.join(sorted(missing_assets)[:5])} — "
+            "страница уйдёт клиенту сломанной (без стилей/скрипта/картинки)."))
+
     # 5. ЦЕЛОСТНОСТЬ ССЫЛОК: каждая внутренняя ссылка ведёт на существующий файл.
     # Сначала пробуем путь ПОЛНОСТЬЮ (разрешённый относительно директории страницы) —
     # раньше сравнивали только basename, и href="./pages/x.html" считался рабочим,
@@ -398,6 +432,18 @@ def _near_duplicate_pages(pages: list[str]) -> int:
     return len(dupes)
 
 
+# Memoize review_site_llm по хэшу проверяемого HTML + версии промпта: реальный
+# найденный баг (форензик-аудит 2026-07-18) — байт-в-байт идентичный запрос к
+# критику ушёл в LLM ДВАЖДЫ с разницей в 12 минут на НЕИЗМЕНИВШЕМСЯ HTML — чистая
+# трата на нулевую новую информацию. In-memory (не на диск): переживает процесс,
+# не переживает рестарт — приемлемо, это оптимизация повторных вызовов в рамках
+# одного прогона, не персистентный кеш. Ключ включает тенанта (общий процесс на
+# несколько тенантов, см. saas/context.py) и goal/niche/audience — тот же HTML с
+# другой бизнес-целью должен получить новую оценку, не старую из кеша.
+_review_cache: dict[str, list[dict]] = {}
+_REVIEW_PROMPT_VERSION = "v1"
+
+
 async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> list[dict]:
     """
     «Зрячая» самопроверка: LLM-ревьюер читает реальный HTML готового сайта и судит,
@@ -420,6 +466,14 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
     html = workspace.read_file(idx)
     if not html or html.startswith("Файл не найден"):
         return []
+
+    import hashlib
+    from src.saas import context as ctx
+    cache_key = hashlib.sha256(
+        f"{ctx.get_tenant()}|{_REVIEW_PROMPT_VERSION}|{goal}|{niche}|{audience}|{html}".encode("utf-8")
+    ).hexdigest()
+    if cache_key in _review_cache:
+        return _review_cache[cache_key]
 
     from src.core import llm
     from src.office import models as models_module
@@ -460,6 +514,7 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
     while True:
         idx = raw.find("{", pos)
         if idx == -1:
+            _review_cache[cache_key] = []
             return []
         try:
             obj, end = decoder.raw_decode(raw[idx:])
@@ -470,7 +525,9 @@ async def review_site_llm(goal: str, niche: str = "", audience: str = "") -> lis
             fixes = obj.get("fixes", [])
             # LLM-замечания позиционирования — cosmetic: запускают одну доработку,
             # но не входят в критический гейт приёмки (тот считается по check_site).
-            return [_p("llm_review", "cosmetic", str(f)[:200]) for f in fixes if f][:4]
+            result = [_p("llm_review", "cosmetic", str(f)[:200]) for f in fixes if f][:4]
+            _review_cache[cache_key] = result
+            return result
         pos = idx + max(end, 1)
 
 
