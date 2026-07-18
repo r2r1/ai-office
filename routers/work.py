@@ -467,7 +467,8 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
             continue
         if role and title:
             real = plan_module.add_task(title, role, t.get("done_criterion", ""),
-                                        requested_by="user", project_id=proj["id"])
+                                        requested_by="user", project_id=proj["id"],
+                                        artifacts=t.get("artifacts"))
             added += 1
             temp_id = (t.get("id") or "").strip()
             if temp_id:

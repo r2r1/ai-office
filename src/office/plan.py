@@ -196,7 +196,7 @@ def set_tasks(tasks: list[dict]) -> None:
 
 def add_task(title: str, role: str, done_criterion: str = "",
              requested_by: str = "", deps: list[str] | None = None, parent: str = "",
-             project_id: str = "") -> dict:
+             project_id: str = "", artifacts: list[str] | None = None) -> dict:
     """
     Добавляет задачу в доску (например, поставленную КОЛЛЕГОЙ-агентом другому отделу/роли).
     Возвращает созданную задачу. Видна в to-do списке исполнителя и у его лидера.
@@ -209,16 +209,29 @@ def add_task(title: str, role: str, done_criterion: str = "",
     ensure_active() (единственный/первый активный проект). Явно указывать
     нужно там, где задача рождается ДЛЯ конкретного нового Work (например,
     принятая инициатива), а не для того, что уже само собой активно.
+
+    `artifacts` — явная декларация артефакта (см. _derive_artifacts). Пусто —
+    выводится по роли+заголовку, как раньше. Явно указывать нужно там, где
+    вызывающий код уже ТОЧНО знает тип артефакта лучше, чем эвристика по
+    словам заголовка (например, шаблон задач dashboard_widget.md — см. ниже).
     """
     d = _data()
     tasks = d.get("tasks", [])
     role = _route_role(role, title)  # роль без отдела → исполнимая; бот записи → integrator
-    # Дедуп: если такая же незакрытая задача той же роли уже есть — не плодим дубль
-    # (циклы делегирования иначе ставили один и тот же таск несколько раз). Инвариант
-    # проекта — дедупликация.
+    # Дедуп: если такая же незакрытая задача той же роли в ТОМ ЖЕ проекте уже
+    # есть — не плодим дубль (циклы делегирования иначе ставили один и тот же
+    # таск несколько раз). Раньше матч не проверял project_id вовсе — задача
+    # с совпавшим заголовком в СОВСЕМ ДРУГОМ (возможно старом/чужом) проекте
+    # тихо "поглощала" новую: принятая инициатива не создавала ничего своего,
+    # просто возвращала чужую задачу — выглядело как "инициатива исчезла"
+    # (реальный баг: "Автообновление курса USD/RUB"). Инвариант проекта —
+    # дедупликация СКОУПЛЕНА проектом, а не глобальная.
     norm_title = " ".join((title or "").lower().split())
     norm_role = (role or "").strip()
+    dedup_pid = project_id or None
     for t in tasks:
+        if dedup_pid is not None and t.get("project") != dedup_pid:
+            continue
         if (t.get("status") in ("pending", "in_progress")
                 and t.get("role") == norm_role
                 and " ".join((t.get("title", "")).lower().split()) == norm_title):
@@ -235,7 +248,7 @@ def add_task(title: str, role: str, done_criterion: str = "",
         "project": pid,
         "milestone_id": milestones.active_stage_id(pid),
         "parent": (parent or "").strip(),
-        "artifacts": _derive_artifacts(role, title),
+        "artifacts": [a for a in (artifacts or []) if a] or _derive_artifacts(role, title),
         "required_capabilities": _required_caps({"title": title}),
         "workflow_id": _workflow_id(title),
     }
