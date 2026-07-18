@@ -135,7 +135,7 @@ def portfolio() -> list[dict]:
     только поля, нужные для навигации (id, заголовок, статус, папка). Полные
     записи (с внутренними полями плана) лидеру в промпт не нужны."""
     return [{"id": p["id"], "title": p.get("title", ""), "status": p.get("status", ""),
-             "workspace_dir": p.get("workspace_dir", "")}
+             "workspace_dir": p.get("workspace_dir", ""), "off_brief": bool(p.get("off_brief"))}
             for p in all_projects()]
 
 
@@ -183,7 +183,7 @@ def _promote_queued(items: list[dict]) -> None:
         n_active += 1
 
 
-def create(title: str, goal: str = "", type: str = "project") -> dict:
+def create(title: str, goal: str = "", type: str = "project", off_brief: bool = False) -> dict:
     """Создаёт Work. Для type="project": если активных проектов меньше лимита
     (get_limit(), по умолчанию 3) — становится активным сразу; иначе встаёт в
     очередь (`queued`) и активируется автоматически, когда освободится слот
@@ -201,7 +201,13 @@ def create(title: str, goal: str = "", type: str = "project") -> dict:
     должен вставать в очередь из-за занятых проектных слотов; v1 пока не
     реализует Instance-поток — заводится как задел на будущее) | initiative
     (идея до решения, без лимита). Сегодня вся созданная работа фактически
-    ведётся как project; поле подготавливает данные к разделению."""
+    ведётся как project; поле подготавливает данные к разделению.
+
+    `off_brief` — проект структурно не похож на бизнес клиента (см.
+    relevance.is_off_brief, форензик-аудит 2026-07-18: служебный запрос
+    владельца платформы стал полноценным Project внутри чужого бизнеса).
+    Только маркер для UI/CEO — не блокирует создание, последнее слово всегда
+    у владельца (BOS §2)."""
     d = _data()
     items = d.get("items", [])
     norm_type = type if type in ("project", "process", "initiative") else "project"
@@ -221,6 +227,7 @@ def create(title: str, goal: str = "", type: str = "project") -> dict:
         "workspace_dir": workspace_dir,  # см. докстринг модуля — читаемая папка в workspace/
         "created_ts": time.time(), "closed_ts": None,
         "left_behind": {},   # что проект оставил после себя (заполняется при закрытии)
+        "off_brief": bool(off_brief),
     }
     items.append(proj)
     d["items"] = items
@@ -353,7 +360,11 @@ def context_block() -> str:
         left = p.get("left_behind") or {}
         tail = (f" (сдано {left.get('tasks_done', 0)} задач, лидов: {left.get('leads_count', 0)})"
                 if p.get("status") == "done" and left else "")
-        lines.append(f"{mark} {p['title']}{tail}")
+        # off_brief (relevance.py): помечен как структурно непохожий на бизнес
+        # клиента — CEO должен видеть это как отдельную категорию, не смешивать
+        # со своими же бизнес-инициативами при принятии следующих решений.
+        note = " [🔧 служебное, не похоже на бизнес клиента]" if p.get("off_brief") else ""
+        lines.append(f"{mark} {p['title']}{tail}{note}")
     header = f"\n=== ПРОЕКТЫ КОМПАНИИ (лимит одновременных: {get_limit()}) ===\n"
     if queued:
         header += f"⏳ В очереди на свободный слот: {len(queued)}\n"

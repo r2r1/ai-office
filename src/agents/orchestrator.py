@@ -347,8 +347,16 @@ async def generate_initiative(
         f"Наблюдаемая возможность: {opportunity_summary}\n\n"
         "Сформулируй инициативу с конкретными задачами."
     )
+    # Портфель проектов (BOS §6.2) — CEO должен видеть, что компания уже ведёт,
+    # ПЕРЕД тем как предложить новую инициативу, а не только в decide_company
+    # (форензик-аудит 2026-07-18: без этого блока в этой конкретной точке две
+    # независимые инициативы независимо родили два параллельных сайта под
+    # одну и ту же задачу «витрина доверия» — ни одна не видела другую).
+    # Уже закешированный снимок цикла (world.snapshot()) — не новый LLM/сетевой
+    # вызов, просто больше текста в том же промпте.
     system, _pid = prompt_builder.company_system(
-        "ceo_initiative", "orchestrator_1", "orchestrator", user, extra=_known_roles_block())
+        "ceo_initiative", "orchestrator_1", "orchestrator", user,
+        extra=_known_roles_block() + prompt_builder.portfolio_block("orchestrator"))
     raw = await llm.run_agent(
         system=system,
         user=user,
@@ -412,9 +420,17 @@ async def interpret_dashboard_request(text: str) -> dict:
         f"данные есть за {max(1, int((now - m['earliest_ts']) / 86400))} дн., точек: {m['count']}"
         for m in metrics
     ) or "(пока вообще нет ни одной измеримой метрики)"
+    # Портфель проектов — та же причина, что в generate_initiative: реальный
+    # прогон показал, что CEO принял внебрифовый служебный запрос («график
+    # курса доллара») как полноценную бизнес-инициативу именно из ЭТОЙ точки,
+    # хотя бриф уже был в контексте (brief_block всегда в company_system) —
+    # наличие ниши в промпте само по себе не заставляет модель с ней сверяться.
+    # Портфель + явное правило в dashboard_widget.md (см. файл) — первая линия
+    # защиты; код-уровневый бэкстоп — routers/work.py (relevance.is_off_brief).
     system, _pid = prompt_builder.company_system(
         "dashboard_widget", "orchestrator_1", "orchestrator", text,
-        fmt={"metrics_block": metrics_block})
+        fmt={"metrics_block": metrics_block},
+        extra=prompt_builder.portfolio_block("orchestrator"))
     raw = await llm.run_agent(
         system=system, user=text,
         model=models_module.for_agent("orchestrator_1"),

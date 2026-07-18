@@ -435,6 +435,20 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
                 reused_site_project = p
                 break
 
+    # Форензик-аудит прогона 2026-07-18 («Кухни на заказ КМВ»): служебный
+    # запрос владельца ПЛАТФОРМЫ («построй график курса доллара», не имеющий
+    # отношения к нише клиента) стал полноценным бизнес-Project с наймом двух
+    # агентов и повторяющимся процессом — 52% задач того прогона ушли на
+    # метрику, не относящуюся к бизнесу клиента вообще. Бриф технически был у
+    # CEO в контексте (brief_block всегда в company_system), но наличие ниши
+    # в промпте не гарантирует, что модель с ней сверится перед решением.
+    # relevance.py — дешёвый (эмбеддинги, не LLM-суждение) код-уровневый
+    # бэкстоп поверх LLM-решения, не замена промпту: не блокирует создание
+    # (последнее слово у владельца, BOS §2), только маркирует для UI/CEO.
+    from src.office import relevance
+    initiative_text = f"{(initiative or {}).get('title', '')} {(initiative or {}).get('rationale', '')}"
+    off_brief = relevance.is_off_brief(initiative_text)
+
     if reused_site_project:
         proj = reused_site_project
         await bus.publish({"type": "system",
@@ -443,7 +457,8 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
                                    f"(уже опубликовал сайт), а не в отдельный: одному бизнесу — один сайт."})
     else:
         proj = projects_module.create((initiative or {}).get("title", ""),
-                                       (initiative or {}).get("rationale", ""))
+                                       (initiative or {}).get("rationale", ""),
+                                       off_brief=off_brief)
     added = 0
     skipped_roles: list[str] = []
     # Двухпроходное построение графа: LLM отдаёт зависимости через СВОИ
@@ -497,10 +512,16 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
     # (см. reused_site_project выше) — объяснение уже отправлено там, второе
     # сообщение только дублировало бы его другими словами.
     if not reused_site_project:
+        title = proj_after['title'] if proj_after else proj['title']
         await bus.publish({"type": "system",
                            "text": f"💡 Инициатива «{(initiative or {}).get('title', '')}» принята — "
-                                   f"открыт проект «{proj_after['title'] if proj_after else proj['title']}» "
-                                   f"({added} задач(и))"})
+                                   f"открыт проект «{title}» ({added} задач(и))"})
+        if off_brief:
+            await bus.publish({"type": "system",
+                               "text": f"🔧 Проект «{title}» структурно не похож на бизнес клиента "
+                                       f"(ниша: «{(initiative or {}).get('title', '')}» vs бриф) — "
+                                       f"похоже на служебный запрос, не на работу над бизнесом. "
+                                       f"Помечен отдельно, чтобы не путать с реальными инициативами."})
     if skipped_roles:
         await bus.publish({"type": "system",
                            "text": f"⚠️ {len(skipped_roles)} задач(и) инициативы пропущено "
