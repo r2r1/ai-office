@@ -85,7 +85,8 @@ def snapshot() -> dict:
 
     from src.office import (brief, objectives, plan,
                             costs, sites, leads, events, autonomy, trust, org,
-                            registry, questions, projects, metrics, gap, artifact, dna)
+                            registry, questions, projects, metrics, gap, artifact, dna,
+                            results)
 
     b = brief.get()
 
@@ -144,9 +145,23 @@ def snapshot() -> dict:
             "leads_count": leads.count(),
             # Единый реестр артефактов (issue #2, docs/architecture-improvements.md) —
             # sites/leads выше НЕ убраны (не ломаем существующих потребителей формы
-            # снапшота), artifacts_count — аддитивное поле поверх того же реестра,
-            # что теперь используют новые типы результата без правки world.py.
+            # снапшота — фронт ProjectView/SettingsView), artifacts_count — аддитивное
+            # поле поверх того же реестра, что теперь используют новые типы результата
+            # без правки world.py.
             "artifacts_count": len(artifact.all_artifacts()),
+            # Capability-agnostic срез (см. results.py): ядро мира НЕ должно знать
+            # частные имена «сайт»/«лид» — офис делает что угодно (код, расчёт,
+            # письмо, исследование), «сайт+лиды» лишь один зарегистрированный тип
+            # результата среди прочих. results_summary — то же самое, чем УЖЕ живёт
+            # results.py (реестр производителей, каждый регистрируется сам), просто
+            # спроецированное в снапшот, а не только в /api/results для фронта.
+            # ⚠️ sites/leads_count выше — совместимость с текущими потребителями
+            # (SettingsView.tsx, ProjectView.tsx), не образец для НОВОГО кода: новый
+            # код читает results_summary, не заводит третье частное поле рядом.
+            "results_summary": [
+                {"id": k["id"], "label": k["label"], "count": k["count"]}
+                for k in results.snapshot()["kinds"]
+            ],
             "spend_usd": totals.get("cost", 0.0),
             "budget_limit_usd": lim.get("total_usd", 0.0),
             "autonomy_level": autonomy.get_level(),
@@ -269,7 +284,13 @@ def context_block() -> str:
     lines = [
         f"План: {bs['plan']['done']}/{bs['plan']['total']} задач ({bs['plan']['percent']}%)",
         f"В работе: " + ("; ".join(f"{t['id']}({t['role']})" for t in bs["tasks_in_progress"]) or "—"),
-        f"Сайты: {len(bs['sites'])}, лиды: {bs['leads_count']}",
+        # НЕ "Сайты: X, лиды: Y" — это был бы намёк CEO, что цель всегда веб+лиды.
+        # results_summary — что реально произвела компания, каким бы ни было
+        # содержание работы (код, сайт, расчёт, письмо, исследование, что угодно
+        # зарегистрированное как ResultKind). Пусто, пока ничего не произведено —
+        # честное состояние, не «сайты: 0».
+        "Произведено: " + ("; ".join(f"{r['label']}: {r['count']}" for r in bs["results_summary"] if r["count"])
+                           or "пока ничего — план ещё выполняется"),
         f"Расход: ${bs['spend_usd']:.2f}" + (f" из ${bs['budget_limit_usd']:.2f}" if bs['budget_limit_usd'] else ""),
         f"Отделы открыты: {', '.join(bs['open_departments']) or 'нет'}; команда: {bs['team_size']}",
         f"Автономия: {bs['autonomy_level']}, доверие: {bs['trust_score']}",
