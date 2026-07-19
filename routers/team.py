@@ -107,13 +107,33 @@ async def get_onboarding_result():
     office/loop.py, office/onboarding_result.py). ready=False, пока BOOTSTRAP
     ещё не дошёл до этого шага — фронт показывает "офис изучает..."."""
     from src.office import onboarding_result as onboarding_result_module, initiatives as initiatives_module
+    from src.agents import architect as architect_module
     d = onboarding_result_module.get()
     if not d:
-        return {"ready": False, "analysis": [], "growth_points": [], "initiatives": []}
+        return {"ready": False, "analysis": [], "growth_points": [], "initiatives": [], "blocking": False}
     ini_ids = set(d.get("initiative_ids") or [])
     inis = [i for i in initiatives_module.pending() if i["id"] in ini_ids]
+    confirmed = d.get("status") == "confirmed"
+    # blocking=True — ТОЧНО то же условие, что держит office/loop.py перед
+    # architect.run_async (портрет §23): не «есть неподтверждённый дашборд
+    # вообще» (это правда для КАЖДОГО тенанта до первого клика, включая уже
+    # прошедших BOOTSTRAP до появления этого гейта), а «офис РЕАЛЬНО стоит и
+    # ждёт этого клика прямо сейчас». Одна точка правды, не дублирующая логика
+    # на фронте — старые тенанты с уже спроектированным ТЗ сюда не попадают.
+    blocking = onboarding_result_module.has_content(d) and not confirmed and not architect_module.load()
     return {"ready": True, "analysis": d.get("analysis", []),
-            "growth_points": d.get("growth_points", []), "initiatives": inis}
+            "growth_points": d.get("growth_points", []), "initiatives": inis,
+            "confirmed": confirmed, "blocking": blocking}
+
+@router.post("/api/onboarding/result/confirm")
+async def confirm_onboarding_result(request: Request):
+    """Владелец посмотрел первый дашборд (портрет §23) — разблокирует
+    architect/milestones/plan в loop.py, которые до этого ждут этого вызова
+    (см. onboarding_result.is_confirmed())."""
+    from src.office import onboarding_result as onboarding_result_module
+    data = await request.json()
+    d = onboarding_result_module.confirm(note=(data.get("note") or ""))
+    return {"ok": True, "confirmed": d.get("status") == "confirmed"}
 
 @router.get("/api/onboarding/suggested-integrations")
 async def get_suggested_integrations():

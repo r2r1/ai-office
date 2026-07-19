@@ -13,6 +13,14 @@ interface Props {
    * если ready успеет стать true раньше, чем клиент дойдёт до onDone (см.
    * комментарий у onboardingStarted в App.tsx). */
   onStart: () => void
+  /** Восстановление после перезагрузки/закрытой вкладки МЕЖДУ тем, как бриф
+   * стал готов, и тем, как владелец подтвердил первый дашборд (портрет §23) —
+   * без этого office/loop.py ждёт подтверждения, которое НЕЧЕМ дать: обычный
+   * гейт App.tsx (`ready === false`) уже не срабатывает, `onboardingStarted`
+   * сброшен новым mount'ом. Пропускает chat/analyzing, сразу грузит и
+   * показывает result-фазу. Реальный найденный разрыв, не гипотетический —
+   * см. docs/handoff.md, тот же класс проблемы, что и `onboardingStarted`. */
+  forceResultPhase?: boolean
 }
 
 // Отделы, которые «рождаются» на финале (визуальное строительство).
@@ -45,8 +53,13 @@ const NICHE_CHIPS = ["Мебель", "Стройка и ремонт", "Крас
 // повторно и не сканировал его второй раз сам.
 const LANDING_SCAN_KEY = "aioffice_landing_scan"
 
-export function OnboardingFlow({ onDone, onStart }: Props) {
-  const [phase, setPhase] = useState<Phase>("chat")
+export function OnboardingFlow({ onDone, onStart, forceResultPhase }: Props) {
+  // Ленивый инициализатор — читает ТЕКУЩЕЕ значение пропа РОВНО ОДИН раз при
+  // маунте компонента, не подписывается на его дальнейшие изменения. Если бы
+  // сюда попадало живое значение пропа, дашборд мог бы дёрнуть фазу назад на
+  // "result" посреди обычного чата, случайно совпади живой ready-опрос с
+  // моментом, когда пользователь уже сам продвинулся дальше по шагам.
+  const [phase, setPhase] = useState<Phase>(() => forceResultPhase ? "result" : "chat")
   const [result, setResult] = useState<{ analysis: string[]; growth_points: string[]; initiatives: any[] }>(
     { analysis: [], growth_points: [], initiatives: [] })
   const [integrations, setIntegrations] = useState<any[]>([])
@@ -61,6 +74,14 @@ export function OnboardingFlow({ onDone, onStart }: Props) {
       if (parsed?.url && parsed?.result) setLandingScan(parsed)
     } catch { /* приватный режим браузера / битый JSON — просто без подсказки */ }
   }, [])
+
+  // Восстановление: догружаем сам результат для result-фазы, в которую нас
+  // с ходу поставил ленивый initializer выше (тот знает только ЧТО показать
+  // фазу, не ЧЕМ её наполнить).
+  useEffect(() => {
+    if (phase !== "result" || result.analysis.length || result.growth_points.length || result.initiatives.length) return
+    api.onboardingResult().then(d => { if (d?.ready) setResult(d) }).catch(() => {})
+  }, []) // eslint-disable-line
 
   return (
     <div style={{
@@ -350,6 +371,18 @@ function AnalyzingScreen({ onReady }: { onReady: (r: any) => void }) {
 // ── Результат: аналитика + точки роста + инициативы на выбор ────────────────
 function ResultScreen({ result, onContinue }: { result: any; onContinue: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+
+  // Клик по «Продолжить» — единственное место, где владелец подтверждает
+  // первый дашборд (портрет §23). До этого office/loop.py держит BOOTSTRAP
+  // на паузе перед проектированием ТЗ — эндпоинт делает клик содержательным
+  // для бэкенда, а не только сменой фазы во фронтовом состоянии.
+  async function confirmAndContinue() {
+    setConfirming(true)
+    await api.confirmOnboardingResult().catch(() => null)
+    setConfirming(false)
+    onContinue()
+  }
   // Map, не Set: раньше принятая и отклонённая инициатива выглядели ОДИНАКОВО
   // (просто тускнели) — активное согласие читалось как «отключено», тот же
   // визуальный язык, что и disabled-состояние (найдено при аудите). Теперь
@@ -438,12 +471,13 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
         </div>
       )}
 
-      <motion.button onClick={onContinue} whileTap={{ scale: 0.97 }}
+      <motion.button onClick={confirmAndContinue} disabled={confirming} whileTap={{ scale: 0.97 }}
         style={{
           width: "100%", marginTop: 22, padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none",
-          cursor: "pointer", background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
+          cursor: confirming ? "default" : "pointer", background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
+          opacity: confirming ? 0.7 : 1,
         }}>
-        Продолжить →
+        {confirming ? "Подтверждаю…" : "Продолжить →"}
       </motion.button>
     </motion.div>
   )

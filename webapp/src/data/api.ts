@@ -175,7 +175,8 @@ export const api = {
   unblockTask: (id: string) => postJSON<any>(`/api/task/${id}/unblock`, {}, null),
   onboardingScan: (url: string) => postJSON<any>("/api/onboarding/scan", { url }, null),
   onboardingResult: () => getJSON<any>("/api/onboarding/result",
-    { ready: false, analysis: [], growth_points: [], initiatives: [] }),
+    { ready: false, analysis: [], growth_points: [], initiatives: [], confirmed: false, blocking: false }),
+  confirmOnboardingResult: (note = "") => postJSON<any>("/api/onboarding/result/confirm", { note }, null),
   suggestedIntegrations: () => getJSON<{ integrations: any[] }>(
     "/api/onboarding/suggested-integrations", { integrations: [] }),
   officeStatus: () => getJSON<any>("/api/office/status", { paused: false, reason: "" }),

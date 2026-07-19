@@ -50,6 +50,43 @@ def test_reset_clears():
     assert onboarding_result.exists() is False
 
 
+# ── подтверждение первого дашборда (портрет §23, implementation-prompt §3.8) ──
+
+def test_save_defaults_to_draft_not_confirmed():
+    _fresh("obr_test_draft_default")
+    onboarding_result.save(["вывод"], [], [])
+    assert onboarding_result.get()["status"] == "draft"
+    assert onboarding_result.is_confirmed() is False
+
+
+def test_confirm_sets_status_and_note():
+    _fresh("obr_test_confirm")
+    onboarding_result.save(["вывод"], ["точка роста"], [])
+    d = onboarding_result.confirm(note="выглядит верно")
+    assert d["status"] == "confirmed"
+    assert d["confirmed_note"] == "выглядит верно"
+    assert "confirmed_ts" in d
+    assert onboarding_result.is_confirmed() is True
+
+
+def test_has_content_true_when_any_field_nonempty():
+    assert onboarding_result.has_content({"analysis": ["x"], "growth_points": [], "initiative_ids": []}) is True
+    assert onboarding_result.has_content({"analysis": [], "growth_points": ["y"], "initiative_ids": []}) is True
+    assert onboarding_result.has_content({"analysis": [], "growth_points": [], "initiative_ids": ["i1"]}) is True
+
+
+def test_has_content_false_when_generation_failed_empty():
+    assert onboarding_result.has_content({"analysis": [], "growth_points": [], "initiative_ids": []}) is False
+    assert onboarding_result.has_content({}) is False
+
+
+def test_has_content_reads_current_tenant_when_no_arg():
+    _fresh("obr_test_has_content_current")
+    assert onboarding_result.has_content() is False  # ничего не сохранено
+    onboarding_result.save(["вывод"], [], [])
+    assert onboarding_result.has_content() is True
+
+
 # ── suggested_for: подбор интеграций по ключевым словам брифа ────────────────
 
 def test_suggested_for_matches_telegram_bot_keywords():

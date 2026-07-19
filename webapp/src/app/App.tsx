@@ -131,6 +131,18 @@ export default function App() {
   // OnboardingFlow из-под ног ровно в момент, когда должны были появиться
   // экраны результата (реальный баг, пойман на живом прогоне).
   const [onboardingStarted, setOnboardingStarted] = useState(false)
+  // Дашборд ждёт подтверждения владельца (портрет §23), а страница, на
+  // которой этот клик делается (result-фаза OnboardingFlow), была закрыта/
+  // перезагружена ДО клика — обычный гейт ниже (`ready === false`) уже не
+  // видит этот случай (бриф давно готов), `onboardingStarted` сброшен новым
+  // mount'ом. Без этого владелец физически не может разблокировать office/
+  // loop.py, застрявший перед architect.run_async — реальный найденный
+  // разрыв, проверяется через тот же blocking-флаг, что и backend-гейт.
+  const [dashboardBlocking, setDashboardBlocking] = useState(false)
+  useEffect(() => {
+    if (ready !== true || onboardingStarted || onboarded) return
+    api.onboardingResult().then(d => { if (d?.blocking) setDashboardBlocking(true) }).catch(() => {})
+  }, [ready, onboardingStarted, onboarded])
   // Глубокая ссылка «открыть конкретный проект» — например, после принятия
   // инициативы (Сводка), чтобы не заставлять искать его самому в списке Работы.
   const [focusProjectId, setFocusProjectId] = useState<string | undefined>()
@@ -223,10 +235,10 @@ export default function App() {
   // Онбординг: офис ещё не получил бриф → ведём клиента через CEO-интервью.
   // onboardingStarted держит поток на экране, даже когда ready успел стать
   // true раньше, чем клиент дошёл до "Готово" (см. комментарий у объявления).
-  if ((ready === false || onboardingStarted) && !onboarded) {
+  if ((ready === false || onboardingStarted || dashboardBlocking) && !onboarded) {
     return (
       <Suspense fallback={null}>
-        <OnboardingFlow onStart={() => setOnboardingStarted(true)}
+        <OnboardingFlow onStart={() => setOnboardingStarted(true)} forceResultPhase={dashboardBlocking}
           onDone={() => { markReady(); setOnboarded(true); setView("office") }} />
       </Suspense>
     )
