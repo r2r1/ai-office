@@ -231,6 +231,17 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
             }}>OAuth 2.0</span>}
           </div>
         </div>
+        {/* Цена ДО подключения — первоклассный элемент, не мелкий шрифт (портрет
+            §24). Пусто в манифесте = бесплатно (сегодня весь каталог бесплатен —
+            честный дефолт, не заглушка под будущие платные провайдеры). */}
+        <span style={{
+          fontSize: 9.5, padding: "2px 7px", borderRadius: 5, flexShrink: 0, fontWeight: 600,
+          background: integ.price_hint ? "rgba(255,172,46,0.12)" : "rgba(160,224,171,0.10)",
+          color: integ.price_hint ? "#ffac2e" : "#a0e0ab",
+          border: `1px solid ${integ.price_hint ? "rgba(255,172,46,0.25)" : "rgba(160,224,171,0.22)"}`,
+        }}>
+          {integ.price_hint || "Бесплатно"}
+        </span>
       </div>
 
       {/* Описание */}
@@ -367,11 +378,16 @@ export function ConnectionsBody() {
   const [connections, setConnections]   = useState<any[]>([])
   const [integrations, setIntegrations] = useState<any[]>([])
   const [diSources, setDiSources]       = useState<any[]>([])
+  const [recommended, setRecommended]   = useState<any[]>([])
 
   const refresh = () => {
     api.connections().then(d => setConnections(d.connections || []))
     api.integrations().then(d => setIntegrations(d.integrations || []))
     api.digitalInfrastructure().then(d => setDiSources(d.sources || []))
+    // Тот же источник, что уже показывает карточку-предложение в онбординге
+    // сразу после брифа (OnboardingFlow.tsx IntegrationsScreen) — «второй шанс»
+    // найти предложение здесь, а не отдельная очередь рекомендаций (портрет §24).
+    api.suggestedIntegrations().then(d => setRecommended(d.integrations || []))
   }
 
   const tick = useThrottled(state.feed.length, 2500)
@@ -396,8 +412,27 @@ export function ConnectionsBody() {
     cat, items: integrations.filter((integ: any) => (integ.category || "other") === cat),
   })).filter(g => g.items.length > 0)
 
+  const recommendedUnconnected = recommended.filter((integ: any) => !integ.connected)
+
   return (
       <ViewBody>
+        {/* Рекомендации — способности, релевантные брифу клиента, ещё не
+            подключённые. Второй шанс найти предложение, если пропустили карточку
+            в онбординге (портрет §24) — тот же api.suggestedIntegrations(), не
+            новая очередь предложений. */}
+        {recommendedUnconnected.length > 0 && (
+          <>
+            <SectionLabel style={{ marginBottom: 14 }}>
+              Рекомендации для вашей компании
+            </SectionLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10, marginBottom: 24 }}>
+              {recommendedUnconnected.map((integ: any, i: number) => (
+                <IntegCard key={i} integ={integ} onRefresh={refresh} />
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Digital Infrastructure — что офис видит о компании за пределами
             своих интеграций (CRM-виджеты/аналитика/соцсети на сайте клиента) */}
         {diByCategory.length > 0 && (

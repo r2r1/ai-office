@@ -136,6 +136,10 @@ INTEGRATION = Integration(
     how_to="Нажми «Подключить Google» — это даёт доступ сразу к Sheets, Gmail и Calendar.",
     cred_fields=[],      # OAuth — поля вводить не нужно
     oauth_url="/auth/google/start",
+    # read_sheet реально читает содержимое таблицы клиента — манифест
+    # провайдера (§5.3): могла бы поставлять эти Facts в World Model, если
+    # обработчик прогнать через knowledge.remember(source="scanned").
+    produces_facts=["данные из таблиц клиента (учёт/выгрузки)"],
     actions={
         "list_sheets": Action(
             name="list_sheets",

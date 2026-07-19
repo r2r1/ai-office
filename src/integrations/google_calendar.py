@@ -256,6 +256,10 @@ INTEGRATION = Integration(
     how_to="Нажми «Подключить Google» — это даёт доступ сразу к Calendar, Gmail и Sheets.",
     cred_fields=[],
     oauth_url="/auth/google/start",
+    # list_events/free_busy реально читают занятость — манифест провайдера
+    # (§5.3): могла бы поставлять эти Facts в World Model, если обработчик
+    # прогнать через knowledge.remember(source="scanned").
+    produces_facts=["занятость по календарю", "предстоящие встречи"],
     actions={
         "list_calendars": Action(
             name="list_calendars",

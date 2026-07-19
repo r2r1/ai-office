@@ -194,6 +194,10 @@ INTEGRATION = Integration(
     how_to="Нажми «Подключить Google» — это даёт доступ сразу к Gmail, Sheets и Calendar.",
     cred_fields=[],      # OAuth — поля вводить не нужно
     oauth_url="/auth/google/start",
+    # list_emails/read_email реально читают содержимое переписки — манифест
+    # провайдера (§5.3): могла бы поставлять эти Facts в World Model, если
+    # обработчик прогнать через knowledge.remember(source="scanned").
+    produces_facts=["переписка с клиентами (входящие письма)"],
     actions={
         "get_profile": Action(
             name="get_profile",
