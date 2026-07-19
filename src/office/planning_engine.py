@@ -555,33 +555,43 @@ async def orchestrate(strategy: str, publish, tech_design: str = "", cycle: int 
     # ---- Блок 4: Инициативы из opportunity-событий ----
     # CEO превращает наблюдённые возможности отделов в конкретные предложения
     # с ROI-оценкой. Пользователь видит карточку и принимает или отклоняет.
-    try:
-        opp_events = [e for e in events_mod.pending() if e.get("kind") == "opportunity"]
-        for ev in opp_events[:2]:  # макс 2 инициативы за цикл
-            summary = ev.get("summary", "")
-            if not summary or initiatives.has_pending_similar(summary):
+    #
+    # Гейт "boost" (портрет §11, philosophy.py._DEFAULT["boost"]): именно ЭТО —
+    # автономный поиск роста офисом, не инициативы вообще. При boost=False
+    # («поддержание») блок пропускается целиком, opportunity-события остаются
+    # НЕобработанными (не mark_processed) — если владелец включит boost обратно
+    # или сам попросит разобраться, накопленные возможности не потеряны. Process-
+    # triggered и owner-triggered инициативы этим гейтом НЕ затрагиваются —
+    # они не проходят через этот блок вообще.
+    from src.office import philosophy as philosophy_module
+    if philosophy_module.load().get("boost", True):
+        try:
+            opp_events = [e for e in events_mod.pending() if e.get("kind") == "opportunity"]
+            for ev in opp_events[:2]:  # макс 2 инициативы за цикл
+                summary = ev.get("summary", "")
+                if not summary or initiatives.has_pending_similar(summary):
+                    events_mod.mark_processed([ev["id"]])
+                    continue
+                ini = await orchestrator.generate_initiative(goal, strategy, summary, publish)
+                if ini and ini.get("title"):
+                    iid = initiatives.add(
+                        title=ini["title"],
+                        rationale=ini.get("rationale", summary),
+                        expected_outcome=ini.get("expected_outcome", ""),
+                        estimated_effort=ini.get("estimated_effort", "1-2 цикла"),
+                        tasks=ini.get("tasks", []),
+                        source="event",
+                    )
+                    await publish({"type": "speech", "agent_id": "orchestrator_1",
+                                   "text": f"💡 Возможная инициатива: {ini['title']} — запускаю анализ, прежде чем спросить"})
+                    # Глубокое исследование ДО показа решения пользователю (не
+                    # заголовок «на глазок» — предприниматель решает по анализу).
+                    from src.office import initiative_research
+                    await initiative_research.run(iid, ini["title"], ini.get("rationale", summary), publish)
                 events_mod.mark_processed([ev["id"]])
-                continue
-            ini = await orchestrator.generate_initiative(goal, strategy, summary, publish)
-            if ini and ini.get("title"):
-                iid = initiatives.add(
-                    title=ini["title"],
-                    rationale=ini.get("rationale", summary),
-                    expected_outcome=ini.get("expected_outcome", ""),
-                    estimated_effort=ini.get("estimated_effort", "1-2 цикла"),
-                    tasks=ini.get("tasks", []),
-                    source="event",
-                )
-                await publish({"type": "speech", "agent_id": "orchestrator_1",
-                               "text": f"💡 Возможная инициатива: {ini['title']} — запускаю анализ, прежде чем спросить"})
-                # Глубокое исследование ДО показа решения пользователю (не
-                # заголовок «на глазок» — предприниматель решает по анализу).
-                from src.office import initiative_research
-                await initiative_research.run(iid, ini["title"], ini.get("rationale", summary), publish)
-            events_mod.mark_processed([ev["id"]])
-    except Exception as e:
-        await publish({"type": "error", "agent_id": "orchestrator_1",
-                       "text": f"Инициатива не сгенерирована: {str(e)[:100]}"})
+        except Exception as e:
+            await publish({"type": "error", "agent_id": "orchestrator_1",
+                           "text": f"Инициатива не сгенерирована: {str(e)[:100]}"})
 
     # ---- Детерминированный автостарт ----
     # Слабые модели порой возвращают wait и офис висит без единого отдела (как в логе).

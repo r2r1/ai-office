@@ -291,6 +291,23 @@ function ProfileTab() {
           onChange={v => savePhil({ growth_style: v })} />
         <SelectField label="Аппетит к риску" value={phil.risk_appetite} options={RISK}
           onChange={v => savePhil({ risk_appetite: v })} />
+        {/* НЕ то же самое, что "Стиль роста" выше (портрет §11): стиль — КАК расти,
+            буст — растит ли офис сам ВООБЩЕ без запроса. Выключение не убирает
+            инициативы совсем — процессы и ваши прямые просьбы по-прежнему их рождают,
+            выключается только самостоятельный поиск офисом новых возможностей. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, color: "var(--text)" }}>Буст — офис сам ищет точки роста</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+              Выключите для режима «только поддерживать»: текущие процессы продолжают идти,
+              но офис не хантит новые возможности сам — только по вашей просьбе
+            </div>
+          </div>
+          <Button variant="toggle" active={phil.boost !== false}
+            onClick={() => savePhil({ boost: !(phil.boost !== false) })}>
+            {phil.boost !== false ? "Включён" : "Выключен"}
+          </Button>
+        </div>
       </Card>
 
       <SectionLabel>Конституция — правила, которые офис не нарушит</SectionLabel>
