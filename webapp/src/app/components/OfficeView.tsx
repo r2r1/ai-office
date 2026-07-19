@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { useOffice } from "../../data/OfficeProvider"
+import { useOffice, useOfficeSelector } from "../../data/OfficeProvider"
+import { useThrottled } from "../hooks"
+import { api } from "../../data/api"
 import type { Worker } from "../types"
 
 const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
@@ -10,13 +12,24 @@ const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 // место интерфейса, нарушавшее правило проекта "язык продукта — русский"
 // (найдено при живом дизайн-аудите: смешение RU/EN резало глаз именно здесь,
 // на самом заметном экране продукта).
+//
+// `deptId` (портрет §10, «офис физически растёт»): комната, привязанная к
+// отделу (office_stage.rooms из /api/world — то же самое, что org.open_
+// departments()), показывается ТОЛЬКО когда отдел реально открыт — открытие
+// отдела становится видимым событием, не тихой записью в БД. Комнаты без
+// deptId (штаб — research/strategy/hr/mgmt/meeting) не гейтятся: это
+// сервисные роли (CEO/researcher/strategist/architect/hr), не члены отдела
+// (org.py: "Штаб стратегии... подчиняется CEO напрямую — это НЕ отдел").
+// ⚠️ Известный пробел этой итерации: у marketing/finance пока нет своей
+// геометрии комнаты в этом плане — расширение сетки оставлено отдельной,
+// более крупной задачей (визуальный редизайн сцены), не подмешано сюда.
 const ROOMS = [
   { id: "research", label: "ИССЛЕДОВАНИЯ", x: 4, y: 7, w: 30, h: 44 },
   { id: "strategy", label: "СТРАТЕГИЯ", x: 37, y: 7, w: 22, h: 44 },
   { id: "hr", label: "HR", x: 62, y: 7, w: 17, h: 44 },
   { id: "mgmt", label: "УПРАВЛЕНИЕ", x: 82, y: 7, w: 14, h: 44 },
-  { id: "sales", label: "ПРОДАЖИ", x: 4, y: 58, w: 22, h: 36 },
-  { id: "dev", label: "РАЗРАБОТКА", x: 29, y: 58, w: 32, h: 36 },
+  { id: "sales", label: "ПРОДАЖИ", x: 4, y: 58, w: 22, h: 36, deptId: "sales" },
+  { id: "dev", label: "РАЗРАБОТКА", x: 29, y: 58, w: 32, h: 36, deptId: "tech" },
   { id: "meeting", label: "ПЕРЕГОВОРНАЯ", x: 64, y: 58, w: 32, h: 36 },
 ]
 
@@ -71,6 +84,29 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
     return () => clearInterval(t)
   }, [agents.length])
 
+  // Рост офиса (портрет §10) — те же отделы, что уже двигают сюжет офиса,
+  // просто спроецированные в видимую сцену. Троттлинг по feed.length —
+  // тот же приём, что уже применяют RightPanel/ConnectionsView/DashboardView
+  // (шторм рефетчей на каждое SSE-событие — известный пофикшенный баг).
+  const feedLength = useOfficeSelector(s => s.feed.length)
+  const tick = useThrottled(feedLength, 2500)
+  const [openRooms, setOpenRooms] = useState<string[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api.world().then(w => {
+      if (cancelled) return
+      const rooms = w?.business_state?.office_stage?.rooms
+      if (Array.isArray(rooms)) setOpenRooms(rooms)
+    }).catch(() => { /* мир недоступен — оставляем прошлое состояние комнат */ })
+    return () => { cancelled = true }
+  }, [tick])
+  // До первого успешного ответа /api/world комнаты отделов скрыты по умолчанию
+  // (openRooms === null) — честнее показать только штаб, чем на секунду
+  // мигнуть комнатами, которые ещё не подтверждены как открытые.
+  const rooms = useMemo(
+    () => ROOMS.filter(r => !r.deptId || (openRooms ?? []).includes(r.deptId)),
+    [openRooms])
+
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
       {/* перспективный пол-сетка для глубины (изо-намёк) */}
@@ -83,7 +119,7 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
       }} />
 
       {/* комнаты */}
-      {ROOMS.map(r => (
+      {rooms.map(r => (
         <div key={r.id} style={{
           position: "absolute", left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%`,
           border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)",

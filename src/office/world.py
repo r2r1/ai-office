@@ -86,7 +86,7 @@ def snapshot() -> dict:
     from src.office import (brief, objectives, plan,
                             costs, sites, leads, events, autonomy, trust, org,
                             registry, questions, projects, metrics, gap, artifact, dna,
-                            results)
+                            results, office_stage)
 
     b = brief.get()
 
@@ -162,6 +162,10 @@ def snapshot() -> dict:
                 {"id": k["id"], "label": k["label"], "count": k["count"]}
                 for k in results.snapshot()["kinds"]
             ],
+            # Игровой слой (портрет §10): визуальная стадия офиса — чистая проекция
+            # чисел ниже (trust/autonomy/team/отделы), не новое состояние. office_stage
+            # сам ничего не хранит — тот же CQRS-закон, что у остальных полей снапшота.
+            "office_stage": office_stage.stage(),
             "spend_usd": totals.get("cost", 0.0),
             "budget_limit_usd": lim.get("total_usd", 0.0),
             "autonomy_level": autonomy.get_level(),
