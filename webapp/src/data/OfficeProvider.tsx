@@ -8,7 +8,7 @@ import type { Worker, WorkerStatus } from "../app/types"
 // на переходный период (в т.ч. для уже сохранённой на диске истории старых прогонов).
 function wid(o: any): string { return o?.worker_id ?? o?.agent_id ?? "" }
 
-export interface FeedItem { id: number; icon: string; who: string; text: string; kind: "" | "system" | "done" | "error" }
+export interface FeedItem { id: number; icon: string; who: string; text: string; kind: "" | "system" | "done" | "error" | "mistake" }
 export interface ProgressState { percent: number; note: string; stages: any[]; current: string }
 export interface PlanState { generated: boolean; tasks: any[]; progress: { done: number; total: number } }
 // Сводка личного чата с агентом (из /api/threads) — для бейджей непрочитанного.
@@ -153,6 +153,11 @@ function reducer(state: OfficeState, action: Action): OfficeState {
           return { ...state, feed: hist ? state.feed : feed(state, "🔌", "", e.text || "Внешний сервис", "system") }
         case "connection_added":
           return { ...state, feed: hist ? state.feed : feed(state, "🔌", "", `Доступ «${e.connection?.name || ""}» сохранён`, "system") }
+        case "mistake_acknowledged":
+          // Голос офиса (портрет §5b/§13): явное признание ошибки — отдельный
+          // kind, не смешивать с обычным "error", чтобы UI мог со временем
+          // отличить визуально «офис сам сказал» от «упало само».
+          return { ...state, feed: hist ? state.feed : feed(state, "⚠️", "", e.text || "", "mistake") }
         default:
           return state
       }

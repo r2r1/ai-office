@@ -86,12 +86,15 @@ def build(agent_id: str, role: str,
                         f"относится. Поставь задачу через delegate_task нужной роли этого отдела "
                         f"или попроси лидера («{org_module.lead_title(integ.department)}») выполнить это.")
 
+        # act_type нужен и гейту ниже, и записи исхода после вызова (risk.py) —
+        # считаем один раз для обеих целей.
+        from src.office import autonomy
+        act_type = autonomy._action_type_for(action_name)
+
         # Гейт автономии для ВНЕШНЕ-видимых действий: на уровнях ниже требуемого офис
         # не выполняет действие сам, а просит OK клиента. website публикует через свой
         # гейт (loop._publish_site_auto), поэтому его здесь не дублируем.
         if integ.name != "website":
-            from src.office import autonomy
-            act_type = autonomy._action_type_for(action_name)
             if autonomy.needs_approval(act_type):
                 return (f"Действие «{integ.title}.{action_name}» затрагивает внешний мир, а уровень "
                         f"автономии «{autonomy.get_level()}» (только рекомендации) не позволяет офису "
@@ -119,8 +122,25 @@ def build(agent_id: str, role: str,
         except Exception as e:
             err = str(e)[:200]
             await _report_connection_error(integ.title, err)
+            # Офис учится риску сам, постфактум (портрет §5a) — реальный провал
+            # эскалирует оценку риска этого типа действия для БУДУЩИХ вызовов.
+            from src.office import risk
+            risk.record_outcome(act_type, ok=False, note=f"{integ.title}.{action_name}: {err}")
+            if risk.severe_failure(act_type):
+                # Портрет §13: серьёзная видимая ошибка (высокая видимость/
+                # необратимость + реальный провал) откатывает уровень автономии
+                # автоматически, симметрично autonomy.upgrade() — не только
+                # тихий декремент внутреннего trust.py. Плюс явное признание
+                # (§5b) — отдельное, обязательное вместе с откатом, не вместо.
+                new_level = autonomy.downgrade(reason=f"{integ.title}.{action_name} failed: {err}")
+                await publish({"type": "mistake_acknowledged", "agent_id": agent_id,
+                               "text": f"⚠️ Понял, ошибся здесь — {integ.title}.{action_name} "
+                                       f"не сработало ({err[:100]}). Уровень автономии откатил "
+                                       f"до «{autonomy.LEVEL_INFO[new_level]['name']}», пока не разберусь."})
             return f"Ошибка при вызове {integ.name}.{action_name}: {err}"
 
+        from src.office import risk
+        risk.record_outcome(act_type, ok=True)
         await publish_and_log({"type": "speech", "agent_id": agent_id,
                                "text": f"✅ {integ.title}.{action_name}: {result[:80]}"})
         await publish({"type": "integration_used", "agent_id": agent_id,

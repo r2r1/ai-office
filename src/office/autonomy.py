@@ -82,12 +82,24 @@ def needs_approval(action_type: str) -> bool:
     Базовое решение — заработанный уровень автономии (+ «одобрено один раз»). Поверх —
     ЖЁСТКИЙ оверрайд Конституции: если компания явно задала правило для действия, оно
     имеет приоритет (True → всегда спрашивать, False → всегда разрешать).
+
+    Между ними — обучаемый риск (см. risk.py, портрет §5a/§16): если реальные исходы
+    подняли риск этого типа действия выше стартовой гипотезы, требуем подтверждение
+    ДАЖЕ на высоком уровне доверия и даже если разово уже одобряли — статическая
+    таблица `_ACTION_MIN_LEVEL` ниже НЕ трогается, это аддитивный слой поверх неё,
+    не замена (сначала должна доказать себя, прежде чем на неё полагаться полностью).
     """
     try:
         from src.office import constitution
         ov = constitution.override_for(action_type)
         if ov is not None:
             return ov
+    except Exception:
+        pass
+    try:
+        from src.office import risk
+        if risk.escalated(action_type):
+            return True
     except Exception:
         pass
     return not can_auto(action_type) and not was_approved_once(action_type)
@@ -171,6 +183,24 @@ def upgrade() -> str:
     if nl:
         set_level(nl)
         return nl
+    return get_level()
+
+
+def prev_level() -> str:
+    """Следующий уровень автономии вниз, или '' если уже минимум (scout)."""
+    i = _idx(get_level())
+    return LEVELS[i - 1] if i > 0 else ""
+
+
+def downgrade(reason: str = "") -> str:
+    """Откатить автономию на один уровень — симметрично upgrade(), портрет §13:
+    серьёзная видимая ошибка (не просто внутренний trust.py-декремент) откатывает
+    заработанный уровень доверия автоматически, не дожидаясь, пока владелец
+    заметит и понизит сам. `reason` — для лога/уведомления, не хранится здесь."""
+    pl = prev_level()
+    if pl:
+        set_level(pl)
+        return pl
     return get_level()
 
 

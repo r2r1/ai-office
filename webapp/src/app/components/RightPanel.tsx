@@ -23,6 +23,9 @@ const KIND_COLOR: Record<string, string> = {
   hired:    "#a0c0ff",
   speech:   "var(--text-dim)",
   system:   "var(--muted)",
+  // Голос офиса — явное признание ошибки (портрет §5b/§13): янтарный, не
+  // красный — это офис САМ сказал, отличается от «упало и молчит» (error).
+  mistake:  "#ffac2e",
 }
 
 interface RightPanelProps {
