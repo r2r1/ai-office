@@ -78,3 +78,31 @@ def init_db() -> None:
         )
         """
     )
+    # Multi-user доступ (docs/product-portrait-2026-07-19.md §12): несколько
+    # людей с доступом к одному тенанту, разные права, выдаёт ТОЛЬКО основатель
+    # (owner_user_id воркспейса — никогда сам участник). Три раздельно
+    # выдаваемых права, не единый пакет «роль»:
+    #   visibility_domains  — JSON-список доменов, чьи Facts/метрики видны
+    #                         ("*" = весь CWM целиком, как у основателя)
+    #   decide_domains      — JSON-список доменов, где у этого человека финальное
+    #                         слово (тот же ритуал §3/§5a, что у основателя, но
+    #                         только в своём домене) — БЕЗ права здесь может
+    #                         только обсуждать/советовать
+    #   can_direct_agents   — 0/1: может ли давать агентам поручения напрямую
+    #                         (не только смотреть дашборды/факты)
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_members (
+            workspace_id      TEXT NOT NULL,
+            user_id           TEXT NOT NULL,
+            granted_by        TEXT NOT NULL,
+            visibility_domains TEXT DEFAULT '[]',
+            decide_domains    TEXT DEFAULT '[]',
+            can_direct_agents INTEGER DEFAULT 0,
+            created_at        REAL,
+            PRIMARY KEY (workspace_id, user_id),
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """
+    )

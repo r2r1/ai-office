@@ -16,6 +16,10 @@ from src.office import quality_modes as quality_modes_module
 from src.office import roles as roles_module
 from src.office import skills as skills_module
 from src.office import trust as trust_module
+from src.saas import context as saas_context
+from src.saas import members as members_module
+from src.saas import store as saas_store
+from routers.shared import current_user
 
 router = APIRouter()
 
@@ -182,3 +186,71 @@ async def post_limits(request: Request):
         daily_usd=data.get("daily_usd", 0),
     )
     return {"ok": True, **costs_module.limit_payload()}
+
+
+# ---- Multi-user доступ (портрет §12) — выдаёт/отзывает ТОЛЬКО основатель ----
+
+@router.get("/api/members")
+async def get_members(request: Request):
+    """Список людей с доступом к тенанту + сам основатель первым. Видно
+    любому авторизованному в тенанте (не только основателю) — прозрачность
+    состава команды не секрет, только ПРАВА менять её — секрет основателя."""
+    tid = saas_context.get_tenant()
+    # По id ТЕКУЩЕГО тенанта, не по пользователю — участник может владеть
+    # СВОИМ отдельным воркспейсом где-то ещё; нам нужен основатель именно
+    # ТЕКУЩЕГО tid, не «какой-то воркспейс, к которому причастен этот человек».
+    ws = saas_store.db.query_one("SELECT * FROM workspaces WHERE id = ?", (tid,))
+    owner_id = ws["owner_user_id"] if ws else None
+    owner = saas_store.public_user(saas_store.get_user(owner_id)) if owner_id else None
+    members = []
+    for r in members_module.members_of(tid):
+        u = saas_store.get_user(r["user_id"])
+        if u:
+            members.append({**r, "user": saas_store.public_user(u)})
+    return {"founder": owner, "members": members}
+
+
+@router.post("/api/members/grant")
+async def post_members_grant(request: Request):
+    """Выдать/обновить права участнику. 403, если вызывающий не основатель —
+    enforced и здесь (403 для API-ответа), и внутри members.grant (NotFounder,
+    defense in depth — см. докстринг saas/members.py)."""
+    me = current_user(request)
+    if not me:
+        return JSONResponse({"error": "Требуется авторизация"}, status_code=401)
+    tid = saas_context.get_tenant()
+    data = await request.json()
+    target_email = (data.get("email") or "").strip().lower()
+    if not target_email:
+        return JSONResponse({"error": "Укажите email участника"}, status_code=400)
+    target = saas_store.db.query_one("SELECT * FROM users WHERE email = ?", (target_email,))
+    if not target:
+        return JSONResponse({"error": "Пользователь с таким email ещё не входил в сервис"},
+                            status_code=404)
+    try:
+        rights = members_module.grant(
+            tid, target["id"], me["id"],
+            visibility_domains=data.get("visibility_domains") or [],
+            decide_domains=data.get("decide_domains") or [],
+            can_direct_agents=bool(data.get("can_direct_agents")),
+        )
+    except members_module.NotFounder:
+        return JSONResponse({"error": "Права выдаёт только основатель"}, status_code=403)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"ok": True, "rights": rights}
+
+
+@router.post("/api/members/revoke")
+async def post_members_revoke(request: Request):
+    me = current_user(request)
+    if not me:
+        return JSONResponse({"error": "Требуется авторизация"}, status_code=401)
+    tid = saas_context.get_tenant()
+    data = await request.json()
+    target_user_id = (data.get("user_id") or "").strip()
+    try:
+        ok = members_module.revoke(tid, target_user_id, me["id"])
+    except members_module.NotFounder:
+        return JSONResponse({"error": "Права отзывает только основатель"}, status_code=403)
+    return {"ok": ok}
