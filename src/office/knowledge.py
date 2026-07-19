@@ -29,6 +29,24 @@ _FILE = "knowledge.json"
 _MAX_FACTS = 60          # потолок хранилища department-знаний
 _DEFAULT_LIMIT = 6       # сколько фактов класть в контекст задачи
 
+# ── Провенанс знания (spec docs/ai-office-canonical-spec.md §4.2/§5.2) ──
+# Каждый факт несёт источник происхождения и вытекающий из него вес доверия.
+# Закон: проверенное офисом весит больше самоотчёта; слова клиента — сигнал
+# о мире (0.45), но НЕ ограничение поведения (ограничения живут в memory.py
+# и всегда закон). Повторение факта не повышает confidence — только верификация.
+SOURCES: dict[str, float] = {
+    "measured":   0.9,   # измерил сам офис (лиды с нашего лендинга, скрипт)
+    "outcome":    0.85,  # подтверждённый исход решения/эксперимента
+    "scanned":    0.7,   # реальные данные автоскана/интеграции, не пересказ
+    "researched": 0.5,   # внешний веб-ресёрч
+    "owner_said": 0.45,  # клиент сказал сам (не проверено офисом)
+    "inferred":   0.3,   # вывод/гипотеза модели без внешнего источника
+}
+_DEFAULT_SOURCE = "inferred"
+# Ниже этого порога факт подписывается в промпте как непроверенный — решение
+# на оценке не имеет права выглядеть так же уверенно, как на факте (§9 принципов).
+_UNVERIFIED_BELOW = 0.5
+
 # Стоп-слова: не несут смысла для подбора релевантности (рус + англ).
 _STOP = {
     "и", "в", "во", "на", "с", "со", "по", "для", "что", "как", "это", "от",
@@ -46,18 +64,26 @@ def _store() -> dict:
     return ctx.read_json(_FILE, {"facts": []})
 
 
-def remember(text: str, department: str = "", tags: str = "") -> None:
-    """Записать факт department-знания (с дедупликацией по тексту)."""
+def remember(text: str, department: str = "", tags: str = "",
+             source: str = _DEFAULT_SOURCE) -> None:
+    """Записать факт department-знания (с дедупликацией по тексту).
+
+    `source` — происхождение знания (ключ SOURCES); из него выводится
+    confidence. Дефолт inferred — самый низкий вес: анонимное знание не
+    имеет права выглядеть проверенным."""
     text = (text or "").strip()
     if not text:
         return
+    if source not in SOURCES:
+        source = _DEFAULT_SOURCE
     data = _store()
     facts = data.setdefault("facts", [])
     norm = text.lower()
     if any((f.get("text") or "").lower() == norm for f in facts):
         return
     fact = {"text": text[:280], "department": department or "",
-            "tags": tags or "", "ts": time.time()}
+            "tags": tags or "", "ts": time.time(),
+            "source": source, "confidence": SOURCES[source]}
     # Эмбеддинг считается ОДИН раз при записи (не на каждый retrieve) — дальше
     # используется как вторичный сигнал ранжирования поверх TF-скора (§8/§19 п.11).
     # embed() сам деградирует к None при любой ошибке (сеть/баланс/провайдер) —
@@ -132,6 +158,12 @@ def _global_facts() -> list[dict]:
         if val:
             out.append({"text": f"Ограничение/пожелание клиента: {val}",
                         "base": 0.55, "src": "global"})
+    # Факты автоскана сайта (Instant Learning) — производные от источника истины
+    # (brief["scan"]), НЕ дублируются в хранилище: рассинхрон невозможен по
+    # построению. source=scanned — офис ПРОВЕРИЛ сам, вес выше слов клиента.
+    # Раньше скан показывался только в онбординге и understanding.py, а до
+    # retrieval-слоя (т.е. до промптов работников) не доходил вовсе.
+    out.extend(_scan_facts(b))
     # Ответы пользователя — самый приоритетный слой (указания клиента главнее всего).
     for e in memory.all_entries():
         ans = (e.get("answer") or "").strip()
@@ -143,6 +175,31 @@ def _global_facts() -> list[dict]:
     return out
 
 
+def _scan_facts(b: dict) -> list[dict]:
+    """Скан сайта клиента → компактные факты для retrieval (source=scanned)."""
+    scan = b.get("scan") or {}
+    det = scan.get("detected") or {}
+    if not scan.get("ok") or not det:
+        return []
+    conf = SOURCES["scanned"]
+    facts: list[str] = []
+    if det.get("cms"):
+        facts.append(f"Сайт клиента работает на {det['cms']}")
+    analytics_on = [k for k, v in (det.get("analytics") or {}).items() if v]
+    facts.append("Аналитика на сайте клиента: " + (", ".join(analytics_on) if analytics_on
+                 else "НЕ обнаружена — измерять эффект рекламы нечем"))
+    crm_on = [k for k, v in (det.get("crm_widgets") or {}).items() if v]
+    if crm_on:
+        facts.append("CRM-виджеты на сайте клиента: " + ", ".join(crm_on))
+    socials = det.get("socials") or {}
+    if socials:
+        facts.append("Соцсети клиента: " + ", ".join(f"{k} ({v})" for k, v in socials.items()))
+    if det.get("has_form") is False and det.get("has_cta") is False:
+        facts.append("На сайте клиента нет ни формы заявки, ни CTA — лидов сайт не собирает")
+    return [{"text": f"[скан сайта] {t}", "base": 0.4, "src": "scan", "confidence": conf}
+            for t in facts]
+
+
 def _department_facts(department: str) -> list[dict]:
     """DEPARTMENT-слой: знания своего отдела важнее, чужого — фоном."""
     out: list[dict] = []
@@ -150,7 +207,9 @@ def _department_facts(department: str) -> list[dict]:
         same = department and f.get("department") == department
         out.append({"text": f.get("text", ""),
                     "base": 0.18 if same else 0.06, "src": "dept",
-                    "emb": f.get("emb")})
+                    "emb": f.get("emb"),
+                    "source": f.get("source", _DEFAULT_SOURCE),
+                    "confidence": f.get("confidence", SOURCES[_DEFAULT_SOURCE])})
     return out
 
 
@@ -218,7 +277,11 @@ def retrieve(task: str, department: str = "", limit: int = _DEFAULT_LIMIT) -> li
             return 0.0
         return embeddings_mod.cosine(task_emb, f["emb"])
     def _relevance(f: dict) -> float:
-        return _tf(f) + _SEM_WEIGHT * _sem(f) + 0.001 * f.get("base", 0.0)
+        # Провенанс — слабый вторичный сигнал: при равной релевантности
+        # проверенный факт (scanned/measured) обгоняет гипотезу (inferred),
+        # но confidence сам по себе факт в выдачу не протаскивает.
+        return (_tf(f) + _SEM_WEIGHT * _sem(f) + 0.001 * f.get("base", 0.0)
+                + 0.05 * f.get("confidence", 0.0))
     for f in sorted(rest, key=_relevance, reverse=True):
         if len(out) >= limit:
             break
@@ -230,7 +293,13 @@ def retrieve(task: str, department: str = "", limit: int = _DEFAULT_LIMIT) -> li
         if key in seen:
             continue
         seen.add(key)
-        out.append(f["text"])
+        # Непроверенное знание подписывается явно — агент видит, чему можно
+        # доверять, а что стоит перепроверить, прежде чем строить на нём работу.
+        txt = f["text"]
+        if f.get("confidence", 1.0) < _UNVERIFIED_BELOW and f.get("src") == "dept":
+            txt += " (непроверено — источник: " + \
+                ("слова клиента" if f.get("source") == "owner_said" else "гипотеза офиса") + ")"
+        out.append(txt)
     return out
 
 
@@ -252,7 +321,9 @@ def all_facts() -> list[dict]:
             for f in _global_facts()]
     store = _store()
     dept = [{"text": f.get("text", ""), "layer": "department",
-             "department": f.get("department", ""), "ts": f.get("ts", 0)}
+             "department": f.get("department", ""), "ts": f.get("ts", 0),
+             "source": f.get("source", _DEFAULT_SOURCE),
+             "confidence": f.get("confidence", SOURCES[_DEFAULT_SOURCE])}
             for f in store.get("facts", [])]
     results = [{"text": r.get("text", ""), "layer": "result",
                 "department": r.get("department", ""), "ts": r.get("ts", 0)}

@@ -1830,3 +1830,34 @@ cd webapp && npm run build                       # сборка фронта в 
 Проверка перед коммитом: `python -m py_compile $(git ls-files '*.py')`,
 `cd webapp && npx tsc --noEmit`, `python tests/run_all.py`.
 Локально порт 8000 может быть занят фантомным сокетом — бери другой (напр. 8123).
+
+---
+
+## 2026-07-19 — Каноническая спецификация + провенанс знаний (Fact-контракт v1)
+
+**Спецификация.** `docs/ai-office-canonical-spec.md` — 17-частный RFC/Architecture
+Handbook (vision, 30 принципов философии, Company World Model v2 c Fact-контрактом,
+Understanding/Autonomous/Work Engine, память, UX/UI, backend/frontend, платформа,
+open source, roadmap V1→V3, критический аудит). Создан после полного исследования
+кода и рынка (22 продукта). Ключевой вывод аудита: главный разрыв — не исполнение,
+а ОБУЧЕНИЕ (Outcome Learning, петля «Measure через N дней» — сердце V2).
+
+**Итерация 1 реализации (провенанс знаний, spec §4.2/§5.2).** Находка: 
+`knowledge.remember()` был МЁРТВЫМ путём записи — ни один агент и ни один модуль
+его не вызывал; DEPARTMENT-слой знаний никогда не пополнялся, «офис постоянно
+узнаёт компанию» не работало в основании. Сделано:
+  - `knowledge.py`: таблица SOURCES (measured 0.9 / outcome 0.85 / scanned 0.7 /
+    researched 0.5 / owner_said 0.45 / inferred 0.3); `remember(..., source=)`
+    хранит source+confidence; неизвестный source деградирует к inferred.
+  - Факты автоскана сайта (`brief["scan"].detected`) теперь доходят до retrieval
+    (раньше — только онбординг/understanding): производные GLOBAL-факты
+    `_scan_facts()` читаются из источника истины, БЕЗ дублирования в хранилище.
+  - retrieve(): confidence — слабый вторичный сигнал ранжирования (0.05×);
+    dept-факты с confidence<0.5 подписываются «(непроверено — слова клиента /
+    гипотеза офиса)» — решение на оценке не выглядит как решение на факте.
+  - Новый инструмент агентов `remember_fact` (tool_schemas + integration_tool_
+    handlers + agent_factory): единственный канал записи знаний, с честным
+    enum-source и предупреждением против фейкового 'measured'.
+  - `tests/test_knowledge_provenance.py` (8 проверок, изоляция как в
+    test_processes.py). Полный прогон: все 63 файла тестов прошли
+    (test_projects мигнул один раз в раннере, отдельно и на повторе — зелёный).

@@ -217,6 +217,23 @@ def build(agent_id: str, role: str,
                        "text": f"📈 Записал метрику «{label}»: {value} {unit} — появится на дашборде"})
         return f"Записано: {point['metric_id']}={point['value']} {unit} ({source})."
 
+    async def _handle_remember_fact(args: dict) -> str:
+        """Запись долговременного знания о бизнесе с провенансом (spec §4.2) —
+        единственный канал пополнения DEPARTMENT-слоя knowledge.py агентами."""
+        from src.office import knowledge as knowledge_module, org as org_module
+        fact = (args.get("fact") or "").strip()
+        if not fact:
+            return "Укажи fact — одно утверждение о бизнесе."
+        source = args.get("source") or ""
+        if source not in knowledge_module.SOURCES:
+            return ("Укажи честный source из: " + ", ".join(knowledge_module.SOURCES) +
+                    ". Не знаешь происхождение — это inferred.")
+        department = org_module.department_of_role(role)
+        knowledge_module.remember(fact, department=department, source=source)
+        await publish({"type": "speech", "agent_id": agent_id,
+                       "text": f"🧠 Запомнил: {fact[:90]}"})
+        return f"Записано в память офиса (source={source}, отдел={department or 'штаб'})."
+
     async def _handle_discover_resource(args: dict) -> str:
         """Discovery-слой (office/discovery.py): голая ссылка → что это и как
         с этим работать. Не выполняет действие сама — только классифицирует и
@@ -392,6 +409,7 @@ def build(agent_id: str, role: str,
         "use_skill": _handle_use_skill,
         "find_skills": _handle_find_skills,
         "record_metric": _handle_record_metric,
+        "remember_fact": _handle_remember_fact,
         "discover_resource": _handle_discover_resource,
         "register_external_api": _handle_register_external_api,
         "register_mcp_server": _handle_register_mcp_server,

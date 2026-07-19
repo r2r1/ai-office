@@ -135,6 +135,7 @@ def create(role: str, task: str, agent_id: str, publish: Callable[[dict], Awaita
                         _ts.READ_OFFICE_CHAT_TOOL,
                         _ts.LIST_INTEGRATIONS_TOOL, _ts.USE_CAPABILITY_TOOL, _ts.USE_INTEGRATION_TOOL,
                         _ts.USE_SKILL_TOOL, _ts.FIND_SKILLS_TOOL, _ts.RECORD_METRIC_TOOL,
+                        _ts.REMEMBER_FACT_TOOL,
                         _ts.DISCOVER_RESOURCE_TOOL, _ts.REGISTER_EXTERNAL_API_TOOL, _ts.REGISTER_MCP_SERVER_TOOL,
                         _ts.FIND_MCP_CONNECTORS_TOOL, _ts.CONNECT_MCP_CONNECTOR_TOOL,
                         _ts.HOST_APP_TOOL, _ts.LIST_HOSTED_APPS_TOOL, _ts.STOP_HOSTED_APP_TOOL,
