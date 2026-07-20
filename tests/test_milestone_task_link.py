@@ -78,6 +78,60 @@ def test_task_milestone_id_follows_active_stage_transition():
     assert t2["milestone_id"] == "strategy"
 
 
+# ── resync ещё не начатых задач при переключении фокуса этапа (живой аудит
+#    2026-07-20, найдено на реальном прогоне) ──────────────────────────────
+
+def test_mark_active_resyncs_pending_tasks_of_same_project_to_new_stage():
+    """Задачи, сгенерированные под "предполагаемый следующий" этап ("content"),
+    остаются подписаны им же навсегда, если офис реально переключает фокус
+    на ДРУГОЙ этап того же проекта ("build") — до фикса. UI показывал их
+    "без этапа", хотя реальная работа шла под другим, новым этапом."""
+    _fresh("mst_test_resync")
+    from src.office import projects
+    brief.set_brief({"goal": "тест"})
+    proj = projects.ensure_active()
+    milestones.set_business_stages(
+        [{"id": "content", "title": "Контент"}, {"id": "build", "title": "Сборка"}],
+        project_id=proj["id"])
+    milestones.mark_active("content")  # "предполагаемый следующий" на момент генерации
+    plan.set_tasks([{"id": "t1", "title": "Задача 1", "role": "marketer"},
+                    {"id": "t2", "title": "Задача 2", "role": "developer"}])
+    assert plan.get_task("t1")["milestone_id"] == "content"
+    # Офис реально переключает фокус на "build", минуя "content"
+    milestones.mark_active("build")
+    assert plan.get_task("t1")["milestone_id"] == "build"
+    assert plan.get_task("t2")["milestone_id"] == "build"
+
+
+def test_mark_active_does_not_resync_already_started_tasks():
+    """Задача, уже взятая в работу (status != pending), сохраняет исторически
+    точную метку того этапа, где реально была начата — не переписывается
+    задним числом."""
+    _fresh("mst_test_resync_started")
+    from src.office import projects
+    brief.set_brief({"goal": "тест"})
+    proj = projects.ensure_active()
+    milestones.set_business_stages(
+        [{"id": "content", "title": "Контент"}, {"id": "build", "title": "Сборка"}],
+        project_id=proj["id"])
+    milestones.mark_active("content")
+    plan.set_tasks([{"id": "t1", "title": "Задача 1", "role": "marketer"}])
+    plan.assign("t1", "marketer_1")  # переводит в in_progress
+    milestones.mark_active("build")
+    assert plan.get_task("t1")["milestone_id"] == "content"  # не тронута
+
+
+def test_mark_active_ignores_stages_without_project():
+    """Bootstrap-этапы (intake/research/strategy) без project — общекомпаней-
+    ские, resync их не касается (план ведёт задачи только по проектам)."""
+    _fresh("mst_test_resync_no_project")
+    brief.set_brief({"goal": "тест"})
+    milestones.mark_active("research")
+    plan.set_tasks([{"id": "t1", "title": "Задача", "role": "marketer"}])
+    milestones.mark_active("strategy")
+    assert plan.get_task("t1")["milestone_id"] == "research"  # не переподписана
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("mst_test_*"):
         if d.is_dir():

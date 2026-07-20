@@ -113,7 +113,12 @@ function reducer(state: OfficeState, action: Action): OfficeState {
       const eid = wid(e)
       switch (e.type) {
         case "hired": {
-          const agents = upsertAgent(state, eid, { role: e.role, status: e.status || "idle", lastMessage: e.last_message || "" })
+          // project_id раньше не приходил в этом событии вовсе — свежена-
+          // нятый project-scoped агент (developer_p1_...) показывался в
+          // "Штабе" до перезагрузки страницы (живой аудит 2026-07-20,
+          // см. planning_engine.hire_and_run).
+          const agents = upsertAgent(state, eid, { role: e.role, status: e.status || "idle",
+            lastMessage: e.last_message || "", projectId: e.project_id || "" })
           return { ...state, agents, feed: hist ? state.feed : feed(state, "👋", "", `${roleName(e.role)} нанят`, "system") }
         }
         case "speech": case "thinking": {

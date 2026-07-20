@@ -185,7 +185,7 @@ export function SectionLabel({ children, style }: { children: ReactNode; style?:
     letterSpacing: "1.5px", margin: "0 0 12px", ...style }}>{children}</div>
 }
 
-export function Card({ children, style, onClick }: { children: ReactNode; style?: CSSProperties; onClick?: () => void }) {
+export function Card({ children, style, onClick, title }: { children: ReactNode; style?: CSSProperties; onClick?: () => void; title?: string }) {
   const hover = !!onClick
   // Раньше клик обрабатывался на <div> — карточка была активируема только
   // мышью, без Tab/Enter/Space и видимого фокус-кольца (найдено при живом
@@ -193,7 +193,7 @@ export function Card({ children, style, onClick }: { children: ReactNode; style?
   // серверы, Приложения, инициативы). role="button" + tabIndex + onKeyDown
   // делают её доступной централизованно, в одном месте на всё приложение.
   return (
-    <div className="card" onClick={onClick}
+    <div className="card" onClick={onClick} title={title}
       role={hover ? "button" : undefined} tabIndex={hover ? 0 : undefined}
       onKeyDown={hover ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick!() } } : undefined}
       style={{ borderRadius: "var(--radius-md)", padding: 16, cursor: hover ? "pointer" : "default",

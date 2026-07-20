@@ -1014,7 +1014,16 @@ function ProjectDetailBody({ project: p, detail, isDone }: { project: any; detai
                     animation: roleWorking ? "mercury-pulse 2.4s ease infinite" : "none" }} />
                   <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)", minWidth: 130, display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 12, opacity: 0.7 }}>{roleIcon(role)}</span>
-                    {roleName(role)}{count > 1 ? ` × ${count}` : ""}
+                    {roleName(role)}
+                    {/* roleCounts считает ЗАДАЧИ этой роли в плане, не число
+                        нанятых агентов (MAX_PER_ROLE=1 — их всегда 1) — "× N"
+                        читалось как "N человек в этой роли", что прямо
+                        противоречит инварианту (живой аудит 2026-07-20, живой
+                        прогон показал реальную команду по 1 на роль при том,
+                        что здесь стояло "× 2"). Честная подпись — число задач. */}
+                    {count > 1 && (
+                      <span style={{ fontSize: 10.5, color: "var(--faint)", fontWeight: 400 }}> · {count} задачи</span>
+                    )}
                   </span>
                   <span style={{ fontSize: 12.5, color: roleWorking ? "var(--text-dim)" : "var(--faint)" }}>
                     {roleWorking ? roleWorking.title : "свободен"}

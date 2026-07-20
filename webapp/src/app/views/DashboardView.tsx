@@ -57,11 +57,18 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
     || milestones.find((m: any) => m.status === "active")
 
   const metrics = [
-    { label: "Задачи",   value: `${state.plan.progress.done}/${state.plan.progress.total}` },
-    { label: "Прогресс", value: `${state.progress.percent}%` },
-    { label: "Лиды",     value: String(state.leads.length) },
-    { label: "Сайты",    value: String(state.sites.length) },
-    { label: "Расход",   value: `$${state.cost.toFixed(4)}` },
+    { label: "Задачи",   value: `${state.plan.progress.done}/${state.plan.progress.total}`,
+      hint: "Сколько задач текущего плана уже закрыто приёмкой" },
+    // ⚠️ Считается ПО БИЗНЕС-ЭТАПАМ (Запрос/Исследование/Стратегия/...), не
+    // по видимому списку задач выше — две разные метрики могут не совпадать
+    // (например «Прогресс 33%» при «Задачи 0/6», если несколько этапов уже
+    // пройдены, а задачи ТЕКУЩЕГО этапа ещё не закрыты). Раньше это нигде
+    // не объяснялось — живой аудит 2026-07-20 зафиксировал ровно эту путаницу.
+    { label: "Прогресс", value: `${state.progress.percent}%`,
+      hint: "Доля пройденных бизнес-этапов (Запрос → Исследование → Стратегия → ...) — не то же самое, что «Задачи» слева: этап может быть пройден раньше, чем закрыты все его задачи" },
+    { label: "Лиды",     value: String(state.leads.length), hint: "Заявки, собранные с опубликованных сайтов/ботов" },
+    { label: "Сайты",    value: String(state.sites.length), hint: "Опубликованные лендинги/сайты этого тенанта" },
+    { label: "Расход",   value: `$${state.cost.toFixed(4)}`, hint: "Потрачено на LLM-вызовы с начала работы офиса" },
   ]
 
   async function handleInitiative(iid: string, action: "accept" | "reject", override = false, idemKey?: string) {
@@ -288,7 +295,7 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
         <SectionLabel>Ключевые метрики</SectionLabel>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
           {metrics.map(m => (
-            <Card key={m.label}>
+            <Card key={m.label} title={m.hint}>
               <div className="display" style={{ fontSize: 28, color: "var(--text)", lineHeight: 1 }}>{m.value}</div>
               <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 7 }}>{m.label}</div>
             </Card>

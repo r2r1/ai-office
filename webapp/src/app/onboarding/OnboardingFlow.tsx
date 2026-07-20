@@ -258,7 +258,7 @@ function InvestigationChat({ landingScan, onFirstMessage, onBriefReady }: {
 
       <div style={{ display: "flex", gap: 8 }}>
         {!chatting ? (
-          <textarea value={input} onChange={e => setInput(e.target.value)} autoFocus rows={3}
+          <textarea value={input} onChange={e => setInput(e.target.value)} autoFocus rows={3} maxLength={2000}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input || "Не знаю, с чего начать — разберитесь сами") } }}
             placeholder="Например: делаю торты на заказ, хочу больше клиентов…"
             style={{
@@ -267,8 +267,8 @@ function InvestigationChat({ landingScan, onFirstMessage, onBriefReady }: {
               background: "var(--surface-soft)", color: "var(--text)", fontFamily: "inherit", outline: "none",
             }} />
         ) : (
-          <input value={input} onChange={e => setInput(e.target.value)} autoFocus
-            onKeyDown={e => { if (e.key === "Enter") send(input) }}
+          <input value={input} onChange={e => setInput(e.target.value)} autoFocus maxLength={2000}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); send(input) } }}
             placeholder="Ответьте здесь…"
             style={{ flex: 1, padding: "11px 14px", fontSize: 13, borderRadius: "var(--radius-pill)",
               border: "1px solid var(--hairline)", background: "var(--surface-soft)",
@@ -436,6 +436,16 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
 
       {result.initiatives?.length > 0 && (
         <Section title="Предложенные инициативы">
+          {/* Живой аудит 2026-07-20: владелец, не принявший НИ ОДНУ карточку
+              ниже, обнаруживал, что офис уже завёл и ведёт проект — без
+              объяснения выглядело как «работа началась сама, непонятно
+              почему». На деле офис ВСЕГДА начинает с базовой цели из брифа —
+              карточки ниже НАДСТРОЙКА сверх нее, не условие старта. */}
+          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: -6, marginBottom: 12, lineHeight: 1.5 }}>
+            Офис уже начинает работать над вашей целью из брифа — это не зависит
+            от решения ниже. Карточки — ДОПОЛНИТЕЛЬНЫЕ возможности сверх этой
+            работы; можно принять любую, все сразу или пропустить все.
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {result.initiatives.map((ini: any) => {
               const verdict = decided.get(ini.id)

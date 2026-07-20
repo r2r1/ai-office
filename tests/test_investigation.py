@@ -145,6 +145,40 @@ def test_run_turn_passes_web_search_and_finish_tool_to_run_agent():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+def test_run_turn_truncates_absurdly_long_input():
+    """Живой аудит 2026-07-20: сдвоенный/испорченный ввод (двойной клик
+    отправки, дребезг клавиатуры) уходил в LLM и сохранялся в историю как
+    есть, без единого потолка длины."""
+    _fresh_tenant("investigation_truncate_unit")
+    captured = {}
+
+    async def fake_run_agent(**kwargs):
+        captured["user"] = kwargs["user"]
+        return "ок"
+
+    huge = "а" * 5000
+    with patch("src.core.llm.run_agent", side_effect=fake_run_agent):
+        asyncio.run(investigation.run_turn(huge))
+
+    assert len(captured["user"]) == investigation._MAX_MESSAGE_CHARS
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
+def test_run_turn_strips_surrounding_whitespace():
+    _fresh_tenant("investigation_strip_unit")
+    captured = {}
+
+    async def fake_run_agent(**kwargs):
+        captured["user"] = kwargs["user"]
+        return "ок"
+
+    with patch("src.core.llm.run_agent", side_effect=fake_run_agent):
+        asyncio.run(investigation.run_turn("   мебель на заказ   "))
+
+    assert captured["user"] == "мебель на заказ"
+    shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):

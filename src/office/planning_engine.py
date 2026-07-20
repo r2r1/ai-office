@@ -344,8 +344,14 @@ async def hire_and_run(role: str, task: str, publish, skill: str = "",
     rec = registry.register(agent_id, role, full_task, department=department, manager=manager,
                             project_id=project_id)
     if rec:
+        # ⚠️ project_id в событии (живой аудит 2026-07-20): раньше "hired" не
+        # нёс его вовсе — фронт (OfficeProvider.upsertAgent) переносит
+        # projectId из ПРЕДЫДУЩЕЙ записи агента, но у СВЕЖЕНАНЯТОГО агента
+        # предыдущей записи нет, так что он падал в "Штаб" в живом UI, пока
+        # владелец не перезагружал страницу (REST /api/agents его знает сразу).
         await publish({"type": "hired", "agent_id": agent_id, "role": role,
-                       "desk": rec.desk, "task": full_task[:100], "skill": skill})
+                       "desk": rec.desk, "task": full_task[:100], "skill": skill,
+                       "project_id": project_id})
         from src.office import office_channel
         gmsg = office_channel.greet(agent_id, role, full_task[:100])
         await publish({"type": "office_chat", "from": agent_id, "role": role,

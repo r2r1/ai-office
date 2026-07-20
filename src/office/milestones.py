@@ -81,10 +81,12 @@ def set_status(stage_id: str, status: str) -> None:
 
 def mark_active(stage_id: str) -> None:
     st = _load()
+    project_id = ""
     for s in st:
         if s["id"] == stage_id:
             s["status"] = "active"
             s["updated_ts"] = time.time()
+            project_id = s.get("project", "")
         elif s["status"] == "active":
             # Закрываем только РАНЕЕ активный этап. Раньше здесь принудительно ставились
             # done ВСЕ предыдущие не-done этапы — перескок «задним числом» отмечал
@@ -93,6 +95,15 @@ def mark_active(stage_id: str) -> None:
             s["status"] = "done"
             s["updated_ts"] = time.time()
     _save(st)
+    # Пересинхронизация ещё не начатых задач проекта на новый активный этап —
+    # см. plan.resync_pending_milestone докстринг (живой аудит 2026-07-20:
+    # задачи, сгенерированные под "предполагаемый следующий" этап, оставались
+    # навсегда подписаны им же, даже когда офис реально переключил фокус
+    # сюда). Только project-scoped этапы (bootstrap-этапы intake/research/
+    # strategy без project — общекомпанейские, задач под них план не ведёт).
+    if project_id:
+        from src.office import plan as plan_module
+        plan_module.resync_pending_milestone(project_id, stage_id)
 
 
 def add_item(stage_id: str, text: str, agent_id: str = "", role: str = "") -> None:

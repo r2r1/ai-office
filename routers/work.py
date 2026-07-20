@@ -36,9 +36,19 @@ async def get_files():
 async def get_storage_usage():
     """Разбивка использования диска тенантом (вкладка «Хранилище») — сколько
     занимают файлы проектов (по папке), системные данные и Docker-ресурсы
-    (постоянные приложения/MCP-серверы), не только сырой список файлов."""
+    (постоянные приложения/MCP-серверы), не только сырой список файлов.
+
+    ⚠️ storage_usage.summary() внутри синхронно вызывает subprocess.run()
+    (docker ps / docker image inspect / проверка доступности) с таймаутом
+    до 15-20с — раньше это выполнялось ПРЯМО в async-хендлере, без
+    to_thread: FastAPI/uvicorn однопоточные для asyncio-цикла, поэтому
+    блокирующий subprocess.run() замораживал ВЕСЬ event loop процесса на
+    время вызова — не только эту вкладку, а вообще все запросы всех
+    тенантов (SSE, другие API), пока Docker/WSL отвечает (живой аудит
+    2026-07-20: «все вкладки долго прогружаются», не только «Хранилище»).
+    asyncio.to_thread — тот же результат, но в отдельном потоке, не блокируя цикл."""
     from src.office import storage_usage
-    return storage_usage.summary()
+    return await asyncio.to_thread(storage_usage.summary)
 
 @router.get("/api/plan")
 async def get_plan():
