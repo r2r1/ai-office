@@ -32,6 +32,19 @@ from src.saas import context as ctx
 MAX_THINK_SECS = int(os.getenv("AGENT_MAX_THINK_SECS", "240"))  # дольше → считаем зависшим
 MAX_TASK_ATTEMPTS = 3  # провалов приёмки до блокировки задачи (эскалация вместо цикла)
 
+# Перевод самых частых технических классов исключений в понятный хвост —
+# владелец бизнеса не обязан знать, что "ConnectionError" значит "не достучался
+# до сервиса". Детерминированная таблица, не вызов LLM (тот же принцип, что у
+# llm.is_quota_error/is_model_unavailable_error) — не про каждую возможную
+# ошибку, только про те, что реально повторяются в трейсах прод-прогонов.
+_FRIENDLY_ERROR_HINTS: dict[str, str] = {
+    "ConnectionError":  "не получилось подключиться к сервису, обычно временно, попробует снова",
+    "TimeoutError":      "сервис долго не отвечал, попробует снова",
+    "ReadTimeout":        "сервис долго не отвечал, попробует снова",
+    "ConnectTimeout":     "не получилось подключиться к сервису, попробует снова",
+    "JSONDecodeError":    "сервис ответил не тем, что ожидалось, попробует снова",
+}
+
 # ── Состояние живости в памяти процесса (ключ «tenant:agent_id», не голый id) ──
 _thinking_since: dict[str, float] = {}   # когда агент начал «думать» (watchdog)
 _agent_task: dict[str, str] = {}         # какую задачу плана он делает
@@ -712,7 +725,12 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
         err_str = f"{type(e).__name__}: {err_str}" if err_str else type(e).__name__
         trace.log("agent_error", agent=agent_id, role=role,
                   sec=round(time.time() - _job_t0, 1), error=err_str[:200])
-        await publish({"type": "error", "agent_id": agent_id, "text": err_str[:100]})
+        # ⚠️ Сырая ошибка (`agent_error`, "type":"error") раньше публикова-
+        # лась В ЛЕНТУ БЕЗУСЛОВНО, даже когда через несколько строк ниже уходит
+        # понятное объяснение ТОГО ЖЕ случая (квота/недоступная модель) — владелец
+        # видел ОБА сообщения подряд: сырое "RuntimeError: 403 ..." и следом
+        # человеческое "⛔ Недостаточно баланса...". Сырое сообщение теперь идёт
+        # ТОЛЬКО туда, где нет более дружелюбной версии — в конец блока ниже.
         registry.update_status(agent_id, "idle")
         if task_id and plan.is_generated():
             plan.revert(task_id)  # упала — вернуть в очередь
@@ -746,6 +764,15 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
                                            f"Проверьте «Компания → Интеллект»."})
         else:
             _model_fail_count.pop(tk(agent_id), None)
+            # Ни один известный "дружелюбный" случай не подошёл — показываем
+            # сырую ошибку, но переводим самые частые технические классы в
+            # понятный текст (детерминированно, без вызова LLM — тот же
+            # принцип, что уже у is_quota_error/is_model_unavailable_error):
+            # "ConnectionError: [Errno 111]..." ничего не говорит владельцу
+            # бизнеса, "Не получилось подключиться к сервису" — говорит.
+            friendly = _FRIENDLY_ERROR_HINTS.get(type(e).__name__, "")
+            text = f"{err_str[:100]} — {friendly}" if friendly else err_str[:100]
+            await publish({"type": "error", "agent_id": agent_id, "text": text[:160]})
     finally:
         costs.release_reservation(policy["estimated_usd"])
         _thinking_since.pop(tk(agent_id), None)

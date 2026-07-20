@@ -110,6 +110,11 @@ export default function App() {
   const [memory, setMemory] = useState<any>(null)
   // Autonomy level + Health + Trust (живые индикаторы governance)
   const [autonomyLevel, setAutonomyLevel] = useState<string>("")
+  // Русское название уровня — бэкенд его уже отдаёт (autonomy.payload().name),
+  // раньше фронт брал только сырой ключ ("guided") и показывал его как есть
+  // в чипе попапа статуса (production-readiness worklist, тот же класс
+  // находки, что и с кнопками уровня в DashboardView.tsx).
+  const [autonomyName, setAutonomyName] = useState<string>("")
   const [health, setHealth] = useState<{ company: number; status: string } | null>(null)
   const [trust, setTrust] = useState<{ company: number; streak: number } | null>(null)
   const [qualityMode, setQualityMode] = useState<{ icon: string; label: string } | null>(null)
@@ -216,7 +221,7 @@ export default function App() {
       api.get("/api/limits").then(l => { if (l) setLimitInfo({ spent: l.spent || 0, total_usd: l.total_usd || 0, over_limit: !!l.over_limit }) }).catch(() => {})
       api.understanding().then(u => { if (u) setUnderstanding(u) })
       api.knowledge().then(m => { if (m) setMemory(m) })
-      api.get("/api/autonomy").then(a => { if (a?.level) setAutonomyLevel(a.level) }).catch(() => {})
+      api.get("/api/autonomy").then(a => { if (a?.level) { setAutonomyLevel(a.level); setAutonomyName(a.name || a.level) } }).catch(() => {})
       api.get("/api/health").then(h => { if (h?.company !== undefined) setHealth({ company: h.company, status: h.status }) }).catch(() => {})
       api.get("/api/trust").then(t => { if (t?.company !== undefined) setTrust({ company: t.company, streak: t.streak || 0 }) }).catch(() => {})
       api.get("/api/quality-modes").then(c => {
@@ -405,7 +410,7 @@ export default function App() {
                       onClick={() => { changeView("dashboard"); setUnderstandingOpen(false) }} />
                   )}
                   {autonomyLevel && (
-                    <StatusChip label="Автономность" value={autonomyLevel}
+                    <StatusChip label="Автономность" value={autonomyName || autonomyLevel}
                       onClick={() => { changeView("dashboard"); setUnderstandingOpen(false) }} />
                   )}
                   {qualityMode && (

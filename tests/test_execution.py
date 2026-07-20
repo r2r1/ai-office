@@ -180,6 +180,14 @@ def test_heal_stuck_agents_only_protects_agent_with_own_pending_question():
         shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+# ── friendly error hints: сырое исключение не единственное, что видит владелец ──
+
+def test_friendly_error_hints_cover_common_network_exceptions():
+    for exc_name in ("ConnectionError", "TimeoutError"):
+        assert exc_name in ex._FRIENDLY_ERROR_HINTS
+        assert ex._FRIENDLY_ERROR_HINTS[exc_name]  # непустой текст
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):
