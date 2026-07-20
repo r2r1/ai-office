@@ -25,9 +25,14 @@ export function ResultsView() {
   const [prefs, setPrefs] = useState<Prefs>({ order: [], hidden: [] })
   const [active, setActive] = useState<string>("leads")
   const [prefsOpen, setPrefsOpen] = useState(false)
+  // Раньше tabs.length===0 читалось ОДНОЗНАЧНО как «результатов нет», хотя
+  // до ответа api.results() это то же самое состояние, что и «ещё гружусь» —
+  // на каждом заходе на вкладку секунду-две показывалось неверное сообщение
+  // (production-readiness worklist п.24).
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.results().then(d => setKinds(d.kinds || []))
+    api.results().then(d => setKinds(d.kinds || [])).finally(() => setLoading(false))
     api.uiPrefs("results").then(setPrefs)
   }, [])
 
@@ -88,7 +93,11 @@ export function ResultsView() {
         </div>
       )}
       {tabs.length === 0 ? (
-        <ViewBody><Empty icon="◈" text="Результатов пока нет" hint="Появятся, когда офис опубликует лендинг или соберёт первую заявку" /></ViewBody>
+        <ViewBody>
+          {loading
+            ? <Empty icon="◈" text="Загрузка…" hint="" />
+            : <Empty icon="◈" text="Результатов пока нет" hint="Появятся, когда офис опубликует лендинг или соберёт первую заявку" />}
+        </ViewBody>
       ) : (
         <>
           {active === "leads" && <LeadsTab />}

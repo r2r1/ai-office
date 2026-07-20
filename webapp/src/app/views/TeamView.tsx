@@ -17,7 +17,10 @@ const TEAM_TABS = [
   { id: "skills", label: "Скиллы" },
 ]
 
-const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
+// var(--mercury) из design.css — раньше был отдельный литерал, идентичный
+// токену (production-readiness worklist п.37): смена оттенка потребовала бы
+// правки в нескольких файлах, рискуя разъехаться незаметно.
+const MERCURY = "var(--mercury)"
 
 interface TeamViewProps {
   onOpenChat?: (agentId: string) => void
@@ -30,7 +33,7 @@ const STATUS_LABEL: Record<string, string> = {
   active: "РАБОТАЕТ", thinking: "ДУМАЕТ", done: "ГОТОВО", idle: "ЖДЁТ",
 }
 const STATUS_COLOR: Record<string, string> = {
-  active: "#a0e0ab", thinking: "#ffac2e", done: "var(--text-dim)", idle: "var(--whisper)",
+  active: "var(--success)", thinking: "var(--mercury-a)", done: "var(--text-dim)", idle: "var(--whisper)",
 }
 const STATUS_BG: Record<string, string> = {
   active:   "rgba(160,224,171,0.12)",
@@ -408,9 +411,9 @@ function AgentCard({ agent, index, onOpenChat, initialModel, presets, onOpenDeta
             initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.25 }}
             style={{
-              fontSize: 11, color: isActive ? "#a0e0ab" : isThinking ? "var(--mercury-a)" : "var(--muted)",
+              fontSize: 11, color: isActive ? "var(--success)" : isThinking ? "var(--mercury-a)" : "var(--muted)",
               lineHeight: 1.45, padding: "7px 10px",
-              borderLeft: `3px solid ${isActive ? "#a0e0ab" : isThinking ? "var(--mercury-a)" : "var(--hairline-strong)"}`,
+              borderLeft: `3px solid ${isActive ? "var(--success)" : isThinking ? "var(--mercury-a)" : "var(--hairline-strong)"}`,
               background: "var(--surface-soft)", borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
               display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
             }}>

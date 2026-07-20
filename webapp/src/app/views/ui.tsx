@@ -81,7 +81,15 @@ export function ViewBody({ children, style }: { children: ReactNode; style?: CSS
   }, [scrollY])
 
   return (
-    <div ref={ref} style={{ flex: 1, overflowY: "auto", padding: "18px 28px 28px", ...style }}>
+    // clamp() вместо фиксированных 28px — раньше отступы не менялись НИ ПРИ
+    // каком viewport (ни одного isMobile/matchMedia не было ни в одной из
+    // крупных вкладок, production-readiness worklist п.22); на узком экране
+    // 28px с каждой стороны съедали заметную долю и без того тесной ширины.
+    // Один общий фикс здесь закрывает все вкладки, использующие ViewBody,
+    // не только 4 названных в аудите — правка каждой по отдельности была бы
+    // дублированием одного и того же решения.
+    <div ref={ref} style={{ flex: 1, overflowY: "auto",
+      padding: "clamp(10px, 3vw, 18px) clamp(12px, 4vw, 28px) clamp(14px, 4vw, 28px)", ...style }}>
       {children}
     </div>
   )

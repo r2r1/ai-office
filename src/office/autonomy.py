@@ -60,8 +60,16 @@ _ACTION_MIN_LEVEL: dict[str, str] = {
 }
 
 
-def _action_type_for(action_name: str) -> str:
-    """Имя действия интеграции → тип для гейта автономии."""
+def _action_type_for(action_name: str, declared: str = "") -> str:
+    """Имя действия интеграции → тип для гейта автономии.
+
+    `declared` — явное поле Action.action_type (integrations/base.py), если
+    вызывающий его передал: побеждает БЕЗУСЛОВНО, подстрочная эвристика ниже —
+    только фолбэк для действий, которые ничего не декларируют (production-
+    readiness worklist п.17: угадывание по подстроке — источник тихих ошибок,
+    "send" в имени ловит и "send_report", не только реальную внешнюю отправку)."""
+    if declared:
+        return declared
     a = (action_name or "").lower()
     if "publish" in a:
         return "publish_site"

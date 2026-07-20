@@ -676,7 +676,15 @@ function ProcessDetailScreen({ proc, onBack, onPause, onResume, onDelete }: {
               <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
                 border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
             )}
-            <button onClick={onDelete} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+            <button onClick={() => {
+              // Промах мышью безвозвратно удалял активный процесс без единого
+              // подтверждения (production-readiness worklist п.19) — тот же
+              // паттерн window.confirm, что уже принят в DashboardView для
+              // других необратимых действий этого продукта.
+              if (window.confirm(`Удалить процесс «${proc.title}»? Это необратимо — он перестанет запускаться каждый цикл.`)) {
+                onDelete()
+              }
+            }} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
               border: "1px solid var(--hairline)", background: "transparent", color: "var(--faint)" }}>Удалить</button>
           </>
         } />

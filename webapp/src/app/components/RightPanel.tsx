@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { useOfficeSelector } from "../../data/OfficeProvider"
+import { useOfficeSelector, useUnread } from "../../data/OfficeProvider"
 import { api } from "../../data/api"
 import { useThrottled } from "../hooks"
 import { roleName, roleFromAgentId } from "../../data/roles"
@@ -31,9 +31,16 @@ const KIND_COLOR: Record<string, string> = {
 interface RightPanelProps {
   collapsed: boolean
   onToggle: () => void
+  /** Открыть личный чат конкретного агента (вкладка «Команда») — нужен для
+   * баннера «вас ждёт ответ» в ChatTab (см. ниже): общий чат офиса физически
+   * не может показать/принять блокирующий ask_user (он живёт в личных
+   * тредах, threads.py), поэтому раньше пользователь, печатающий именно
+   * сюда, никак не узнавал, что где-то в другом месте продукта его ждёт
+   * вопрос агента (production-readiness worklist п.6). */
+  onOpenAgentChat?: (agentId: string) => void
 }
 
-export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
+export function RightPanel({ collapsed, onToggle, onOpenAgentChat }: RightPanelProps) {
   const [tab, setTab] = useState<"feed" | "chat">("chat")
   // Раньше useOffice() (весь state) — панель всегда смонтирована рядом с офисом
   // и перерисовывалась на КАЖДОЕ SSE-событие только ради счётчика длины ленты.
@@ -108,7 +115,7 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
               })}
             </div>
 
-            {tab === "chat" && <ChatTab />}
+            {tab === "chat" && <ChatTab onOpenAgentChat={onOpenAgentChat} />}
             {tab === "feed" && <FeedTab />}
           </motion.div>
         )}
@@ -118,13 +125,21 @@ export function RightPanel({ collapsed, onToggle }: RightPanelProps) {
 }
 
 // ── Чат офиса ────────────────────────────────────────────────────────────────
-function ChatTab() {
+function ChatTab({ onOpenAgentChat }: { onOpenAgentChat?: (agentId: string) => void }) {
   const feedLength = useOfficeSelector(s => s.feed.length)
+  const threads = useOfficeSelector(s => s.threads)
   const [messages, setMessages] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Реальные блокирующие вопросы (ask_user) живут в ЛИЧНЫХ чатах с агентами
+  // (threads.py), не в этом общем канале — этот тред печатает совсем в другое
+  // место. Баннер — единственный способ узнать здесь, что где-то ждут ответа.
+  const waitingAgents = Object.entries(threads || {})
+    .filter(([, s]: [string, any]) => (s?.unanswered || 0) > 0)
+    .map(([aid]) => aid)
 
   const tick = useThrottled(feedLength, 2000)
   async function load() {
@@ -153,6 +168,22 @@ function ChatTab() {
 
   return (
     <>
+      {waitingAgents.length > 0 && (
+        <button onClick={() => onOpenAgentChat?.(waitingAgents[0])}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+            margin: "10px 12px 0", padding: "9px 12px", borderRadius: "var(--radius-md)",
+            border: "1px solid rgba(255,172,46,0.35)", background: "rgba(255,172,46,0.10)",
+            color: "var(--mercury-a)", fontSize: 11.5, cursor: onOpenAgentChat ? "pointer" : "default",
+            fontFamily: "var(--font-sans)", flexShrink: 0,
+          }}>
+          <span style={{ fontSize: 14 }}>❓</span>
+          <span>
+            {waitingAgents.length === 1 ? "Команда ждёт вашего ответа" : `Команда ждёт ответа (${waitingAgents.length})`}
+            {" — это НЕ здесь, "}<u>откройте личный чат агента</u>
+          </span>
+        </button>
+      )}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
         {allMessages.length === 0 && (
           <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", paddingTop: 40, lineHeight: 1.6 }}>

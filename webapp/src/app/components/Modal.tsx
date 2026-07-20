@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import type { ReactNode } from "react"
 
@@ -11,13 +11,44 @@ interface ModalProps {
   children: ReactNode
 }
 
+const _FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+
 /** Универсальное модальное окно для полной информации по карточке. */
 export function Modal({ open, onClose, title, subtitle, badge, children }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
+
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return }
+      // Focus trap: Tab раньше свободно уводил фокус на контент СТРАНИЦЫ под
+      // визуально открытой модалкой (production-readiness worklist п.35) —
+      // клавиатурный пользователь мог взаимодействовать с невидимым для него
+      // экраном. Циклим фокус внутри диалога, пока он открыт.
+      if (e.key === "Tab" && dialogRef.current) {
+        const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(_FOCUSABLE))
+          .filter(el => !el.hasAttribute("disabled"))
+        if (items.length === 0) return
+        const first = items[0], last = items[items.length - 1]
+        const active = document.activeElement
+        if (e.shiftKey && active === first) { e.preventDefault(); last.focus() }
+        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus() }
+      }
+    }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    // Фокус уходит в диалог при открытии, возвращается туда, откуда пришёл,
+    // при закрытии — стандартный контракт accessible-модалки.
+    prevFocusRef.current = document.activeElement as HTMLElement
+    const t = setTimeout(() => {
+      const first = dialogRef.current?.querySelector<HTMLElement>(_FOCUSABLE)
+      first?.focus()
+    }, 0)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      clearTimeout(t)
+      prevFocusRef.current?.focus?.()
+    }
   }, [open, onClose])
 
   return (
@@ -30,6 +61,7 @@ export function Modal({ open, onClose, title, subtitle, badge, children }: Modal
           style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center",
             background: "rgba(0,0,0,0.5)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", padding: 24 }}>
           <motion.div
+            ref={dialogRef} role="dialog" aria-modal="true"
             initial={{ opacity: 0, y: 22, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             onClick={e => e.stopPropagation()}

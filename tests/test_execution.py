@@ -141,6 +141,45 @@ def test_review_and_maybe_fix_publishes_immediately_when_js_already_valid():
     shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
 
 
+# ── heal_stuck_agents: вотчдог персонально по агенту, не блокирует лечение
+#    ВСЕХ агентов тенанта из-за ЧУЖОГО открытого вопроса (production-readiness
+#    worklist п.5) ────────────────────────────────────────────────────────────
+
+def test_heal_stuck_agents_only_protects_agent_with_own_pending_question():
+    ctx.set_tenant("exec_unit_watchdog_scoped")
+    from src.office import questions as questions_mod, registry as registry_mod
+    registry_mod.reset()
+    registry_mod.register("designer_1", "designer", "рисует лендинг", department="tech")
+    registry_mod.register("developer_1", "developer", "зависший таск", department="tech")
+    # Оба стартуют "thinking" — иначе assert "== idle" был бы истинен и без
+    # лечения (register() по умолчанию ставит "idle"), проверка ничего не докажет.
+    registry_mod.update_status("designer_1", "thinking")
+    registry_mod.update_status("developer_1", "thinking")
+    old = ex.MAX_THINK_SECS
+    ex.MAX_THINK_SECS = 0.01  # мгновенный таймаут для теста
+    try:
+        # designer_1 реально спрашивает владельца — НЕ должен считаться зависшим
+        async def _ask():
+            qid, _fut = questions_mod.ask("Какой цвет бренда?", agent_id="designer_1")
+            return qid
+        asyncio.run(_ask())
+        ex._thinking_since[ex.tk("designer_1")] = 0.0  # "давно" в прошлом
+        ex._thinking_since[ex.tk("developer_1")] = 0.0  # тоже "давно", но БЕЗ вопроса
+        asyncio.run(ex.heal_stuck_agents(_noop_publish))
+        # designer_1 защищён своим вопросом — таймер продлён, не сброшен в idle
+        assert ex.tk("designer_1") in ex._thinking_since
+        assert registry_mod.get("designer_1").status != "idle"
+        # developer_1 не имеет своего вопроса — лечится как обычно
+        assert ex.tk("developer_1") not in ex._thinking_since
+        assert registry_mod.get("developer_1").status == "idle"
+    finally:
+        ex.MAX_THINK_SECS = old
+        ex._thinking_since.pop(ex.tk("designer_1"), None)
+        ex._thinking_since.pop(ex.tk("developer_1"), None)
+        registry_mod.reset()
+        shutil.rmtree(ctx.tenant_dir(), ignore_errors=True)
+
+
 def _run():
     passed = 0
     for name, fn in sorted(globals().items()):

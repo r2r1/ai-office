@@ -160,6 +160,21 @@ def registry() -> dict:
             "missing": [i["id"] for i in items if i["status"] == "missing"]}
 
 
+def blocking_for_task(task: dict) -> list[dict]:
+    """Способности, которых не хватает ИМЕННО для этой задачи — гейт НА
+    ДИСПЕТЧЕРИЗАЦИИ (см. planning_engine.run_leaders), а не только
+    уведомление раз на bootstrap (missing_for_plan). Без него задача
+    доезжала до исполнителя и падала в середине работы вместо понятного
+    «нет доступа» до старта (production-readiness worklist п.3)."""
+    out = []
+    for cap_id in required_of(task):
+        if _backing_status(cap_id) != "have":
+            spec = _CATALOG.get(cap_id, {})
+            out.append({"capability": cap_id, "label": spec.get("label", cap_id),
+                        "acquire": _acquire(cap_id)})
+    return out
+
+
 def missing() -> list[dict]:
     """Способности, которые план требует, но офис не умеет — как РЕШЕНИЕ приобрести
     (§5), а не уведомление. [{capability, label, required_by:[task_ids], acquire}].

@@ -286,6 +286,12 @@ export function IntegCard({ integ, onRefresh }: { integ: any; onRefresh: () => v
       {isOAuth && connected && (
         <Button variant="ghost" size="sm" style={{ marginTop: 2, alignSelf: "flex-start" }}
           onClick={async () => {
+            // Раньше срабатывало сразу по клику, без единого подтверждения —
+            // единственное деструктивное действие в каталоге без него
+            // (production-readiness worklist п.26). Агенты, уже держащие эти
+            // креды в работе (лиды/задачи), после отключения получат сырую
+            // ошибку провайдера — стоит подумать дважды.
+            if (!window.confirm(`Отключить ${integ.title || integ.name}? Задачи, использующие этот доступ, перестанут работать.`)) return
             await fetch(`/auth/${isGoogle ? "google" : integ.name}/disconnect`, { method: "POST" })
             onRefresh()
           }}>

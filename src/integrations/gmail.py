@@ -223,6 +223,13 @@ INTEGRATION = Integration(
             name="list_emails",
             description="Получить список писем из Gmail. Поддерживает поиск.",
             handler=_list_emails,
+            # Явная декларация (production-readiness worklist п.17) — без неё
+            # подстрочная эвристика autonomy._action_type_for ловит "email" в
+            # имени и классифицирует ЧТЕНИЕ почты как send_message: на самом
+            # ограничительном уровне автономии ("scout") агент не мог бы даже
+            # прочитать входящие без одобрения владельца, хотя это чистое
+            # чтение без единого внешнего эффекта.
+            action_type="use_integration",
             params={
                 "query":       {"type": "string",  "description": "Поисковый запрос Gmail (default: in:inbox). Примеры: 'from:boss@co.ru', 'is:unread', 'subject:счёт'"},
                 "max_results": {"type": "integer", "description": "Максимум писем (default: 10, max: 50)"},
@@ -232,6 +239,7 @@ INTEGRATION = Integration(
             name="read_email",
             description="Прочитать содержимое письма по его ID.",
             handler=_read_email,
+            action_type="use_integration",  # см. комментарий у list_emails выше
             params={
                 "message_id": {"type": "string", "description": "ID письма (из list_emails)"},
             },

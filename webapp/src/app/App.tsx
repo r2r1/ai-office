@@ -293,14 +293,20 @@ export default function App() {
           }}>
             <span>
               {officePaused
-                ? `⏸ Офис на паузе${officePauseReason ? ` — ${officePauseReason}` : "."}`
+                // Пустая причина раньше давала голое "⏸ Офис на паузе." без
+                // единой подсказки, что делать дальше (production-readiness
+                // worklist п.8) — тупик понимания при живой кнопке рядом.
+                ? `⏸ Офис на паузе${officePauseReason ? ` — ${officePauseReason}` : " — причина не сохранена, посмотрите журнал событий (вкладка «Работа»)."}`
                 : "⚠ Бюджетный лимит исчерпан — офис вот-вот встанет на паузу."}
             </span>
             {limitInfo?.over_limit ? (
               <button onClick={goToLimits}
                 style={{ border: "1px solid var(--danger)", borderRadius: "var(--radius-md)", padding: "6px 14px",
                   background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>
-                Пополнить
+                {/* Реальной оплаты пока нет (см. комментарий выше) — кнопка не
+                    должна обещать платёж, которого не происходит (production-
+                    readiness worklist п.9). */}
+                Повысить лимит
               </button>
             ) : (
               <button onClick={handleToggleOffice}
@@ -570,7 +576,8 @@ export default function App() {
 
           {/* Правая панель — только на офисе и не мобайл */}
           {isOffice && !isMobile && (
-            <RightPanel collapsed={!panelOpen} onToggle={() => setPanelOpen(p => !p)} />
+            <RightPanel collapsed={!panelOpen} onToggle={() => setPanelOpen(p => !p)}
+              onOpenAgentChat={openChat} />
           )}
 
           {isMobile && (

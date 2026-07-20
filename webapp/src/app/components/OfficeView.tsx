@@ -51,7 +51,15 @@ const ROLE_HOME: Record<string, [number, number]> = {
   salesman: [13, 73], marketer: [13, 84],
   developer: [42, 73], designer: [49, 73], integrator: [35, 73],
 }
-const MEETING: [number, number] = [80, 75]
+// Несколько соседних точек, не одна — раньше ЛЮБОЕ число агентов в
+// переговорке одновременно вставало РОВНО в одну точку [80,75], и подписи
+// под аватарами (абсолютно спозиционированные, без анти-коллизии) полностью
+// накладывались друг на друга при 2+ участниках (production-readiness
+// worklist п.7) — частый случай, не редкий (независимый 6с-тумблер на
+// агента, не эксклюзивный слот).
+const MEETING_SPOTS: [number, number][] = [
+  [80, 75], [87, 75], [80, 82], [87, 82], [83.5, 78.5],
+]
 
 function homeFor(agent: Worker, idx: number): [number, number] {
   const base = ROLE_HOME[agent.role]
@@ -138,9 +146,15 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
       ))}
 
       {/* агенты (живые данные + Motion) */}
-      {agents.map((a, i) => {
+      {(() => {
+        // Стабильный порядок ВНУТРИ группы «сейчас в переговорке» (по id, не
+        // по позиции в agents — иначе слот прыгал бы между рендерами вместе
+        // с составом отдела) — каждому участнику своя точка из MEETING_SPOTS.
+        const inMeeting = agents.filter(ag => meeting[ag.id]).map(ag => ag.id).sort()
+        return agents.map((a, i) => {
         const [hx, hy] = homeFor(a, i)
-        const [x, y] = meeting[a.id] ? MEETING : [hx, hy]
+        const meetingSlot = inMeeting.indexOf(a.id)
+        const [x, y] = meetingSlot >= 0 ? MEETING_SPOTS[meetingSlot % MEETING_SPOTS.length] : [hx, hy]
         const active = a.status === "active"
         const thinking = a.status === "thinking"
         return (
@@ -191,7 +205,8 @@ export function OfficeView({ onOpenAgent }: OfficeViewProps) {
             </AnimatePresence>
           </motion.div>
         )
-      })}
+        })
+      })()}
 
       {/* подсказка / индикатор «офис ожидает» */}
       {agents.length === 0 && (

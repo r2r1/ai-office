@@ -1,6 +1,8 @@
 import type { Theme } from "../types"
 
-const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
+// var(--mercury) из design.css — раньше был отдельным литералом, идентичным
+// токену (production-readiness worklist п.37).
+const MERCURY = "var(--mercury)"
 
 interface TopBarProps {
   progress: number
@@ -94,7 +96,7 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
           )}
           <span style={{
             width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-            background: connected ? "#a0e0ab" : "#ffac2e",
+            background: connected ? "var(--success)" : "var(--mercury-a)",
             boxShadow: connected ? "0 0 6px rgba(160,224,171,0.6)" : "0 0 6px rgba(255,172,46,0.6)",
             animation: connected ? "none" : "mercury-pulse 1.2s ease-in-out infinite",
           }} />
@@ -161,7 +163,7 @@ function StatusBadge({ understanding, health, trust, autonomyLevel, qualityMode,
   qualityMode?: { icon: string; label: string } | null
   onClick?: () => void
 }) {
-  const healthColor = health ? (health.company >= 75 ? "#a0e0ab" : health.company >= 45 ? "#ffac2e" : "#e05a5a") : "var(--text-dim)"
+  const healthColor = health ? (health.company >= 75 ? "var(--success)" : health.company >= 45 ? "var(--mercury-a)" : "var(--danger)") : "var(--text-dim)"
   return (
     <button
       className="btn btn-ghost btn-pill"

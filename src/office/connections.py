@@ -77,16 +77,22 @@ def get_by_name(name: str) -> dict | None:
     Нечёткий фолбэк (подстрока) — для агента, который называет сервис приблизительно
     (get_connection). Для идентификации КОНКРЕТНОЙ интеграции (registry.credentials_for/
     is_connected) используй get_exact_by_name — нечёткий матч здесь способен задеть
-    чужую интеграцию с похожим префиксом имени (реальный риск: "crm" — подстрока
-    "crm_bitrix24", "telegram" — подстрока "telegram_personal")."""
+    чужую интеграцию с похожим префиксом имени ("crm" — подстрока "crm_bitrix24",
+    "telegram" — подстрока "telegram_personal").
+
+    ⚠️ Фолбэк срабатывает, только если подстрокой совпал РОВНО ОДИН кандидат
+    (production-readiness worklist п.21) — раньше при НЕСКОЛЬКИХ совпадениях
+    молча брался первый попавшийся: реальный риск подсунуть агенту чужие
+    креды («crm» → «crm_bitrix24», хотя у тенанта есть и просто «crm»).
+    Неоднозначность — повод честно ответить «не найдено», не повод угадывать."""
     name = (name or "").lower().strip()
     conns = _all()
     for c in conns:
         if c["name"].lower() == name:
             return _decrypted(c)
-    for c in conns:
-        if name and name in c["name"].lower():
-            return _decrypted(c)
+    fuzzy = [c for c in conns if name and name in c["name"].lower()]
+    if len(fuzzy) == 1:
+        return _decrypted(fuzzy[0])
     return None
 
 

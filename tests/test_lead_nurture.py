@@ -94,6 +94,24 @@ def test_sequence_exhausts_after_all_steps():
     assert total == len(lead_nurture.STEPS)  # ровно 3 шага, не больше
 
 
+def test_reopening_lead_resets_nurture_sequence():
+    """production-readiness worklist п.30: владелец вернул лида в "new" после
+    того, как автодожим уже отправил шаг 1 — следующий дожим обязан
+    начать сначала (шаг 1), не продолжить с шага 2."""
+    _fresh("nurture_test_reopen")
+    lead = leads.add("site", "Иван", "+79990000000", "")
+    _backdate_lead(lead["id"], 80)
+    asyncio.run(lead_nurture.run_due_followups())  # шаг 1 отправлен
+    leads.set_status(lead["id"], "contacted")
+    leads.set_status(lead["id"], "new")  # владелец переоткрыл лида
+    _backdate_lead(lead["id"], 80)  # снова "старый" — но теперь заново с 0
+    n = asyncio.run(lead_nurture.run_due_followups())
+    assert n == 1
+    updated = leads.get(lead["id"])
+    notes = [h["text"] for h in updated["history"] if h.get("kind") == "note"]
+    assert any("Автодожим шаг 1/3" in t for t in notes)  # снова шаг 1, не шаг 2
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("nurture_test_*"):
         if d.is_dir():

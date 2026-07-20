@@ -88,8 +88,16 @@ async def _try_deliver(contact: str, text: str) -> tuple[bool, str]:
 
 async def run_due_followups(max_per_cycle: int = 10) -> int:
     """Отправляет по одному следующему шагу дожима каждому подходящему лиду за
-    вызов (не спамит все шаги разом). Возвращает число отправленных сообщений."""
-    state = _state()
+    вызов (не спамит все шаги разом). Возвращает число отправленных сообщений.
+
+    ⚠️ Состояние сохраняется ПОСЛЕ КАЖДОГО отправленного шага, не одним
+    батчем в конце (production-readiness worklist п.20). Раньше `_save`
+    вызывался один раз после всего цикла — если процесс упал/был убит между
+    отправкой лида №1 и №10 (реальное внешнее сообщение УЖЕ ушло клиенту),
+    ни один шаг цикла не персистился, и на следующем прогоне ВСЕ уже
+    отправленные лиды получили бы дубль того же сообщения. Заодно сужает
+    окно гонки при (не поддерживаемом по умолчанию) параллельном вызове до
+    одной записи вместо всего цикла."""
     sent_count = 0
     now = time.time()
     for lead in leads.all_leads():
@@ -98,6 +106,7 @@ async def run_due_followups(max_per_cycle: int = 10) -> int:
         if lead.get("status") != "new":
             continue  # уже в работе/закрыт — автодожим не вмешивается
         hours_waiting = (now - lead.get("ts", now)) / 3600
+        state = _state()  # свежее чтение — минимизирует окно гонки с др. писателем
         last_step = state.get(lead["id"], -1)
         next_step = last_step + 1
         if next_step >= len(STEPS):
@@ -109,11 +118,27 @@ async def run_due_followups(max_per_cycle: int = 10) -> int:
         delivered, result = await _try_deliver(lead.get("contact", ""), text)
         leads.add_note(lead["id"],
                        f"Автодожим шаг {next_step + 1}/{len(STEPS)}: {result}", by="auto_nurture")
+        # ⚠️ НЕ удалять запись после финального шага: state.get(id, -1)==-1
+        # неотличимо от "ещё не начинали" — удаление заставило бы завершённую
+        # серию НАЧАТЬСЯ ЗАНОВО на следующем цикле (лид всё ещё "new" и всё
+        # ещё старше первого порога). Запись остаётся навсегда, но это один
+        # int на лид — незначительный рост даже за годы (production-readiness
+        # worklist п.38 — рассмотрено, оставлено как есть сознательно).
         state[lead["id"]] = next_step
-        sent_count += 1
-    if sent_count:
         _save(state)
+        sent_count += 1
     return sent_count
+
+
+def reset_lead(lead_id: str) -> None:
+    """Сбрасывает прогресс автодожима ОДНОГО лида — см. leads.set_status:
+    вызывается, когда лид вручную возвращён в статус "new" после того, как
+    серия уже была начата, чтобы следующий дожим стартовал с шага 1, а не
+    продолжил с места, где остановился до переоткрытия."""
+    state = _state()
+    if lead_id in state:
+        del state[lead_id]
+        _save(state)
 
 
 def reset() -> None:

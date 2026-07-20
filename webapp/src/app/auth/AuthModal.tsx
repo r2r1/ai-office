@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { api } from "../../data/api"
 
-const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
+// var(--mercury) из design.css (production-readiness worklist п.36/37).
+const MERCURY = "var(--mercury)"
 
 interface AuthModalProps {
   open: boolean
@@ -61,7 +62,7 @@ export function AuthModal({ open, onClose, onSuccess, githubAvailable, googleAva
                   <Title>Вход в офис</Title>
                   <Sub>Подключите аккаунт, чтобы запустить свою команду AI-агентов.</Sub>
                   {hasScan && (
-                    <div style={{ marginTop: 10, fontSize: 11.5, color: "#a0e0ab", display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--success)", display: "flex", alignItems: "center", gap: 6 }}>
                       <span>✓</span> Находки о вашей компании сохранены — офис продолжит с них, спрашивать заново не будет
                     </div>
                   )}
@@ -103,6 +104,17 @@ export function AuthModal({ open, onClose, onSuccess, githubAvailable, googleAva
   )
 }
 
+// Коды ошибок GitHub Device Flow (RFC 8628) — конечный, известный набор,
+// сырой код напрямую пользователю раньше не переводился (production-
+// readiness worklist п.23: только expired_token имел человекочитаемый текст,
+// остальные показывались как есть, напр. "access_denied").
+const _GITHUB_DEVICE_ERRORS: Record<string, string> = {
+  expired_token: "Код истёк — начните заново",
+  access_denied: "Вход отменён — попробуйте ещё раз",
+  incorrect_device_code: "Код не распознан — начните заново",
+  device_flow_disabled: "GitHub временно не отвечает на этот способ входа — попробуйте позже",
+}
+
 function GitHubPane({ onBack, onSuccess }: { onBack: () => void; onSuccess: () => void }) {
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState("")
@@ -123,7 +135,8 @@ function GitHubPane({ onBack, onSuccess }: { onBack: () => void; onSuccess: () =
         if (stop) return
         if (r?.ok) { onSuccess(); return }
         if (r?.error && !["authorization_pending", "slow_down", ""].includes(r.error)) {
-          setError(r.error === "expired_token" ? "Код истёк — начните заново" : r.error); setPolling(false); return
+          setError(_GITHUB_DEVICE_ERRORS[r.error] || "Не получилось войти через GitHub — попробуйте ещё раз")
+          setPolling(false); return
         }
         timer.current = setTimeout(poll, interval)
       }
@@ -153,11 +166,11 @@ function GitHubPane({ onBack, onSuccess }: { onBack: () => void; onSuccess: () =
               background: "var(--surface-soft)", border: "1px dashed var(--hairline-strong)", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span className="mono" style={{ fontSize: 26, letterSpacing: "6px", color: "var(--text)" }}>{data.user_code}</span>
-            <span style={{ fontSize: 11, color: copied ? "#a0e0ab" : "var(--muted)" }}>{copied ? "скопировано" : "копировать"}</span>
+            <span style={{ fontSize: 11, color: copied ? "var(--success)" : "var(--muted)" }}>{copied ? "скопировано" : "копировать"}</span>
           </button>
           <a href={data.verification_uri} target="_blank" rel="noreferrer"
             style={{ display: "block", marginTop: 12, textAlign: "center", padding: "12px", borderRadius: "var(--radius-pill)",
-              background: MERCURY, color: "#0a0a0a", fontWeight: 500, fontSize: 13.5, textDecoration: "none" }}>
+              background: MERCURY, color: "var(--on-accent)", fontWeight: 500, fontSize: 13.5, textDecoration: "none" }}>
             Открыть GitHub
           </a>
           {polling && (
@@ -199,7 +212,7 @@ function EmailPane({ onBack, onSuccess }: { onBack: () => void; onSuccess: () =>
       {error && <ErrorBox text={error} />}
       <button onClick={submit} disabled={busy}
         style={{ width: "100%", marginTop: 12, padding: "12px", borderRadius: "var(--radius-pill)", border: "none",
-          background: busy ? "var(--ghost)" : MERCURY, color: busy ? "var(--muted)" : "#0a0a0a", fontWeight: 500, fontSize: 13.5, cursor: "pointer" }}>
+          background: busy ? "var(--ghost)" : MERCURY, color: busy ? "var(--muted)" : "var(--on-accent)", fontWeight: 500, fontSize: 13.5, cursor: "pointer" }}>
         {busy ? "Входим..." : "Войти"}
       </button>
     </Pane>
@@ -238,7 +251,7 @@ function BigButton({ children, onClick, primary }: { children: React.ReactNode; 
 }
 function ErrorBox({ text }: { text: string }) {
   return <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: "var(--radius-sm)", background: "rgba(207,102,121,0.1)",
-    border: "1px solid rgba(207,102,121,0.3)", color: "#e89", fontSize: 12, lineHeight: 1.5 }}>{text}</div>
+    border: "1px solid rgba(207,102,121,0.3)", color: "var(--danger-soft)", fontSize: 12, lineHeight: 1.5 }}>{text}</div>
 }
 function Spinner() {
   return <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.9, ease: "linear" }}

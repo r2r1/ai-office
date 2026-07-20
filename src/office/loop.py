@@ -487,26 +487,51 @@ async def _run_office(tid: str) -> None:
 
         # Проверка паузы — пользователь или quota-стоп
         if control.is_paused():
+            # Пауза не гарантировала чистое состояние (production-readiness
+            # worklist п.4): агент, зависший РОВНО в момент нажатия ⏸,
+            # оставался «зависшим» до resume — control.pause() не лечит и не
+            # отменяет корутины (сознательно синхронная функция, вызывается
+            # из многих мест). Лечим здесь же, пока ждём — heal_stuck_agents
+            # сама не трогает агентов моложе MAX_THINK_SECS, лишний вызов на
+            # паузе безвреден.
+            await execution.heal_stuck_agents(publish)
             await asyncio.sleep(max(LOOP_INTERVAL * 3, 30))
             continue
 
+        # ⚠️ Каждый из трёх блоков ниже (лиды/автодожим/процессы) в своём
+        # try/except (production-readiness worklist п.12) — раньше необрабо-
+        # танное исключение в ЛЮБОМ из них убивало ВЕСЬ asyncio.Task тенанта;
+        # менеджер респавнил задачу (см. run()), но детерминированный баг
+        # падал на том же месте каждый раз, и офис выглядел «зависшим» без
+        # единой подсказки в UI (видно только в trace.jsonl, которого
+        # тестировщик не откроет). Один сломанный блок больше не должен
+        # останавливать остальные детерминированные проверки этого цикла.
+
         # Недожатые лиды (мини-CRM, product-vision.md §3): дешёвая детерминированная
         # проверка без LLM — событие поднимается один раз на пачку, не спамит.
-        from src.office import leads as leads_mod
-        n_stale = leads_mod.check_stale_events()
-        if n_stale:
-            await publish({"type": "system",
-                           "text": f"🟡 {n_stale} лид(ов) без ответа 72+ часов — см. «Лиды»"})
+        try:
+            from src.office import leads as leads_mod
+            n_stale = leads_mod.check_stale_events()
+            if n_stale:
+                await publish({"type": "system",
+                               "text": f"🟡 {n_stale} лид(ов) без ответа 72+ часов — см. «Лиды»"})
+        except Exception:
+            import logging
+            logging.exception("[office.loop] сбой проверки недожатых лидов, тенант %s", tid)
 
         # Автодожим (docs/product-capability-gaps.md п.4): раньше залежавшийся лид
         # ждал, пока LLM-агент САМ вспомнит написать — событие выше только уведомляло.
         # Детерминированный код первичнее LLM (BOS §7): серия сообщений отправляется
         # сама по расписанию, независимо от того, посмотрел ли кто-то во вкладку «Лиды».
-        from src.office import lead_nurture
-        n_nurtured = await lead_nurture.run_due_followups()
-        if n_nurtured:
-            await publish({"type": "system",
-                           "text": f"📨 Автодожим: отправлено {n_nurtured} сообщени(й) по лидам"})
+        try:
+            from src.office import lead_nurture
+            n_nurtured = await lead_nurture.run_due_followups()
+            if n_nurtured:
+                await publish({"type": "system",
+                               "text": f"📨 Автодожим: отправлено {n_nurtured} сообщени(й) по лидам"})
+        except Exception:
+            import logging
+            logging.exception("[office.loop] сбой автодожима лидов, тенант %s", tid)
 
         # Повторяющиеся процессы (BOS §5: Process — необязательно поток Instance
         # вроде продаж, может быть циклическое действие: «контент-завод»,
@@ -514,19 +539,23 @@ async def _run_office(tid: str) -> None:
         # ли план проекта — Process не подчиняется завершению Project. Дедуп —
         # тот же приём, что gap.replan(): новая задача только когда предыдущая
         # закрыта, иначе один процесс спамил бы задачу каждый цикл.
-        from src.office import processes as processes_mod
-        tick_result = processes_mod.tick()
-        for pt in tick_result["created"]:
-            await publish({"type": "system", "text": f"🔄 Процесс поставил задачу: {pt['title'][:70]}"})
-        # Реальный кейс (лог прогона 2026-07-09): процесс 92 цикла подряд бился в
-        # один и тот же блокер вхолостую — теперь сам встаёт на паузу вместо
-        # бесконечного повтора (processes.tick, BLOCKER_PAUSE_THRESHOLD).
-        for pp in tick_result["paused"]:
-            await publish({"type": "system",
-                           "text": f"⏸ Процесс «{pp['title'][:60]}» поставлен на паузу — "
-                                   f"{processes_mod.BLOCKER_PAUSE_THRESHOLD} раза подряд упёрся в один "
-                                   f"и тот же блокер. Посмотрите «Работа → Процессы» и снимите паузу, "
-                                   f"когда причина устранена."})
+        try:
+            from src.office import processes as processes_mod
+            tick_result = processes_mod.tick()
+            for pt in tick_result["created"]:
+                await publish({"type": "system", "text": f"🔄 Процесс поставил задачу: {pt['title'][:70]}"})
+            # Реальный кейс (лог прогона 2026-07-09): процесс 92 цикла подряд бился в
+            # один и тот же блокер вхолостую — теперь сам встаёт на паузу вместо
+            # бесконечного повтора (processes.tick, BLOCKER_PAUSE_THRESHOLD).
+            for pp in tick_result["paused"]:
+                await publish({"type": "system",
+                               "text": f"⏸ Процесс «{pp['title'][:60]}» поставлен на паузу — "
+                                       f"{processes_mod.BLOCKER_PAUSE_THRESHOLD} раза подряд упёрся в один "
+                                       f"и тот же блокер. Посмотрите «Работа → Процессы» и снимите паузу, "
+                                       f"когда причина устранена."})
+        except Exception:
+            import logging
+            logging.exception("[office.loop] сбой тика повторяющихся процессов, тенант %s", tid)
 
         # Бюджетный лимит из Конституции: превышен общий лимит расхода → авто-пауза.
         if costs.over_limit():

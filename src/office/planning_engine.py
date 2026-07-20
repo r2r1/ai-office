@@ -369,6 +369,34 @@ async def run_leaders(goal: str, ms: list, publish) -> None:
         objective = org.state_of(dept_id).get("objective", "")
         ready = plan.ready_for_department(dept_id) if plan.is_generated() else []
 
+        # Capability-гейт НА ДИСПЕТЧЕРИЗАЦИИ (BOS §6, production-readiness
+        # worklist п.3): раньше недостающая способность (телеграм-токен,
+        # доступ к Gmail) была видна только один раз при BOOTSTRAP
+        # (execution_policy.missing_for_plan) — ничего не мешало назначить
+        # задачу исполнителю, который упирался в отсутствие доступа В
+        # СЕРЕДИНЕ работы. Теперь задача с недостающей способностью вообще
+        # не считается "ready" — остаётся на доске, событие поднимается РАЗ
+        # (дедуп по task_id среди необработанных problem-событий), не на
+        # каждый цикл.
+        if ready:
+            from src.office import capability as capability_module, events as events_mod
+            still_ready = []
+            for t in ready:
+                cap_missing = capability_module.blocking_for_task(t)
+                if not cap_missing:
+                    still_ready.append(t)
+                    continue
+                already = [e for e in events_mod.pending()
+                          if e.get("task_id") == t.get("id") and e.get("kind") == "problem"]
+                if not already:
+                    labels = ", ".join(m["label"] for m in cap_missing)
+                    events_mod.raise_event(
+                        "problem",
+                        f"Задача «{(t.get('title') or t['id'])[:60]}» не может начаться — "
+                        f"нет доступа: {labels}",
+                        from_role="orchestrator", task_id=t.get("id"))
+            ready = still_ready
+
         # Лидер ОТСЛЕЖИВАЕТ доску своего отдела (видимо в ленте и в задаче лидера).
         if plan.is_generated():
             summary = plan.board_summary(dept_id)

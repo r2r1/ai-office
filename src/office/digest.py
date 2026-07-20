@@ -12,6 +12,15 @@ from src.saas import context as ctx
 
 _FILE = "digest.json"
 
+# Читай-мутируй-пиши без блокировки: два почти одновременных вызова (два
+# открытых таба одного тенанта) видят один и тот же старый last_seen и оба
+# строят/показывают ОДИН И ТОТ ЖЕ дайджест (production-readiness worklist
+# п.27). Полноценный лок непропорционален риску (дубль всплывашки, не потеря
+# данных) — вместо этого маленький in-memory дебаунс: повторный вызов В ТЕЧЕНИЕ
+# нескольких секунд после первого для ТОГО ЖЕ тенанта получает пустой дайджест.
+_DEBOUNCE_SECS = 5.0
+_last_call: dict[str, float] = {}
+
 
 def _load() -> dict:
     return ctx.read_json(_FILE, {"last_seen": 0})
@@ -23,9 +32,15 @@ def _save(d: dict) -> None:
 
 def get_and_mark_seen() -> dict:
     """Возвращает дайджест с момента последнего визита, обновляет метку."""
+    tid = ctx.get_tenant()
+    now = time.time()
+    prev_call = _last_call.get(tid, 0.0)
+    if now - prev_call < _DEBOUNCE_SECS:
+        return {"items": [], "count": 0, "since": "", "is_first": False}
+    _last_call[tid] = now
+
     d = _load()
     last_seen = d.get("last_seen", 0)
-    now = time.time()
 
     digest = _build(last_seen)
     d["last_seen"] = now

@@ -253,6 +253,7 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     const cleanups: Array<() => void> = []
+    let lastEventTs = 0
     ;(async () => {
       const [me, bs] = await Promise.all([api.me(), api.briefStatus()])
       if (cancelled) return
@@ -260,7 +261,10 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
       // начальный снапшот данных
       dispatch({ t: "agents", list: await api.agents() })
       const hist = await api.history()
-      for (const ev of hist.events || []) dispatch({ t: "event", e: { ...ev, historical: true } })
+      for (const ev of hist.events || []) {
+        if (ev.ts) lastEventTs = Math.max(lastEventTs, ev.ts)
+        dispatch({ t: "event", e: { ...ev, historical: true } })
+      }
       await refresh(["progress", "costs", "leads", "sites", "plan"])
       await loadThreads()
       // текущая модель офиса — для плашки в топбаре
@@ -284,6 +288,19 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
             dispatch({ t: "agents", list: await api.agents() })
             await refresh(["progress", "costs", "leads", "sites", "plan"])
             await loadThreads()
+            // Ресинк выше восстанавливает СОСТОЯНИЕ (агенты/план/расход) —
+            // но не строки самой ленты событий, случившиеся ровно в окне
+            // разрыва (production-readiness worklist п.31): EventSource не
+            // умеет реплеить пропущенное сам, и раньше эти записи терялись
+            // безвозвратно даже при живом /api/history на диске. Дозагружаем
+            // только события НОВЕЕ последнего уже показанного — тот же
+            // приём historical:true, что уже используется при первом монтировании.
+            try {
+              const hist = await api.history()
+              for (const ev of hist.events || []) {
+                if ((ev.ts || 0) > lastEventTs) dispatch({ t: "event", e: { ...ev, historical: true } })
+              }
+            } catch { /* история недоступна — состояние уже ресинхронизировано выше */ }
           })()
         }
         hasConnectedBefore = true
@@ -292,6 +309,7 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
       es.onmessage = (m) => {
         let e: any
         try { e = JSON.parse(m.data) } catch { return }
+        if (e.ts) lastEventTs = Math.max(lastEventTs, e.ts)
         dispatch({ t: "event", e })
         if (e.historical) return
         // side-effects: подтягиваем данные по релевантным событиям (как в game.js)

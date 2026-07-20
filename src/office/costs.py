@@ -169,16 +169,53 @@ def over_limit() -> bool:
 
 def would_exceed(estimated_usd: float) -> bool:
     """Выйдет ли ПРЕДСТОЯЩИЙ платный шаг за лимиты (BOS §6: estimated_cost сверяется
-    с бюджетом ДО исполнения, а не после). 0/отрицательная оценка → не блокируем."""
+    с бюджетом ДО исполнения, а не после). 0/отрицательная оценка → не блокируем.
+    Учитывает reserved() — см. reserve()."""
     if estimated_usd <= 0:
         return False
     total_cap = _effective_total_cap()
     daily_cap = limits().get("daily_usd", 0.0)
-    if total_cap > 0 and totals()["cost"] + estimated_usd > total_cap:
+    committed = totals()["cost"] + reserved()
+    if total_cap > 0 and committed + estimated_usd > total_cap:
         return True
     if daily_cap > 0 and spent_today() + estimated_usd > daily_cap:
         return True
     return False
+
+
+# ── Резерв бюджета ДО исполнения (закрывает гонку would_exceed↔record) ──
+# record() пишется ТОЛЬКО ПОСЛЕ ответа LLM (реальная стоимость известна только
+# тогда) — а would_exceed() сверяется с totals() ДО вызова. Несколько задач
+# РАЗНЫХ ролей могут исполняться параллельно (execution.assign создаёт
+# отдельную asyncio-корутину на агента, MAX_PER_ROLE=1 ограничивает только
+# ОДНУ роль, не весь отдел/офис) — каждая независимо видит "бюджет ещё не
+# исчерпан" по одному и тому же totals(), и совместно способны проскочить
+# total_usd, пока ни один record() ещё не долетел (production-readiness
+# worklist п.2). In-memory, per-process — тот же уровень строгости, что у
+# execution._thinking_since (признанный SSOT-долг, не новый), достаточен для
+# однопроцессного дефолтного деплоя этого продукта.
+_reserved: dict[str, float] = {}
+
+
+def reserve(estimated_usd: float) -> None:
+    """Резервирует ОЖИДАЕМУЮ стоимость перед вызовом LLM — see run_task()."""
+    if estimated_usd <= 0:
+        return
+    tid = ctx.get_tenant()
+    _reserved[tid] = _reserved.get(tid, 0.0) + estimated_usd
+
+
+def release_reservation(estimated_usd: float) -> None:
+    """Снимает резерв ПОСЛЕ вызова (успех или провал — record() уже учёл
+    реальную стоимость при успехе, при провале реальной стоимости не было)."""
+    if estimated_usd <= 0:
+        return
+    tid = ctx.get_tenant()
+    _reserved[tid] = max(0.0, _reserved.get(tid, 0.0) - estimated_usd)
+
+
+def reserved() -> float:
+    return _reserved.get(ctx.get_tenant(), 0.0)
 
 
 def limit_payload() -> dict:

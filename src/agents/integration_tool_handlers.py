@@ -89,7 +89,7 @@ def build(agent_id: str, role: str,
         # act_type нужен и гейту ниже, и записи исхода после вызова (risk.py) —
         # считаем один раз для обеих целей.
         from src.office import autonomy
-        act_type = autonomy._action_type_for(action_name)
+        act_type = autonomy._action_type_for(action_name, declared=getattr(action, "action_type", ""))
 
         # Гейт автономии для ВНЕШНЕ-видимых действий: на уровнях ниже требуемого офис
         # не выполняет действие сам, а просит OK клиента. website публикует через свой

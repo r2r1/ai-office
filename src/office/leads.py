@@ -54,7 +54,17 @@ def set_status(lead_id: str, status: str, note: str = "") -> dict | None:
     """Меняет статус лида, пишет запись в историю. None — если лид/статус не найден."""
     if status not in STATUSES:
         return None
-    return pi.set_stage(PROCESS, lead_id, status, note=note)
+    result = pi.set_stage(PROCESS, lead_id, status, note=note)
+    if result and status == "new":
+        # Владелец (или агент) вручную вернул лида в "new" — автодожим обязан
+        # начать серию ЗАНОВО, а не продолжить с шага, на котором остановился
+        # до того, как лида взяли в работу (production-readiness worklist
+        # п.30): без сброса клиент, чей запрос только что признали снова
+        # актуальным, мог сразу получить шаг 3 ("если неактуально — больше не
+        # пишем") — сообщение вне контекста для него.
+        from src.office import lead_nurture
+        lead_nurture.reset_lead(lead_id)
+    return result
 
 
 def add_note(lead_id: str, text: str, by: str = "") -> dict | None:

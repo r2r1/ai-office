@@ -210,8 +210,13 @@ export const api = {
   del: async (url: string) => {
     try {
       const r = await fetch(url, { method: "DELETE", credentials: "same-origin" })
-      return await r.json().catch(() => ({ ok: r.ok }))
-    } catch { return null }
+      // Пустое тело (204 — обычный ответ на DELETE) и провал без JSON-тела —
+      // раньше оба случая давали одинаковый {ok: r.ok} без единого текста
+      // ошибки (production-readiness worklist п.10): экран, показывающий
+      // result.message при неудаче, молчал вместо диагноза. Код ответа —
+      // не выдумка, honest минимум даже без содержательного тела.
+      return await r.json().catch(() => ({ ok: r.ok, error: r.ok ? undefined : `HTTP ${r.status}` }))
+    } catch { return { ok: false, error: "Нет связи с сервером" } }
   },
 }
 

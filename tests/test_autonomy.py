@@ -62,6 +62,32 @@ def test_create_repo_still_auto_allowed_at_default_guided_level():
     assert not autonomy.needs_approval("create_repo")
 
 
+# ── declared action_type (production-readiness worklist п.17) ────────────────
+
+def test_declared_action_type_wins_over_substring_heuristic():
+    """Явная декларация побеждает БЕЗУСЛОВНО, даже если подстрочная эвристика
+    предложила бы что-то другое."""
+    assert autonomy._action_type_for("read_email", declared="use_integration") == "use_integration"
+
+
+def test_without_declaration_substring_heuristic_still_runs():
+    """Обратная совместимость: действие без declared ведёт себя как раньше."""
+    assert autonomy._action_type_for("send_message") == "send_message"
+    assert autonomy._action_type_for("push") == "push_code"
+
+
+def test_gmail_read_actions_declare_use_integration_not_send_message():
+    """Реальный найденный баг: подстрока "email" в list_emails/read_email
+    классифицировала ЧТЕНИЕ почты как send_message — на самом строгом уровне
+    автономии ("scout") агент не мог бы даже прочитать входящие без
+    одобрения владельца, хотя это чистое чтение без внешнего эффекта."""
+    from src.integrations.gmail import INTEGRATION
+    for action_name in ("list_emails", "read_email"):
+        action = INTEGRATION.actions[action_name]
+        resolved = autonomy._action_type_for(action.name, declared=action.action_type)
+        assert resolved == "use_integration", f"{action_name} resolved to {resolved!r}"
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("aut_test_*"):
         if d.is_dir():

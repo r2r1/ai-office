@@ -440,6 +440,7 @@ function LimitsTab() {
   const [maxActive, setMaxActive] = useState("3")
   const [activeCount, setActiveCount] = useState(0)
   const [projSaved, setProjSaved] = useState(false)
+  const [maxActiveError, setMaxActiveError] = useState(false)
 
   useEffect(() => {
     api.get("/api/limits").then(l => {
@@ -449,8 +450,17 @@ function LimitsTab() {
   }, [])
 
   function saveProjectLimit() {
-    const n = Math.max(1, parseInt(maxActive) || 3)
-    api.setProjectLimit(n).then(r => {
+    // Раньше "-5"/"abc" молча подменялись дефолтом БЕЗ единой подсказки —
+    // пользователь мог решить, что ввод принят как есть (production-
+    // readiness worklist п.25). Теперь невалидный ввод не уходит на сервер
+    // вовсе, а поле явно помечается ошибкой.
+    const parsed = parseInt(maxActive, 10)
+    if (!Number.isFinite(parsed) || parsed < 1 || String(parsed) !== maxActive.trim()) {
+      setMaxActiveError(true)
+      return
+    }
+    setMaxActiveError(false)
+    api.setProjectLimit(parsed).then(r => {
       if (r) setMaxActive(String(r.max_active))
       setProjSaved(true); setTimeout(() => setProjSaved(false), 1600)
     })
@@ -480,14 +490,17 @@ function LimitsTab() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
           <span style={{ fontSize: 12, color: "var(--text-dim)", width: 100 }}>Лимит</span>
-          <input value={maxActive} onChange={e => setMaxActive(e.target.value)} type="number" min="1" step="1"
+          <input value={maxActive} onChange={e => { setMaxActive(e.target.value); setMaxActiveError(false) }}
+            type="number" min="1" step="1"
             onKeyDown={e => e.key === "Enter" && saveProjectLimit()}
-            style={{ flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+            style={{ flex: 1, background: "var(--surface-soft)",
+              border: `1px solid ${maxActiveError ? "var(--danger)" : "var(--hairline)"}`,
               borderRadius: "var(--radius-md)", padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
           <button onClick={saveProjectLimit}
             style={{ border: "1px solid var(--hairline-strong)", borderRadius: "var(--radius-md)", padding: "0 18px",
               background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13 }}>Сохранить</button>
         </div>
+        {maxActiveError && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 8 }}>Введите целое число от 1 и больше</div>}
         {projSaved && <div style={{ fontSize: 11, color: "var(--success)", marginTop: 8 }}>сохранено ✓</div>}
       </Card>
 

@@ -31,6 +31,16 @@ class Action:
     handler: Callable[[dict, dict], Awaitable[str]]
     params: dict[str, dict] = field(default_factory=dict)   # JSON-schema properties
     required: list[str] = field(default_factory=list)
+    # Явная декларация типа действия для гейта автономии/риска (autonomy.py,
+    # risk.py) — предпочтительнее подстрочного угадывания по имени действия
+    # (`"send" in name` ловил бы и "send_report", не только реальную отправку
+    # вовне; production-readiness worklist §17.10 канонической спеки, п.17
+    # чек-листа). Пусто — action_type выводится эвристикой по имени
+    # (обратная совместимость: существующие интеграции ничего не декларируют,
+    # ничего не ломается). Значения — тот же словарь, что уже понимает
+    # autonomy.needs_approval: publish_site | push_code | launch_bot |
+    # create_repo | send_message | use_integration.
+    action_type: str = ""
     # Слова, которыми агент/клиент описывает потребность СВОБОДНО («лендинг»,
     # «письмо»), но которых нет в name/description этого действия — раньше жили
     # ТОЛЬКО в отдельном захардкоженном словаре src/office/tool_router.py

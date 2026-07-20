@@ -555,6 +555,14 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
     trace.log("agent_start", agent=agent_id, role=role,
               model=policy["model"], tier=policy["tier"],
               est_usd=policy["estimated_usd"], skill=skill or "")
+    # Резерв бюджета ДО вызова LLM (см. costs.reserve докстринг) — закрывает
+    # гонку между этим would_exceed() и record(), который пишется только
+    # ПОСЛЕ ответа API: несколько параллельных задач иначе могли независимо
+    # пройти проверку выше по одному и тому же totals() и совместно
+    # проскочить лимит. Снимается в finally — после успеха реальная
+    # стоимость уже учтена record()'ом, после провала реальной стоимости
+    # не было вовсе.
+    costs.reserve(policy["estimated_usd"])
     try:
         if role == "researcher":
             result = await researcher.run_async(task, depth="quick", publish=publish, agent_id=agent_id)
@@ -739,6 +747,7 @@ async def run_task(agent_id: str, role: str, task: str, publish, skill: str = ""
         else:
             _model_fail_count.pop(tk(agent_id), None)
     finally:
+        costs.release_reservation(policy["estimated_usd"])
         _thinking_since.pop(tk(agent_id), None)
         _agent_task.pop(tk(agent_id), None)
         # Снимаем СВОЙ хэндл (identity-check): если watchdog уже переназначил задачу
@@ -755,19 +764,20 @@ async def heal_stuck_agents(publish) -> None:
     """
     now = time.time()
     prefix = f"{ctx.get_tenant()}:"  # только агенты ТЕКУЩЕГО тенанта, не чужие
-    # Агент, ждущий ответа клиента (ask_user/одобрение публикации), НЕ завис — это
-    # штатное ожидание дольше MAX_THINK_SECS. Пока в тенанте есть открытые вопросы —
-    # продлеваем таймеры; иначе задача получила бы ВТОРОГО исполнителя (двойная запись site/).
+    # Агент, ждущий СВОЕГО ответа клиента (ask_user/одобрение публикации), НЕ
+    # завис — штатное ожидание дольше MAX_THINK_SECS. ⚠️ Раньше это проверялось
+    # ОДНИМ вопросом на весь тенант (list_pending()) — любой открытый вопрос
+    # ЛЮБОГО агента продлевал таймер ВСЕМ, включая тех, кто реально завис и
+    # никого ни о чём не спрашивал (production-readiness worklist п.5).
+    # questions.pending_for(aid) — персонально, только СВОЙ вопрос защищает.
     from src.office import questions as questions_mod
-    if questions_mod.list_pending():
-        for key in list(_thinking_since):
-            if key.startswith(prefix):
-                _thinking_since[key] = now
-        return
     for key, since in list(_thinking_since.items()):
         if not key.startswith(prefix):
             continue
         aid = key[len(prefix):]
+        if questions_mod.pending_for(aid):
+            _thinking_since[key] = now
+            continue
         if now - since > MAX_THINK_SECS:
             _thinking_since.pop(key, None)
             # Зомби-корутину ОТМЕНЯЕМ, а не просто «забываем»: иначе она продолжает

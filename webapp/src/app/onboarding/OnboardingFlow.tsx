@@ -377,10 +377,20 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
   // первый дашборд (портрет §23). До этого office/loop.py держит BOOTSTRAP
   // на паузе перед проектированием ТЗ — эндпоинт делает клик содержательным
   // для бэкенда, а не только сменой фазы во фронтовом состоянии.
+  // ⚠️ api.ts.postJSON НИКОГДА не бросает (сам ловит ошибку сети и молча
+  // возвращает fallback=null) — .catch() здесь был мёртвым кодом, реальный
+  // провал никак не отличался от успеха, и onContinue() срабатывал ВСЕГДА
+  // (production-readiness worklist п.1). Если подтверждение не долетело —
+  // office/loop.py остаётся в бесконечном ожидании, а владелец уже смотрит
+  // следующий экран и не знает, что офис застрял. Теперь смотрим на сам
+  // ответ (r?.ok), а не на факт отсутствия исключения.
+  const [confirmError, setConfirmError] = useState(false)
   async function confirmAndContinue() {
     setConfirming(true)
-    await api.confirmOnboardingResult().catch(() => null)
+    setConfirmError(false)
+    const r = await api.confirmOnboardingResult()
     setConfirming(false)
+    if (!r?.ok) { setConfirmError(true); return }
     onContinue()
   }
   // Map, не Set: раньше принятая и отклонённая инициатива выглядели ОДИНАКОВО
@@ -388,12 +398,15 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
   // визуальный язык, что и disabled-состояние (найдено при аудите). Теперь
   // принято/отклонено — два разных состояния, не один и тот же дым.
   const [decided, setDecided] = useState<Map<string, "accept" | "reject">>(new Map())
+  const [decideError, setDecideError] = useState<string | null>(null)
 
   async function decide(id: string, action: "accept" | "reject") {
     setBusy(id)
-    await api.post(`/api/initiative/${id}/${action}`, {}).catch(() => null)
-    setDecided(prev => new Map(prev).set(id, action))
+    setDecideError(null)
+    const r = await api.post(`/api/initiative/${id}/${action}`, {})
     setBusy(null)
+    if (!r?.ok) { setDecideError(id); return }
+    setDecided(prev => new Map(prev).set(id, action))
   }
 
   return (
@@ -446,7 +459,7 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
                   <div style={{ fontSize: 11, color: "var(--mercury-a)", marginBottom: 10 }}>📈 {ini.expected_outcome}</div>
                 )}
                 {!verdict && (
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <button onClick={() => decide(ini.id, "accept")} disabled={busy === ini.id}
                       style={{ padding: "7px 14px", borderRadius: "var(--radius-pill)", fontSize: 12, cursor: "pointer",
                         border: "1px solid #a0e0ab", background: "rgba(160,224,171,0.15)", color: "#a0e0ab" }}>
@@ -457,6 +470,11 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
                         border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)" }}>
                       Не сейчас
                     </button>
+                    {decideError === ini.id && (
+                      <span style={{ fontSize: 11, color: "#ff6b6b" }}>
+                        Не сохранилось — проверьте связь и попробуйте ещё раз
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -471,9 +489,14 @@ function ResultScreen({ result, onContinue }: { result: any; onContinue: () => v
         </div>
       )}
 
+      {confirmError && (
+        <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 12, marginTop: 22 }}>
+          Не получилось передать подтверждение офису — проверьте связь и нажмите ещё раз.
+        </div>
+      )}
       <motion.button onClick={confirmAndContinue} disabled={confirming} whileTap={{ scale: 0.97 }}
         style={{
-          width: "100%", marginTop: 22, padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none",
+          width: "100%", marginTop: confirmError ? 8 : 22, padding: "13px 20px", borderRadius: "var(--radius-pill)", border: "none",
           cursor: confirming ? "default" : "pointer", background: MERCURY, color: "#0b0b0b", fontSize: 13, fontWeight: 600,
           opacity: confirming ? 0.7 : 1,
         }}>
