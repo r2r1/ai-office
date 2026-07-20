@@ -12,6 +12,8 @@ const MERCURY = "linear-gradient(90deg, #a0e0ab, #ffac2e 50%, #a52d25)"
 interface LandingProps {
   onLogin: () => void
   onDemo?: () => void
+  /** Сообщение над лендингом — сейчас только "сессия истекла" (round2 audit, N9). */
+  notice?: string
 }
 
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } } }
@@ -20,7 +22,7 @@ const item = {
   show:   { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 90, damping: 18 } },
 }
 
-export function LandingView({ onLogin, onDemo }: LandingProps) {
+export function LandingView({ onLogin, onDemo, notice }: LandingProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
   // Параллакс амбиента (скилл, приём 2): фоновые пятна двигаются МЕДЛЕННЕЕ
@@ -40,6 +42,13 @@ export function LandingView({ onLogin, onDemo }: LandingProps) {
         background: "radial-gradient(55vw 55vw at 90% 25%, rgba(255,172,46,0.09), transparent 60%)" }} />
 
       <div style={{ position: "relative", zIndex: 1, maxWidth: 1080, margin: "0 auto", padding: "0 24px" }}>
+        {notice && (
+          <div style={{ marginTop: 16, padding: "10px 16px", borderRadius: "var(--radius-md)",
+            background: "rgba(255,172,46,0.12)", border: "1px solid rgba(255,172,46,0.3)",
+            color: "var(--text)", fontSize: 13.5, textAlign: "center" }}>
+            ⚠️ {notice}
+          </div>
+        )}
         <Nav onLogin={onLogin} />
         <Hero onLogin={onLogin} onDemo={onDemo} />
         <MindFeed />

@@ -3,7 +3,7 @@ import { motion } from "motion/react"
 import { OfficeProvider } from "../data/OfficeProvider"
 import { LandingView } from "./landing/LandingView"
 import { AuthModal } from "./auth/AuthModal"
-import { api } from "../data/api"
+import { api, setAuthExpiredHandler } from "../data/api"
 
 // Посетитель лендинга ещё не авторизован — незачем качать весь авторизованный
 // App (все 9 вкладок, ProjectView на 1164 строки и т.д.) вместе с публичной
@@ -19,6 +19,12 @@ export function Gate() {
   const [phase, setPhase] = useState<Phase>("loading")
   const [authOpen, setAuthOpen] = useState(false)
   const [flags, setFlags] = useState({ github: false, google: false, dev: false, demo: false })
+  // Истёкшая сессия (round2 audit, N9): раньше проверка auth была ТОЛЬКО при
+  // монтировании — если сессия протухала посреди работы (14-дневный TTL,
+  // ручной logout в другой вкладке), все вкладки молча показывали пустые
+  // списки без единого "войдите заново". api.setAuthExpiredHandler ловит
+  // первый же 401 от любого запроса и сбрасывает приложение на лендинг.
+  const [sessionExpired, setSessionExpired] = useState(false)
 
   const check = useCallback(async () => {
     const [me, bs] = await Promise.all([api.me(), api.briefStatus()])
@@ -28,6 +34,15 @@ export function Gate() {
   }, [])
 
   useEffect(() => { check() }, [check])
+
+  useEffect(() => {
+    setAuthExpiredHandler(() => {
+      setSessionExpired(true)
+      setPhase("landing")
+      setAuthOpen(true)
+    })
+    return () => setAuthExpiredHandler(null)
+  }, [])
 
   if (phase === "loading") return <Splash />
   if (phase === "app") return (
@@ -41,6 +56,7 @@ export function Gate() {
       <LandingView
         onLogin={() => setAuthOpen(true)}
         onDemo={flags.demo ? () => setPhase("app") : undefined}
+        notice={sessionExpired ? "Сессия истекла — войдите заново, чтобы продолжить." : undefined}
       />
       <AuthModal
         open={authOpen}
@@ -48,7 +64,7 @@ export function Gate() {
         githubAvailable={flags.github}
         googleAvailable={flags.google}
         devLogin={flags.dev}
-        onSuccess={() => { setAuthOpen(false); setPhase("app") }}
+        onSuccess={() => { setAuthOpen(false); setSessionExpired(false); setPhase("app") }}
       />
     </>
   )

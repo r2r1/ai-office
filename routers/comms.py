@@ -3,10 +3,12 @@
 2026-07-17.md §3.2.1, PR-5) механически — тот же код, то же поведение.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
 import asyncio
+import re
+import uuid
 from src.office import brief
 from src.office import bus
 from src.office import chat
@@ -27,6 +29,15 @@ from src.office import registry
 from src.office import threads as threads_module
 
 router = APIRouter()
+
+# Тот же потолок, что investigation._MAX_MESSAGE_CHARS (round2 audit, раунд1 #3):
+# /api/ask и /api/chat остаются БЕЗ ограничения длины дольше всех в этой сессии —
+# investigation.py получил лимит раньше (живой прогон нашёл там задвоенный текст
+# от повторного набора), но личный/общий чат тем же путём уходит в
+# memory.remember() (подмешивается в промпт КАЖДОГО будущего агента до конца
+# жизни тенанта) и в intent.capture() — раздутая/сдвоенная строка здесь дороже,
+# чем в онбординге, где живёт один раз в одном месте.
+_MAX_MESSAGE_CHARS = 2000
 
 
 @router.get("/api/knowledge")
@@ -73,6 +84,33 @@ async def get_thread(agent_id: str):
     return {"agent_id": agent_id, "worker_id": agent_id,
             "messages": threads_module.recent(agent_id)}
 
+@router.post("/api/thread/{agent_id}/upload")
+async def upload_to_thread(agent_id: str, file: UploadFile = File(...)):
+    """Загрузка файла в личный чат агента (round2 audit, раунд1 #2) — раньше
+    ни одного способа приложить файл/фото/аудио не было нигде в продукте, ни
+    бэкенда, ни UI. Сохраняет файл реальным артефактом рабочей папки (не
+    мёртвым грузом — виден через list_files/read_file любому агенту), путь
+    возвращается фронту для показа в чате. Для картинок фронт отдельно
+    прикладывает их к следующему /api/ask через image_urls (base64) — это
+    отдельный, настоящий vision-контекст модели, не просто ссылка на файл."""
+    if registry.get(agent_id) is None:
+        return JSONResponse({"error": "агент не найден"}, status_code=404)
+    ctype = (file.content_type or "").lower()
+    if not (ctype.startswith("image/") or ctype.startswith("audio/") or ctype == "application/pdf"):
+        return JSONResponse({"error": f"Недопустимый тип файла: {ctype or 'неизвестен'}. "
+                             "Разрешены изображения, аудио, PDF."}, status_code=400)
+    data = await file.read()
+    from src.office import workspace as workspace_module
+    if len(data) > workspace_module.MAX_UPLOAD_BYTES:
+        mb = workspace_module.MAX_UPLOAD_BYTES // (1024 * 1024)
+        return JSONResponse({"error": f"Файл больше {mb}MB"}, status_code=400)
+    safe_name = re.sub(r"[^A-Za-z0-9_.\-]", "_", file.filename or "upload")[:100]
+    rel_path = f"uploads/{uuid.uuid4().hex[:8]}_{safe_name}"
+    saved = workspace_module.write_bytes(rel_path, data)
+    if saved is None:
+        return JSONResponse({"error": "не удалось сохранить файл"}, status_code=500)
+    return {"ok": True, "path": rel_path, "content_type": ctype, "size": len(data)}
+
 @router.post("/api/ask")
 async def ask_agent(request: Request):
     """Сообщение пользователя агенту в личном чате.
@@ -84,10 +122,17 @@ async def ask_agent(request: Request):
     # worker_id — предпочтительное имя (BOS §12 п.4); agent_id принимается как
     # deprecated-алиас на переходный период, чтобы старые клиенты не сломались.
     agent_id = data.get("worker_id") or data.get("agent_id", "")
-    message = (data.get("message") or "").strip()
+    message = (data.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
+    # image_urls — вложенные фото (round2 audit, раунд1 #2b): data:image/...
+    # base64, собранные фронтом при загрузке. Ограничиваем и тип, и число —
+    # тело запроса не должно превращаться в неограниченный канал данных.
+    image_urls = [u for u in (data.get("image_urls") or [])
+                  if isinstance(u, str) and u.startswith("data:image/")][:4]
 
-    if not agent_id or not message:
-        return JSONResponse({"error": "worker_id и message обязательны"}, status_code=400)
+    if not agent_id or (not message and not image_urls):
+        return JSONResponse({"error": "worker_id и (message или image_urls) обязательны"}, status_code=400)
+    if not message:
+        message = "Прикрепил изображение — посмотри, пожалуйста."
 
     if registry.get(agent_id) is None:
         return JSONResponse({"error": "агент не найден"}, status_code=404)
@@ -144,7 +189,7 @@ async def ask_agent(request: Request):
                            "kind": "msg", "text": reply})
         return {"agent_id": agent_id, "worker_id": agent_id, "reply": reply}
     try:
-        reply = await chat.ask(agent_id, message, publish=bus.publish)
+        reply = await chat.ask(agent_id, message, publish=bus.publish, image_urls=image_urls)
         threads_module.post(agent_id, "agent", reply)
         await bus.publish({"type": "agent_message", "agent_id": agent_id, "from": "agent",
                            "kind": "msg", "text": reply})
@@ -272,9 +317,11 @@ async def _steer_from_chat(text: str) -> None:
         # Sandbox-проверки (бюджет/конфликт артефактов/вето Конституции) → apply|reject.
         # Больше НЕ мутируем план/вехи напрямую — только через прошедший проверки diff.
         from src.office import decision_engine
+        pause_projects = res.get("pause_projects") or []
         plan_diff = {
             "add_tasks": new_tasks if isinstance(new_tasks, list) else [],
             "milestone_ops": ops if isinstance(ops, list) else [],
+            "pause_projects": pause_projects if isinstance(pause_projects, list) else [],
         }
         outcome = decision_engine.decide(plan_diff, made_by="orchestrator_1",
                                          thought=directive or text[:120])
@@ -302,7 +349,7 @@ async def post_chat(request: Request):
     """Предприниматель пишет в общий канал офиса. Сообщение сохраняется и сразу
     отдаётся, а CEO в фоне осмысливает его и вписывает в работу (ответ + правки этапов/доски)."""
     data = await request.json()
-    text = (data.get("text") or "").strip()
+    text = (data.get("text") or "").strip()[:_MAX_MESSAGE_CHARS]
     if not text:
         return JSONResponse({"error": "text обязателен"}, status_code=400)
     msg = office_channel.post("user", "user", text)

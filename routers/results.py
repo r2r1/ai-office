@@ -84,6 +84,34 @@ async def get_leads():
     return {"leads": leads_module.all_leads(), "statuses": leads_module.STATUSES,
             "labels": leads_module.STATUS_LABELS}
 
+@router.get("/api/leads/export.csv")
+async def export_leads_csv():
+    """Экспорт лидов в CSV (round2 audit, раунд1 #4): единственным способом
+    унести результат из продукта раньше был полнотекстовый отладочный дамп
+    всего офис-лога (team.py) — ни CSV, ни любого другого структурированного
+    экспорта не было вообще, хотя вкладка «Результаты» это прямо обещает
+    словом «Результаты»."""
+    import csv
+    import io
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Дата", "Имя", "Контакт", "Сообщение", "Статус", "Сайт"])
+    for lead in leads_module.all_leads():
+        ts = lead.get("ts", 0)
+        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else ""
+        status_label = leads_module.STATUS_LABELS.get(lead.get("status", "new"), lead.get("status", ""))
+        writer.writerow([date_str, lead.get("name", ""), lead.get("contact", ""),
+                         lead.get("message", ""), status_label, lead.get("slug", "")])
+    buf.seek(0)
+    fname = f"leads-{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter(["﻿" + buf.getvalue()]),  # BOM — русские буквы читаются в Excel без ручного выбора кодировки
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
 @router.post("/api/leads/{lead_id}/status")
 async def set_lead_status(lead_id: str, request: Request):
     """Сменить статус лида (мини-CRM). Body: {status, note?}.

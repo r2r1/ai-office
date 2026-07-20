@@ -72,6 +72,14 @@ async def interpret_directive(
             "\nЕсли вопрос предпринимателя касается одной из них — назови её прямо и объясни причину "
             "блокировки, не уходи в общие фразы.\n"
         )
+    # Активные проекты с id — без этого CEO физически не может сослаться на
+    # конкретный проект в pause_projects (нужен именно id, не название на глаз).
+    from src.office import projects as projects_module
+    active_projects = [p for p in projects_module.all_projects() if p.get("status") == "active"]
+    projects_section = ""
+    if active_projects:
+        lines = [f"- {p['id']}: «{p.get('title','')[:80]}»" for p in active_projects]
+        projects_section = "\n=== АКТИВНЫЕ ПРОЕКТЫ (id для pause_projects) ===\n" + "\n".join(lines) + "\n"
     # niche/audience/goal сериализует слот Brief в системном промпте (единый
     # сериализатор), здесь — только оперативный контекст этого хода.
     user = (
@@ -79,7 +87,8 @@ async def interpret_directive(
         f"Этапы сейчас:\n{ms_text}\n\n"
         f"Отделы:\n{departments_text or '(отделов пока нет)'}\n\n"
         f"Доска задач: {board_summary or '(пусто)'}\n"
-        f"{blocked_section}\n"
+        f"{blocked_section}"
+        f"{projects_section}\n"
         f"=== СООБЩЕНИЕ ПРЕДПРИНИМАТЕЛЯ ===\n{message}\n\n"
         f"Пойми запрос и впиши его в текущую работу."
     )

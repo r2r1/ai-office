@@ -137,8 +137,12 @@ async def ask(
     agent_id: str,
     message: str,
     publish: Optional[Callable[[dict], Awaitable[None]]] = None,
+    image_urls: Optional[list[str]] = None,
 ) -> str:
-    """Задаёт вопрос конкретному агенту и возвращает его ответ."""
+    """Задаёт вопрос конкретному агенту и возвращает его ответ.
+
+    image_urls — вложенные изображения (round2 audit, раунд1 #2b), см.
+    llm.run_agent докстринг."""
     rec = registry.get(agent_id)
     system = _build_system(agent_id, rec)
     histories = _all_histories()
@@ -176,6 +180,7 @@ async def ask(
         agent_id=agent_id,
         extra_tools=[_SEND_MESSAGE_TOOL, _READ_MESSAGES_TOOL],
         tool_handlers={"send_message": _handle_send_message, "read_messages": _handle_read_messages},
+        image_urls=image_urls,
     )
 
     # Обновляем историю

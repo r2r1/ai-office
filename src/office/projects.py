@@ -347,6 +347,31 @@ def close(pid: str = "", note: str = "") -> dict | None:
     return dict(target)
 
 
+def cancel(pid: str, note: str = "") -> dict | None:
+    """Отменяет проект НАВСЕГДА — не «пауза» (снимается resume()), а осознанный
+    отказ владельца от работы, которую он больше не хочет (round2 audit, N4):
+    раньше единственным действием над проектом, кроме паузы, было close()
+    (status="done" — фиксирует УСПЕШНОЕ завершение). Владелец, понявший, что
+    инициатива была ошибкой, мог только поставить её на паузу НАВСЕГДА — она
+    оставалась немым пассивом в списке, занимая место, без пути окончательно
+    от неё избавиться. cancel() — честный статус "не доведено, отменено", не
+    выдаёт себя за завершение и не хранится тихо как "просто пауза"."""
+    from src.office import plan, world
+    d = _data()
+    target = next((p for p in d.get("items", []) if p["id"] == pid), None)
+    if not target or target.get("status") in ("done", "cancelled"):
+        return None
+    prog = plan.progress(target["id"])
+    target["status"] = "cancelled"
+    target["closed_ts"] = time.time()
+    target["note"] = (note or "")[:300]
+    target["left_behind"] = {"tasks_done": prog.get("done", 0), "tasks_total": prog.get("total", 0)}
+    _promote_queued(d.get("items", []))
+    _save(d)
+    world.save_snapshot(f"project_cancelled:{target['id']}")
+    return dict(target)
+
+
 def context_block() -> str:
     """Блок проектов для промпта CEO: активные + очередь + краткая история."""
     items = all_projects()

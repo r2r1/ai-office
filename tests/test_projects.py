@@ -134,6 +134,54 @@ def test_create_no_longer_force_closes_previous_active():
     assert projects.get(a["id"])["status"] == "active"
 
 
+def test_cancel_active_project_sets_cancelled_status():
+    """round2 audit N4: раньше единственным действием кроме паузы было close()
+    (status="done") — не было честного способа сказать "это ошибка, отменяю"."""
+    _fresh("proj_test_cancel_active")
+    a = projects.create("A")
+    cancelled = projects.cancel(a["id"])
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+    assert projects.get(a["id"])["status"] == "cancelled"
+
+
+def test_cancel_paused_project_works_too():
+    _fresh("proj_test_cancel_paused")
+    a = projects.create("A")
+    projects.pause(a["id"])
+    cancelled = projects.cancel(a["id"])
+    assert cancelled["status"] == "cancelled"
+
+
+def test_cancel_unknown_id_returns_none():
+    _fresh("proj_test_cancel_unknown")
+    assert projects.cancel("nope") is None
+
+
+def test_cancel_already_done_project_returns_none():
+    _fresh("proj_test_cancel_done")
+    a = projects.create("A")
+    projects.close(a["id"])
+    assert projects.cancel(a["id"]) is None
+
+
+def test_cancel_already_cancelled_project_returns_none():
+    _fresh("proj_test_cancel_twice")
+    a = projects.create("A")
+    projects.cancel(a["id"])
+    assert projects.cancel(a["id"]) is None
+
+
+def test_cancel_frees_slot_for_queued_project():
+    _fresh("proj_test_cancel_promotes")
+    projects.set_limit(1)
+    a = projects.create("A")
+    b = projects.create("B")
+    assert b["status"] == "queued"
+    projects.cancel(a["id"])
+    assert projects.get(b["id"])["status"] == "active"
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("proj_test_*"):
         if d.is_dir():

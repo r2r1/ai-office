@@ -162,7 +162,18 @@ function LeadsTab() {
         </ViewBody>
       ) : (
         <ViewBody style={{ overflowX: "auto" }}>
-          <SectionLabel style={{ marginBottom: 16 }}>Всего заявок: {leads.length}</SectionLabel>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <SectionLabel style={{ marginBottom: 0 }}>Всего заявок: {leads.length}</SectionLabel>
+            {/* Раньше унести лиды можно было только копипастой по одному
+                (round2 audit, раунд1 #4) — единственный экспорт во всём
+                продукте был полнотекстовый отладочный лог со всей внутренней
+                кухней офиса вперемешку. */}
+            <a href="/api/leads/export.csv" download
+              style={{ fontSize: 12, color: "var(--mercury-a)", textDecoration: "none", display: "flex",
+                alignItems: "center", gap: 5 }}>
+              ⬇ Экспорт CSV
+            </a>
+          </div>
           <div style={{ display: "flex", gap: 14, minWidth: 900 }}>
             {LEAD_COLUMNS.map(col => {
               const items = byStatus(col)

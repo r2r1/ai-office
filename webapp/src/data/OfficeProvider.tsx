@@ -29,6 +29,12 @@ export interface OfficeState {
   model: string
   threads: Record<string, ThreadSummary>
   threadsSeen: Record<string, number>
+  /** Тихий счётчик (round2 audit, N1): растёт на initiative_resolved-событии,
+   * чтобы вкладки, где решение приняли НЕ они, перезапросили /api/initiatives
+   * и убрали уже отклонённую/принятую карточку — без него другая открытая
+   * вкладка могла показать «Принять» на инициативе, которую только что
+   * отклонили в соседней. */
+  initiativesTick: number
 }
 
 // seen-состояние личных чатов переживает перезагрузку страницы (бэкенд его не хранит).
@@ -44,6 +50,7 @@ const initialState: OfficeState = {
   plan: { generated: false, tasks: [], progress: { done: 0, total: 0 } },
   model: "",
   threads: {}, threadsSeen: loadSeen(),
+  initiativesTick: 0,
 }
 
 let _feedId = 0
@@ -148,6 +155,11 @@ function reducer(state: OfficeState, action: Action): OfficeState {
           return { ...state, feed: feed(state, isQ ? "❓" : "💬", who,
             (isQ ? "Вопрос: " : "") + (e.text || ""), "system") }
         }
+        case "initiative_resolved":
+          // Тихо — видимый feed-текст для этого же действия уже приходит отдельным
+          // "system"-событием в вкладке, где решение приняли; здесь только счётчик
+          // для ПАССИВНЫХ вкладок (см. initiativesTick в OfficeState).
+          return hist ? state : { ...state, initiativesTick: state.initiativesTick + 1 }
         case "department_event":
           return { ...state, feed: hist ? state.feed : feed(state, "📨", "", e.text || "Сигнал отдела", "system") }
         case "lead_captured":

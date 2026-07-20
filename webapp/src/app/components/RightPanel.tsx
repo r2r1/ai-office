@@ -224,7 +224,7 @@ function ChatTab({ onOpenAgentChat }: { onOpenAgentChat?: (agentId: string) => v
       <div style={{ display: "flex", gap: 6, padding: "10px 12px", borderTop: "1px solid var(--hairline)", flexShrink: 0 }}>
         <input value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
-          placeholder="Сообщение офису…"
+          placeholder="Сообщение офису…" maxLength={2000}
           style={{
             flex: 1, background: "var(--surface-soft)", border: "1px solid var(--hairline)",
             borderRadius: "var(--radius-pill)", padding: "8px 14px", color: "var(--text)",

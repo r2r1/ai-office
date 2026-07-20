@@ -96,13 +96,25 @@ export default function App() {
   const unread = useUnread()
   const rowRef = useRef<HTMLDivElement>(null)
   const newLeads = useOfficeSelector(s => s.leads.filter((l: any) => (l.status || "new") === "new").length)
-  // Чаты больше не отдельный пункт NavRail — бейдж непрочитанного переезжает
-  // на «Команду» (оттуда теперь открывается инбокс).
-  const navBadges = { team: unread.total, results: newLeads }
+  // Чаты больше не отдельный пункт NavRail на десктопе — бейдж непрочитанного
+  // переезжает на «Команду» (оттуда теперь открывается инбокс). На мобильном
+  // же горизонтальный NavRail показывает «Чаты» отдельным пунктом (round2
+  // audit, раунд1 #1) — тот же бейдж нужен и там, лишний ключ для десктопного
+  // варианта просто не используется (там "chats" нет в NAV).
+  const navBadges = { team: unread.total, chats: unread.total, results: newLeads }
 
   // Morning Digest
   const [digest, setDigest] = useState<any>(null)
   const [digestOpen, setDigestOpen] = useState(false)
+  // Последний дайджест (round2 audit, U3) — отдельно от digest/digestOpen,
+  // чтобы кнопка "открыть снова" в TopBar работала даже после того, как
+  // основной попап закрылся или его вообще не было в этой сессии.
+  const [lastDigest, setLastDigest] = useState<any>(null)
+  function reopenDigest() {
+    if (!lastDigest) return
+    setDigest(lastDigest)
+    setDigestOpen(true)
+  }
   // Company Understanding
   const [understanding, setUnderstanding] = useState<any>(null)
   const [understandingOpen, setUnderstandingOpen] = useState(false)
@@ -198,7 +210,11 @@ export default function App() {
   // Загружаем дайджест при старте (однократно)
   useEffect(() => {
     api.digest().then(d => {
-      if (d && d.count > 0) { setDigest(d); setDigestOpen(true) }
+      if (d && d.count > 0) { setDigest(d); setDigestOpen(true); setLastDigest(d) }
+      // Ничего нового с прошлого визита — но, возможно, есть НЕПРОЧИТАННЫЙ
+      // прошлый дайджест (round2 audit, U3): попап закрылся случайно до того,
+      // как его успели дочитать. Кнопка "🌤" в TopBar даёт открыть его снова.
+      else api.digestLast().then(ld => { if (ld && ld.count > 0) setLastDigest(ld) })
     })
   }, [])
 
@@ -281,7 +297,8 @@ export default function App() {
           health={health} trust={trust}
           qualityMode={qualityMode}
           limitTotalUsd={limitInfo?.total_usd} limitOverLimit={limitInfo?.over_limit} onOpenLimits={goToLimits}
-          onStatusClick={() => setUnderstandingOpen(o => !o)} />
+          onStatusClick={() => setUnderstandingOpen(o => !o)}
+          onReopenDigest={lastDigest ? reopenDigest : undefined} />
 
         {/* Офис остановлен — админом, бюджетным лимитом или самим клиентом.
             Раньше об этом говорила только крошечная иконка ⏸ в TopBar (легко

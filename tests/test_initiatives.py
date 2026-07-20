@@ -88,6 +88,49 @@ def test_accept_no_go_succeeds_with_override():
     assert initiatives.get(iid)["status"] == "accepted"
 
 
+def test_accept_already_accepted_raises_already_resolved():
+    """round2 audit N1: устаревшая вкладка не может воскресить уже решённую инициативу."""
+    _fresh("init_test_already_accepted")
+    iid = initiatives.add("Тест", "обоснование", "", tasks=[{"role": "developer", "title": "t"}],
+                          needs_research=False)
+    initiatives.set_research(iid, "ВЕРДИКТ: go", recommendation="go")
+    initiatives.accept(iid)
+    try:
+        initiatives.accept(iid)
+        assert False, "должно было бросить InitiativeAlreadyResolved"
+    except initiatives.InitiativeAlreadyResolved as e:
+        assert e.status == "accepted"
+
+
+def test_accept_already_rejected_raises_already_resolved():
+    _fresh("init_test_already_rejected")
+    iid = initiatives.add("Тест", "обоснование", "", needs_research=False)
+    initiatives.set_research(iid, "ВЕРДИКТ: go", recommendation="go")
+    assert initiatives.reject(iid) is True
+    try:
+        initiatives.accept(iid)
+        assert False, "должно было бросить InitiativeAlreadyResolved"
+    except initiatives.InitiativeAlreadyResolved as e:
+        assert e.status == "rejected"
+
+
+def test_reject_twice_second_call_returns_false():
+    _fresh("init_test_reject_twice")
+    iid = initiatives.add("Тест", "обоснование", "", needs_research=False)
+    assert initiatives.reject(iid) is True
+    assert initiatives.reject(iid) is False
+
+
+def test_reject_after_accept_returns_false_and_does_not_flip_status():
+    _fresh("init_test_reject_after_accept")
+    iid = initiatives.add("Тест", "обоснование", "", tasks=[{"role": "developer", "title": "t"}],
+                          needs_research=False)
+    initiatives.set_research(iid, "ВЕРДИКТ: go", recommendation="go")
+    initiatives.accept(iid)
+    assert initiatives.reject(iid) is False
+    assert initiatives.get(iid)["status"] == "accepted"
+
+
 def _cleanup_test_tenants() -> None:
     for d in ctx.ROOT.glob("init_test_*"):
         if d.is_dir():

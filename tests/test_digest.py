@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.saas import context as ctx
-from src.office import digest
+from src.office import digest, plan
 
 
 def _fresh(name: str) -> None:
@@ -50,6 +50,31 @@ def test_debounce_is_per_tenant():
     _fresh("digest_test_tenant_b")
     d = digest.get_and_mark_seen()  # чужой дебаунс не должен влиять
     assert d["is_first"] is True
+
+
+def test_peek_last_empty_by_default():
+    """round2 audit U3: без единого непустого дайджеста peek_last() честно пуст."""
+    _fresh("digest_test_peek_empty")
+    assert digest.peek_last() == {"items": [], "count": 0, "since": "", "is_first": False}
+
+
+def test_peek_last_returns_last_nonempty_digest_without_consuming_it():
+    _fresh("digest_test_peek_nonempty")
+    t = plan.add_task("Собрать бренд-бук", "designer")
+    plan.assign(t["id"], "designer_1")
+    plan.complete(t["id"])
+    d1 = digest.get_and_mark_seen()  # last_seen=0 → is_first, count всё равно есть
+    assert d1["count"] >= 1
+    peeked = digest.peek_last()
+    assert peeked["count"] == d1["count"]
+    assert peeked["items"] == d1["items"]
+    # peek_last НЕ продвигает last_seen — обычный get_and_mark_seen (после debounce)
+    # больше не должен повторно показать тот же самый пункт.
+    digest._last_call[ctx.get_tenant()] -= digest._DEBOUNCE_SECS + 1
+    d2 = digest.get_and_mark_seen()
+    assert d2["count"] == 0
+    # но peek_last всё ещё отдаёт прежний, ничего не потеряно
+    assert digest.peek_last()["count"] == d1["count"]
 
 
 def _cleanup_test_tenants() -> None:

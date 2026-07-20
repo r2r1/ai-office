@@ -1,8 +1,19 @@
 // Тонкая обёртка над fetch: тот же origin (FastAPI отдаёт /webapp), cookie-сессия идёт сама.
+
+// Истёкшая/недействительная сессия (round2 audit, N9): раньше 401 неотличим от
+// сетевого сбоя — getJSON/postJSON молча возвращали fallback (пустые списки/нули),
+// и все вкладки выглядели так, будто у офиса просто ещё нет данных, без единого
+// «войдите заново». Gate.tsx подписывается сюда и сбрасывает приложение на лендинг.
+let _onAuthExpired: (() => void) | null = null
+export function setAuthExpiredHandler(fn: (() => void) | null): void { _onAuthExpired = fn }
+function _checkAuth(r: Response): void {
+  if (r.status === 401) _onAuthExpired?.()
+}
+
 async function getJSON<T>(url: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(url, { credentials: "same-origin" })
-    if (!r.ok) return fallback
+    if (!r.ok) { _checkAuth(r); return fallback }
     return (await r.json()) as T
   } catch {
     return fallback
@@ -18,7 +29,7 @@ async function postJSON<T>(
       headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
     })
-    if (!r.ok) return fallback
+    if (!r.ok) { _checkAuth(r); return fallback }
     return (await r.json()) as T
   } catch {
     return fallback
@@ -40,13 +51,16 @@ export function newIdempotencyKey(): string {
 // /api/run и /api/terminal возвращают понятную причину отказа (например, «код
 // выполнения отключён оператором») в теле 403, а не только в статусе; обычный
 // postJSON эту причину теряет, подменяя её generic-фолбэком.
-async function postJSONReadBody<T>(url: string, body: unknown, fallback: T): Promise<T> {
+async function postJSONReadBody<T>(
+  url: string, body: unknown, fallback: T, extraHeaders?: Record<string, string>,
+): Promise<T> {
   try {
     const r = await fetch(url, {
       method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
     })
+    _checkAuth(r)
     try {
       return (await r.json()) as T
     } catch {
@@ -111,7 +125,19 @@ export const api = {
   thread: (id: string) => getJSON<{ agent_id: string; worker_id: string; messages: any[] }>(`/api/thread/${id}`, { agent_id: id, worker_id: id, messages: [] }),
   // ВАЖНО: бэкенд /api/ask читает поле `message`, а /api/chat — поле `text`.
   // worker_id — предпочтительное имя (BOS §12 п.4); бэкенд принимает и deprecated agent_id.
-  ask: (workerId: string, text: string) => postJSON<any>("/api/ask", { worker_id: workerId, message: text }, null),
+  ask: (workerId: string, text: string, imageUrls?: string[]) =>
+    postJSON<any>("/api/ask", { worker_id: workerId, message: text, image_urls: imageUrls || [] }, null),
+  // Загрузка файла в личный чат (round2 audit, раунд1 #2) — multipart, не JSON,
+  // поэтому свой fetch вместо postJSON/postJSONReadBody (те шлют Content-Type:
+  // application/json, что сломало бы границы multipart-тела).
+  uploadToThread: async (agentId: string, file: File) => {
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const r = await fetch(`/api/thread/${agentId}/upload`, { method: "POST", credentials: "same-origin", body: fd })
+      return await r.json().catch(() => ({ ok: false, error: "Ошибка ответа сервера" }))
+    } catch { return { ok: false, error: "Нет связи с сервером" } }
+  },
   chatGet: () => getJSON<{ messages: any[] }>("/api/chat", { messages: [] }),
   chatPost: (message: string) => postJSON<any>("/api/chat", { text: message }, null),
   agentDetail: (id: string) => getJSON<any>(`/api/agent/${id}`, {}),
@@ -127,6 +153,7 @@ export const api = {
   models: () => getJSON<any>("/api/models", { default: "", presets: [], per_agent: {}, per_role: {} }),
   setModel: (model: string) => postJSON<any>("/api/model", { model }, null),
   digest: () => getJSON<any>("/api/digest", { items: [], count: 0, since: "", is_first: true }),
+  digestLast: () => getJSON<any>("/api/digest/last", { items: [], count: 0, since: "", is_first: false }),
   understanding: () => getJSON<any>("/api/understanding",
     { score: 0, items: [], missing: [], domains: {}, confidence: 0, confidence_reasons: [], checklist: [] }),
   knowledge: () => getJSON<any>("/api/knowledge", { facts: [], count: 0, layers: { global: 0, user: 0, department: 0 } }),
@@ -143,12 +170,19 @@ export const api = {
   setProjectLimit: (max_active: number) => postJSON<any>("/api/projects/limit", { max_active }, null),
   pauseProject: (id: string) => postJSON<any>(`/api/project/${id}/pause`, {}, null),
   resumeProject: (id: string) => postJSON<any>(`/api/project/${id}/resume`, {}, null),
+  cancelProject: (id: string, note = "") => postJSON<any>(`/api/project/${id}/cancel`, { note }, null),
   reorderProjectsQueue: (order: string[]) => postJSON<any>("/api/projects/reorder", { order }, null),
   initiatives: () => getJSON<{ pending: any[]; researching: any[]; pending_count: number; total: number }>("/api/initiatives", { pending: [], researching: [], pending_count: 0, total: 0 }),
   proposeInitiative: (title: string, idea: string) => postJSON<any>("/api/initiatives", { title, idea }, null),
-  acceptInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/accept`, {}, null,
-    { "Idempotency-Key": newIdempotencyKey() }),
-  rejectInitiative: (id: string) => postJSON<any>(`/api/initiative/${id}/reject`, {}, null),
+  // postJSONReadBody, не postJSON (round2 audit, N1): обычный postJSON на 409
+  // (already_resolved/initiative_blocked — гонка двух вкладок или вето
+  // рекомендации) отбрасывает тело ответа и возвращает null — вызывающая
+  // сторона не могла отличить «отклонено с причиной» от «сеть отвалилась» и
+  // молча считала действие успешным.
+  acceptInitiative: (id: string, idemKey?: string) =>
+    postJSONReadBody<any>(`/api/initiative/${id}/accept`, {}, { ok: false, error: "network" },
+      { "Idempotency-Key": idemKey || newIdempotencyKey() }),
+  rejectInitiative: (id: string) => postJSONReadBody<any>(`/api/initiative/${id}/reject`, {}, { ok: false, error: "network" }),
   gap: () => getJSON<{ gaps: any[] }>("/api/gap", { gaps: [] }),
   decisions: () => getJSON<{ decisions: any[] }>("/api/decisions", { decisions: [] }),
   observabilityTimeline: (limit = 200) =>
@@ -196,6 +230,11 @@ export const api = {
   get: (url: string) => getJSON<any>(url, null),
   post: (url: string, body: unknown = {}, extraHeaders?: Record<string, string>) =>
     postJSON<any>(url, body, null, extraHeaders),
+  // Как post, но не теряет тело ответа на 4xx (см. postJSONReadBody) — для мест,
+  // где сервер отвечает конкретной причиной отказа (409 already_resolved/
+  // initiative_blocked и т.п.), а не просто "успех/провал".
+  postReadBody: (url: string, body: unknown = {}, extraHeaders?: Record<string, string>) =>
+    postJSONReadBody<any>(url, body, { ok: false, error: "network" }, extraHeaders),
   // ── Приложения тенанта (office/tenant_apps.py) — постоянный self-host сторонних сервисов ──
   hostedApps: () => getJSON<{ apps: any[] }>("/api/apps", { apps: [] }),
   hostedAppDetail: (id: string) => getJSON<any>(`/api/apps/${id}`, null),
@@ -210,6 +249,7 @@ export const api = {
   del: async (url: string) => {
     try {
       const r = await fetch(url, { method: "DELETE", credentials: "same-origin" })
+      _checkAuth(r)
       // Пустое тело (204 — обычный ответ на DELETE) и провал без JSON-тела —
       // раньше оба случая давали одинаковый {ok: r.ok} без единого текста
       // ошибки (production-readiness worklist п.10): экран, показывающий

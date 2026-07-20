@@ -444,6 +444,14 @@ async def run_leaders(goal: str, ms: list, publish) -> None:
                     # Повторная попытка после провала приёмки: исполнитель видит,
                     # ЧТО именно не прошло, а не решает задачу вслепую заново.
                     task_txt += f"\n{t['last_feedback']}"
+                if t.get("prior_blockers"):
+                    # Задача уже блокировалась и была разблокирована владельцем
+                    # (plan.unblock, round2 audit N2) — last_feedback к этому моменту
+                    # уже пуст (сброшен при разблокировке), но исполнитель всё равно
+                    # должен знать, что уже не сработало раньше, иначе рискует
+                    # повторить тот же провал третий раз подряд.
+                    prior = "; ".join(t["prior_blockers"][-3:])
+                    task_txt += f"\n⚠️ Эта задача уже блокировалась раньше по причине: {prior}"
                 plan.assign(t["id"], free.agent_id)  # доска: взято в работу
                 await execution.assign(free.agent_id, free.role, task_txt, publish,
                               department=dept_id, objective=objective, task_id=t["id"])

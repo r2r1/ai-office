@@ -478,12 +478,28 @@ def blocked_tasks() -> list[dict]:
     return [t for t in all_tasks() if t.get("status") == "blocked"]
 
 
+_MAX_PRIOR_BLOCKERS = 3
+
+
 def unblock(task_id: str) -> bool:
     """Вернуть заблокированную задачу в очередь со сброшенными попытками
-    (владелец/CEO вмешался — исполнитель получает чистый счётчик)."""
+    (владелец/CEO вмешался — исполнитель получает чистый счётчик попыток).
+
+    Причину блокировки НЕ стираем бесследно — переносим в prior_blockers
+    (round2 audit, N2): раньше unblock() полностью обнулял last_feedback И
+    blocked_reason, и переисполнитель начинал СОВСЕМ ВСЛЕПУЮ, без единого
+    намёка на то, почему задача уже 3 раза провалилась. Если корень проблемы
+    не устранился вмешательством владельца (он просто нажал «разблокировать»,
+    не факт что причина уже устранена), задача с высокой вероятностью
+    повторяет тот же провал по кругу, никогда не узнавая, что уже пробовала."""
     d = _data()
     for t in d.get("tasks", []):
         if t["id"] == task_id and t.get("status") == "blocked":
+            prior = list(t.get("prior_blockers") or [])
+            note = (t.get("blocked_reason") or t.get("last_feedback") or "").strip()
+            if note:
+                prior.append(note)
+            t["prior_blockers"] = prior[-_MAX_PRIOR_BLOCKERS:]
             t["status"] = "pending"
             t["attempts"] = 0
             t["blocked_reason"] = ""

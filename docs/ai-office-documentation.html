@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-Office — документация</title>
+<style>
+  :root{
+    --bg:#0b0c0f; --panel:#111318; --panel2:#15171d; --border:#22252c;
+    --text:#e8e9ec; --muted:#9aa0ab; --amber:#ffac2e; --amber-soft:rgba(255,172,46,.14);
+    --code-bg:#1a1c22; --radius:12px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f6f8; --panel:#ffffff; --panel2:#fbfbfc; --border:#e4e5e9;
+      --text:#1c1e22; --muted:#6b7280; --amber:#c8720a; --amber-soft:rgba(200,114,10,.10);
+      --code-bg:#f0f0f3; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    line-height:1.6; font-size:15px;
+  }
+  a{color:var(--amber); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{background:var(--code-bg); padding:1px 6px; border-radius:6px; font-size:.88em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--code-bg); padding:12px 14px; border-radius:var(--radius); overflow-x:auto; border:1px solid var(--border)}
+  pre code{background:none; padding:0}
+
+  .layout{display:flex; min-height:100vh}
+
+  /* Sidebar */
+  .sidebar{
+    width:280px; flex-shrink:0; border-right:1px solid var(--border);
+    background:var(--panel); position:sticky; top:0; height:100vh; overflow-y:auto;
+    padding:20px 0 40px;
+  }
+  .sidebar-header{padding:0 20px 16px; border-bottom:1px solid var(--border); margin-bottom:12px}
+  .sidebar-header .logo{font-size:15px; font-weight:700; letter-spacing:.2px}
+  .sidebar-header .tag{font-size:12px; color:var(--muted); margin-top:2px}
+  .search-box{margin:0 16px 14px}
+  .search-box input{
+    width:100%; padding:8px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--panel2); color:var(--text); font-size:13px; outline:none;
+  }
+  .search-box input:focus{border-color:var(--amber)}
+  .nav-group{margin-bottom:6px}
+  .nav-group-title{
+    font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted);
+    padding:10px 20px 6px; font-weight:600;
+  }
+  .nav-link{
+    display:block; padding:7px 20px; font-size:13.5px; color:var(--muted);
+    border-left:2px solid transparent; cursor:pointer;
+  }
+  .nav-link:hover{color:var(--text); background:var(--panel2); text-decoration:none}
+  .nav-link.active{color:var(--amber); border-left-color:var(--amber); background:var(--amber-soft); font-weight:600}
+
+  /* Content */
+  .content{flex:1; max-width:900px; margin:0 auto; padding:48px 56px 120px}
+  @media (max-width:900px){
+    .layout{flex-direction:column}
+    .sidebar{position:relative; width:100%; height:auto; max-height:280px}
+    .content{padding:28px 20px 80px}
+  }
+
+  section{display:none; animation:fade .18s ease}
+  section.active{display:block}
+  @keyframes fade{from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none}}
+
+  h1{font-size:28px; margin:0 0 6px; font-weight:800}
+  h2{font-size:21px; margin:36px 0 10px; font-weight:700; border-bottom:1px solid var(--border); padding-bottom:8px}
+  h2:first-of-type{margin-top:20px}
+  h3{font-size:16px; margin:22px 0 8px; font-weight:700; color:var(--text)}
+  h4{font-size:14px; margin:16px 0 6px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.3px}
+  p{margin:0 0 12px; color:var(--text)}
+  .lede{font-size:16px; color:var(--muted); margin-bottom:8px}
+  ul,ol{margin:0 0 14px; padding-left:22px}
+  li{margin-bottom:5px}
+  .crumbs{font-size:12.5px; color:var(--muted); margin-bottom:10px}
+
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px 18px; margin:14px 0;
+  }
+  .card h4{margin-top:0}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  @media (max-width:640px){.grid2{grid-template-columns:1fr}}
+
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:13.5px}
+  th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top}
+  th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.3px}
+  tr:last-child td{border-bottom:none}
+
+  .badge{
+    display:inline-block; padding:2px 9px; border-radius:99px; font-size:11.5px;
+    background:var(--amber-soft); color:var(--amber); font-weight:600; margin-right:6px;
+  }
+  .badge.gray{background:var(--panel2); color:var(--muted)}
+
+  .callout{
+    border-left:3px solid var(--amber); background:var(--amber-soft);
+    padding:10px 14px; border-radius:0 8px 8px 0; margin:14px 0; font-size:14px;
+  }
+  .callout.warn{border-left-color:#e2534d; background:rgba(226,83,77,.12)}
+
+  .roles-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; margin:14px 0}
+  .role-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--panel)}
+  .role-card .rname{font-weight:700; font-size:14px; display:flex; align-items:center; gap:6px}
+  .role-card .rdesc{font-size:12.5px; color:var(--muted); margin-top:4px}
+
+  .footer-nav{display:flex; justify-content:space-between; margin-top:48px; padding-top:20px; border-top:1px solid var(--border); font-size:13.5px}
+
+  .toc-inline{margin:10px 0 20px; font-size:13.5px}
+  .toc-inline a{display:block; padding:2px 0}
+
+  ::selection{background:var(--amber-soft)}
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">🏢 AI-OFFICE ДОКУМЕНТАЦИЯ</div>
+      <div class="tag">внутренняя, по состоянию кода на 2026-07-17</div>
+    </div>
+    <div class="search-box">
+      <input type="search" id="searchInput" placeholder="Что вы хотите найти?" oninput="filterNav(this.value)">
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Начало</div>
+      <div class="nav-link" data-target="overview">Общее об AI-Office</div>
+      <div class="nav-link" data-target="getting-started">Начало работы</div>
+      <div class="nav-link" data-target="lifecycle">Жизненный цикл клиента</div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Продукт</div>
+      <div class="nav-link" data-target="office">Офис (изо-сцена)</div>
+      <div class="nav-link" data-target="dashboard">Обзор</div>
+      <div class="nav-link" data-target="work">Работа</div>
+      <div class="nav-link" data-target="team">Команда и роли</div>
+      <div class="nav-link" data-target="results">Результаты</div>
+      <div class="nav-link" data-target="resources">Ресурсы</div>
+      <div class="nav-link" data-target="settings">Настройки</div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Как это работает</div>
+      <div class="nav-link" data-target="events-tools">Событийный слой и Tool Router</div>
+      <div class="nav-link" data-target="skills">Skills-слой</div>
+      <div class="nav-link" data-target="knowledge">Память и контекст</div>
+      <div class="nav-link" data-target="acceptance">Приёмка задач</div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Деньги и доступ</div>
+      <div class="nav-link" data-target="billing">Тарифы, кредиты и оплата</div>
+      <div class="nav-link" data-target="admin">Админ-панель оператора</div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Для разработчиков</div>
+      <div class="nav-link" data-target="architecture">Архитектура и модули</div>
+      <div class="nav-link" data-target="run">Запуск и окружение</div>
+      <div class="nav-link" data-target="invariants">Инварианты (не ломать)</div>
+    </div>
+  </nav>
+
+  <!-- CONTENT -->
+  <main class="content">
+
+    <!-- ============ OVERVIEW ============ -->
+    <section id="overview" class="active">
+      <div class="crumbs">Документация</div>
+      <h1>Общее об AI-Office</h1>
+      <p class="lede">AI-Office — мультиарендный SaaS, в котором у каждого клиента появляется автономный AI-офис: несколько агентов разных ролей самостоятельно ведут его бизнес, а сам офис визуализирован как изометрическая (псевдо-3D) игра в браузере.</p>
+
+      <p>Клиент не ставит задачи поштучно — он формулирует <b>цель</b> (через живое интервью с CEO-агентом при онбординге или позже в чате), а офис сам:</p>
+      <ul>
+        <li>исследует рынок и формирует стратегию;</li>
+        <li>проектирует техническое решение (ТЗ);</li>
+        <li>разбивает путь к цели на этапы и задачи (план-граф);</li>
+        <li>открывает нужные отделы (tech / marketing / sales / finance) и нанимает специалистов;</li>
+        <li>выполняет задачи реальными инструментами — пишет код в рабочую папку, публикует лендинги, шлёт сообщения через интеграции, собирает живых лидов;</li>
+        <li>задаёт клиенту блокирующие вопросы, когда без него нельзя двигаться дальше;</li>
+        <li>сам платит за свои LLM-вызовы из бюджета тенанта.</li>
+      </ul>
+
+      <h2>Чем это отличается от «AI-ассистента»</h2>
+      <p>Инструменты вроде SUIN.AI или ChatGPT-конструкторов ассистентов требуют, чтобы пользователь <i>сам</i> собрал сценарий: написал системный промпт, вручную подключил базу знаний, вручную позвал ассистента в чат. AI-Office устроен наоборот — пользователь формулирует результат, а какие роли нанять, какие инструменты вызвать и в каком порядке — решает сама система.</p>
+
+      <div class="grid2">
+        <div class="card">
+          <h4>Ключевые принципы</h4>
+          <ul>
+            <li><b>Автономность</b> — агент вызывает инструмент сам, не просит «сделать руками».</li>
+            <li><b>Реальный результат</b> — код в файлах, сайты опубликованы, письма отправлены. Текст в чате — не результат.</li>
+            <li><b>Приоритет указаний клиента</b> — ответы пользователя главнее стратегии и ТЗ.</li>
+            <li><b>Единая ответственность</b> — на каждую роль один агент одновременно.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Развязка через события и способности</h4>
+          <ul>
+            <li>Отделы не дёргают друг друга напрямую — сигналят события, CEO интерпретирует.</li>
+            <li>Агент описывает потребность словами (<code>use_capability("опубликовать лендинг")</code>), а какую конкретно интеграцию вызвать — решает роутер.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout">Язык продукта, UI и коммуникации агентов — русский. Главная архитектурная спецификация проекта — <code>docs/bos-architecture.md</code> (Business Operating System): любой новый код сначала находит своё место там, а уже потом пишется.</div>
+    </section>
+
+    <!-- ============ GETTING STARTED ============ -->
+    <section id="getting-started">
+      <div class="crumbs">Документация / Начало</div>
+      <h1>Начало работы</h1>
+
+      <h3>Шаг 1. Регистрация и вход</h3>
+      <ul>
+        <li>Вход через GitHub OAuth либо dev-логин (по email без пароля — только в локальной разработке, флаг <code>ALLOW_DEV_LOGIN</code>).</li>
+        <li>Каждому новому тенанту при регистрации автоматически начисляется бонусный бюджет на LLM-вызовы (по умолчанию $5, настраивается через <code>BONUS_BALANCE_USD</code>).</li>
+      </ul>
+
+      <h3>Шаг 2. Онбординг — живое интервью, а не форма</h3>
+      <p>В отличие от классических визардов «заполните 5 полей», здесь с клиентом сразу говорит агент-CEO. Он сам решает — спросить коротко в чате или найти ответ через веб-поиск (например, просканировать сайт компании клиента) — и завершает интервью, только когда уверен, что бриф достаточно полон. Итоговый бриф содержит:</p>
+      <ul>
+        <li><code>niche</code> / <code>audience</code> — что реально продаёт бизнес клиента конечным покупателям;</li>
+        <li><code>goal</code> — какой результат клиент хочет получить <i>от офиса</i> (это не одно и то же с нишей — офис не должен продавать «услугу автоматизации» вместо того, что продаёт бизнес клиента);</li>
+        <li><code>business_stage</code> — идея / запуск / рост / зрелый бизнес, с обоснованием и степенью уверенности;</li>
+        <li><code>confidence</code> — насколько CEO уверен, что собранных данных достаточно, чтобы начинать работу.</li>
+      </ul>
+
+      <h3>Шаг 3. Офис запускается</h3>
+      <p>Как только бриф готов, стартует автономный цикл: исследование рынка → стратегия → техническое задание → план-граф задач → найм агентов по отделам → выполнение. Прогресс виден сразу на вкладке «Обзор».</p>
+
+      <h3>Шаг 4. Вмешательство по необходимости</h3>
+      <p>Клиент не обязан ничего делать вручную. Он подключается, когда:</p>
+      <ul>
+        <li>агент задал блокирующий вопрос (нужен ключ доступа, подтверждение решения) — приходит как обычное сообщение в чат с агентом;</li>
+        <li>хочет посмотреть результат — лиды, сайт, код;</li>
+        <li>хочет дать прямое указание — оно автоматически становится приоритетнее стратегии.</li>
+      </ul>
+
+      <div class="callout">Все данные строго изолированы по тенанту. Никакого общего пространства между клиентами — у каждого свой офис, свои агенты, своя память, свой бюджет.</div>
+    </section>
+
+    <!-- ============ LIFECYCLE ============ -->
+    <section id="lifecycle">
+      <div class="crumbs">Документация / Начало</div>
+      <h1>Жизненный цикл клиента</h1>
+      <pre><code>лендинг → авторизация (GitHub / dev-вход) → онбординг (живое интервью CEO)
+       → бриф готов → офис-цикл запускается → BOOTSTRAP → циклы CEO
+       → результат: лендинг/бот/код в рабочей папке + лиды + платежи</code></pre>
+
+      <h3>BOOTSTRAP (один раз на тенанта)</h3>
+      <ol>
+        <li>Ресёрчер проводит глубокое исследование рынка;</li>
+        <li>Стратег формирует стратегию бизнеса;</li>
+        <li>Архитектор пишет техническое задание;</li>
+        <li>CEO разбивает путь на бизнес-этапы (milestones) и генерирует план-граф задач — если LLM-генерация плана не удалась, берётся детерминированный резервный план, чтобы офис <b>всегда</b> оставался plan-driven, а не скатывался в хаос.</li>
+      </ol>
+
+      <h3>Циклы (раз в интервал опроса)</h3>
+      <ol>
+        <li>Проверка, не поставлен ли офис на паузу;</li>
+        <li>Проверка завершения плана — если всё сделано, офис публикует сайт, делает финальную верификацию, при критических проблемах добавляет задачу на исправление, иначе уходит в режим ожидания;</li>
+        <li>«Самолечение» зависших агентов (watchdog по максимальному времени размышления);</li>
+        <li>CEO принимает одно решение за цикл: открыть/закрыть отдел, поставить задачу отделу, подождать;</li>
+        <li>Лидеры отделов распределяют задачи плана между подчинёнными;</li>
+        <li>Исполнитель выполняет задачу с подмешанным контекстом (бриф, указания клиента, ТЗ, релевантная память, уроки прошлых прогонов, дайджест отдела).</li>
+      </ol>
+    </section>
+
+    <!-- ============ OFFICE ============ -->
+    <section id="office">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Офис</h1>
+      <p class="lede">Изометрическая псевдо-3D сцена — визуальный якорь бренда: агенты сидят за столами в своих отделах, видно кто чем занят прямо сейчас.</p>
+      <p>Внутри раздела есть переключение вида: изометрическая сцена и органиграмма (оргструктура компании) — это один и тот же «слепок» компании под разными углами, не два разных раздела.</p>
+
+      <h3>Оргструктура</h3>
+      <pre><code>CEO (orchestrator)        — структура компании: открывает/закрывает отделы, ставит цели
+  ├── tech (CTO)          — продукт, код, боты, сайты
+  │     ├── developer     — код (Python/JS)
+  │     ├── integrator    — внешние API, запуск ботов
+  │     └── designer      — UI/UX, верстка
+  ├── marketing (CMO)     — контент, реклама, бренд
+  │     ├── marketer
+  │     └── analyst
+  ├── sales (Head of Sales) — клиенты, переговоры, CRM
+  │     └── salesman
+  └── finance (CFO)       — учёт, ERP/1С, юнит-экономика
+        └── accountant
+
+Сервисные роли (вне отделов): researcher, strategist, architect, hr</code></pre>
+      <p>CEO не ставит задачи людям напрямую — он ставит цели <b>отделам</b>. Лидер отдела распределяет задачи внутри своей команды. На каждую рабочую роль в моменте — только один агент.</p>
+    </section>
+
+    <!-- ============ DASHBOARD ============ -->
+    <section id="dashboard">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Обзор</h1>
+      <p class="lede">Дефолтная вкладка после входа — «за 30 секунд понятно, что происходит с компанией».</p>
+      <ul>
+        <li><b>Здоровье компании</b> — сводный индикатор состояния;</li>
+        <li><b>Инициативы</b> — что сейчас в фокусе;</li>
+        <li><b>Прозрачность</b> — что офис сделал, пока клиента не было (утренний дайджест);</li>
+        <li>Индикатор паузы/бюджета — виден статус, если офис приостановлен (например, закончился бюджет на LLM) или ждёт ответа клиента.</li>
+      </ul>
+    </section>
+
+    <!-- ============ WORK ============ -->
+    <section id="work">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Работа</h1>
+      <p class="lede">План-граф задач, проекты и артефакты — то, что раньше называлось «Итоги», теперь принадлежит конкретному проекту, а не общему котлу на всю компанию.</p>
+
+      <h3>Проекты</h3>
+      <p>Проект — единица работы крупнее одной задачи. Задачи плана принадлежат проекту; когда проект закрывается, фиксируется, что офис «оставил после себя» — срез мира на этот момент.</p>
+
+      <h3>План-граф</h3>
+      <p>Каждая задача имеет id, роль-исполнителя, зависимости от других задач, критерий готовности (<code>done_criterion</code>) и статус. Задача не может быть готова просто потому, что исполнитель написал «готово» текстом.</p>
+
+      <h3>Артефакты</h3>
+      <p>Код, сайты, документы конкретного проекта — доступны прямо на карточке проекта, а не на отдельной общей вкладке.</p>
+    </section>
+
+    <!-- ============ TEAM ============ -->
+    <section id="team">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Команда и роли</h1>
+      <p class="lede">Живые агенты — кто сейчас нанят, чем занят, какие у него навыки. Под-вкладки: <b>Роли</b> и <b>Скиллы</b>.</p>
+
+      <div class="roles-grid">
+        <div class="role-card"><div class="rname">🧭 CEO (orchestrator)</div><div class="rdesc">Управляет компанией: открывает отделы, ставит цели, принимает стратегические решения.</div></div>
+        <div class="role-card"><div class="rname">🔍 Ресёрчер</div><div class="rdesc">Исследует рынок и конкурентов через веб-поиск. Режимы quick (3–5 мин) и deep (15–30 мин).</div></div>
+        <div class="role-card"><div class="rname">📋 Стратег</div><div class="rdesc">Строит бизнес-план: unit-экономика, дорожная карта, приоритеты.</div></div>
+        <div class="role-card"><div class="rname">🏗️ Архитектор</div><div class="rdesc">Проектирует техническое решение и пишет ТЗ.</div></div>
+        <div class="role-card"><div class="rname">👔 HR</div><div class="rdesc">Определяет, кого нанимать следующим.</div></div>
+        <div class="role-card"><div class="rname">🛠️ CTO</div><div class="rdesc">Руководит tech-отделом: ставит задачи разработчикам, контролирует качество.</div></div>
+        <div class="role-card"><div class="rname">💻 Разработчик</div><div class="rdesc">Пишет реальный код в рабочую папку, проверяет и отправляет в GitHub — только с одобрения клиента.</div></div>
+        <div class="role-card"><div class="rname">🎨 Дизайнер</div><div class="rdesc">Готовит бренд-бук: референсы, тон, палитра — до кода, с одобрением владельца.</div></div>
+        <div class="role-card"><div class="rname">🔌 Интегратор</div><div class="rdesc">Подключает внешние сервисы через API, запускает ботов.</div></div>
+        <div class="role-card"><div class="rname">📣 CMO</div><div class="rdesc">Руководит маркетингом: контент, лиды, публикации сайтов, рекламные кампании.</div></div>
+        <div class="role-card"><div class="rname">📢 Маркетолог</div><div class="rdesc">Создаёт контент, публикует лендинги, собирает лиды с форм обратной связи.</div></div>
+        <div class="role-card"><div class="rname">📊 Аналитик</div><div class="rdesc">Анализирует данные, строит отчёты.</div></div>
+        <div class="role-card"><div class="rname">💼 Head of Sales</div><div class="rdesc">Руководит продажами: воронка, работа с лидами, скрипты, конверсия.</div></div>
+        <div class="role-card"><div class="rname">💰 Продажник</div><div class="rdesc">Работает с потенциальными клиентами, ведёт переговоры, закрывает сделки.</div></div>
+        <div class="role-card"><div class="rname">🧾 CFO</div><div class="rdesc">Руководит финансовым отделом: учёт, ERP/1С, юнит-экономика, отчётность.</div></div>
+        <div class="role-card"><div class="rname">📒 Бухгалтер</div><div class="rdesc">Ведёт учёт в ERP/1С: контрагенты, документы, сверка данных.</div></div>
+      </div>
+
+      <div class="callout">Личные чаты с агентами открываются кнопкой «написать агенту» на карточке или кликом по агенту в Офисе/органиграмме — «Чаты» больше не отдельный пункт верхнего уровня.</div>
+    </section>
+
+    <!-- ============ RESULTS ============ -->
+    <section id="results">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Результаты</h1>
+      <p class="lede">Реестр типов результата, которые производит работа команды — сейчас Лиды и Сайты, дальше подключится всё, что зарегистрируется в реестре результатов, без правки навигации.</p>
+      <ul>
+        <li><b>Лиды</b> — мини-CRM: живые заявки, собранные с опубликованных лендингов клиента;</li>
+        <li><b>Сайты</b> — опубликованные лендинги, доступны по публичной ссылке <code>/site/{тенант}/{slug}</code>, с формой сбора лида.</li>
+      </ul>
+      <p>Порядок и видимость под-вкладок персонализируется владельцем поверх того, что доступно в реестре.</p>
+    </section>
+
+    <!-- ============ RESOURCES ============ -->
+    <section id="resources">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Ресурсы</h1>
+      <p class="lede">Всё, что офис использует «под капотом», собрано в одном месте — под-вкладки: Хранилище, Доступы, Приложения, MCP-серверы.</p>
+
+      <h3>Хранилище</h3>
+      <p>Разбивка занятого места по тенанту: папки проектов, системные данные, служебные контейнеры.</p>
+
+      <h3>Доступы (интеграции)</h3>
+      <p>Любой ключ доступен любому агенту через общий механизм — CEO не выбирает исполнителя «потому что у него есть ключ». Доступные интеграции:</p>
+      <table>
+        <tr><th>Сервис</th><th>Тип</th><th>Назначение</th></tr>
+        <tr><td>Website</td><td>без кредов</td><td>публикация лендинга, приём лидов через встроенную форму</td></tr>
+        <tr><td>Telegram (бот)</td><td>API-ключ</td><td>отправка сообщений, шаблонный бот записи</td></tr>
+        <tr><td>Telegram (личный)</td><td>вход по номеру</td><td>работа от имени личного аккаунта</td></tr>
+        <tr><td>GitHub</td><td>OAuth / PAT</td><td>создание репозитория, пуш кода рабочей папки</td></tr>
+        <tr><td>Gmail / Google Calendar / Google Sheets</td><td>OAuth</td><td>почта, календарь, таблицы</td></tr>
+        <tr><td>Figma</td><td>OAuth</td><td>чтение макетов для дизайнера</td></tr>
+        <tr><td>Bitrix24</td><td>OAuth / вебхук</td><td>CRM, экспорт лидов</td></tr>
+        <tr><td>1С / ERP</td><td>—</td><td>учёт для роли бухгалтера/CFO</td></tr>
+      </table>
+      <p>Если ключа нет — агент никогда не «зависает молча»: он запрашивает доступ у клиента (<code>ask_user</code>) с точной инструкцией — «нажми войти через X» для OAuth-сервисов или «вставь ключ» для остальных. Агент никогда не просит API-ключ там, где сервис работает через OAuth.</p>
+
+      <h3>Приложения и MCP-серверы</h3>
+      <p>Подключение сторонних инструментов через Model Context Protocol — расширяет набор доступных агентам действий без изменения кода ролей.</p>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section id="settings">
+      <div class="crumbs">Документация / Продукт</div>
+      <h1>Настройки</h1>
+      <p class="lede">Под-разделы: Профиль, Цели, Интеллект, Лимиты, Аккаунт.</p>
+      <ul>
+        <li><b>Профиль</b> — данные владельца;</li>
+        <li><b>Цели</b> — измеримые желаемые состояния бизнеса (Objectives); цель без способа измерения не участвует в анализе разрывов, а становится источником отдельной работы «обеспечить измеримость»;</li>
+        <li><b>Интеллект</b> — выбор LLM-модели глобально или на конкретного агента;</li>
+        <li><b>Лимиты</b> — бюджет на LLM-расходы, автопауза при исчерпании;</li>
+        <li><b>Аккаунт</b> — вход, выход, безопасность.</li>
+      </ul>
+    </section>
+
+    <!-- ============ EVENTS/TOOLS ============ -->
+    <section id="events-tools">
+      <div class="crumbs">Документация / Как это работает</div>
+      <h1>Событийный слой и Tool Router</h1>
+
+      <h3>Event Layer</h3>
+      <p>Отделы не дёргают друг друга напрямую. Агент, увидевший проблему или возможность вне своей задачи, публикует событие. CEO на следующем цикле читает накопленные события, интерпретирует их и решает, что делать дальше — сам факт события не означает автоматического действия.</p>
+
+      <h3>Tool Router — способности вместо интеграций</h3>
+      <p>Агенты не привязаны к конкретным именам интеграций. Вместо прямого вызова конкретного сервиса они формулируют потребность словами:</p>
+      <pre><code>use_capability("опубликовать лендинг", params)</code></pre>
+      <p>Роутер собирает каталог способностей из всех подключённых интеграций, скорит кандидатов по словам запроса и словарю синонимов («лендинг» → website, «письмо» → gmail, «таблица» → google_sheets…), и либо выполняет явного лидера, либо возвращает варианты на выбор. Если под капотом сменить интеграцию — агент этого не заметит; новая интеграция подхватывается автоматически.</p>
+    </section>
+
+    <!-- ============ SKILLS ============ -->
+    <section id="skills">
+      <div class="crumbs">Документация / Как это работает</div>
+      <h1>Skills-слой</h1>
+      <p class="lede">Роль описывает «кто я / что мне нельзя», а «как именно делать» живёт отдельно — в скилле.</p>
+      <p>Меняется способ работы (например, каким стеком строить сайт) — правится один файл скилла, а не промпт роли. Новый способ выполнения задачи — это новый скилл, роли остаются нетронутыми.</p>
+
+      <h3>Как воркер выбирает скилл</h3>
+      <pre><code>задача воркеру («сделай красивый лендинг»)
+        │
+use_skill("3D-лендинг с анимациями")   ← потребность словами
+        │
+   поиск подходящего скилла по ключевым словам, с фильтром по роли
+        │
+  уверенный лидер → плейбук скилла, воркер исполняет своими инструментами
+  неоднозначно     → топ-N вариантов на выбор воркеру</code></pre>
+      <p>Каталог скиллов не зашит в промпты ролей целиком — в промпт попадают только скиллы, релевантные конкретной роли, поэтому большой каталог не раздувает контекст агента.</p>
+      <p>Системный скилл сайта — единая связка React + Vite (настоящая сборка) + Motion для анимаций, доступная ролям дизайнера и разработчика. Дизайн-скилл сознательно не выбирает палитру сам — это решение маркетинга, чтобы сайт не скатывался в один из типовых «AI-дефолтов» дизайна.</p>
+    </section>
+
+    <!-- ============ KNOWLEDGE ============ -->
+    <section id="knowledge">
+      <div class="crumbs">Документация / Как это работает</div>
+      <h1>Память и контекст</h1>
+      <p class="lede">В задачу каждого работника подмешивается не «всё подряд», а точечно нужный контекст.</p>
+      <ul>
+        <li><b>Бриф клиента</b> — цель, ниша, ограничения;</li>
+        <li><b>Указания пользователя</b> — приоритет над стратегией и ТЗ;</li>
+        <li><b>ТЗ архитектора</b>;</li>
+        <li><b>Трёхслойная память</b> — топ-N фактов, релевантных именно этой задаче:
+          <ul>
+            <li><i>Global</i> — бриф и ответы клиента, высокий приоритет;</li>
+            <li><i>Department</i> — что уже узнал отдел;</li>
+            <li><i>Retrieval</i> — подбор по конкретной задаче (гибрид TF-скора и эмбеддингов);</li>
+          </ul>
+        </li>
+        <li><b>Уроки прошлых прогонов</b> по роли исполнителя;</li>
+        <li><b>Дайджест отдела</b> — что коллеги уже сделали.</li>
+      </ul>
+      <p>Это защищает агента от двух проблем сразу: он не тонет в простыне лишнего контекста и не забывает важное между циклами.</p>
+    </section>
+
+    <!-- ============ ACCEPTANCE ============ -->
+    <section id="acceptance">
+      <div class="crumbs">Документация / Как это работает</div>
+      <h1>Приёмка задач</h1>
+      <p class="lede">Задача закрывается только приёмкой — сдача исполнителем и приёмка это два разных события.</p>
+      <p>Результат прогоняется через уровни проверки:</p>
+      <ul>
+        <li><b>Build</b> — компиляция Python/JS, включая инлайн-скрипты на сайтах;</li>
+        <li><b>Functional</b> — критик проверяет сайт/бота по существу (формы, ссылки, позиционирование);</li>
+        <li><b>Базовый</b> уровень.</li>
+      </ul>
+      <p>Провал возвращает задачу в очередь с конкретным фидбеком, который видит исполнитель при переназначении. Третий провал подряд блокирует задачу и поднимает событие для CEO. «Done» никогда не принимается просто как непустая строка текста.</p>
+    </section>
+
+    <!-- ============ BILLING ============ -->
+    <section id="billing">
+      <div class="crumbs">Документация / Деньги и доступ</div>
+      <h1>Тарифы, кредиты и оплата</h1>
+
+      <h3>Как считается расход</h3>
+      <p>Каждый вызов LLM учитывается инкрементально — сразу после ответа модели, а не по завершении всего прогона. Иначе прерванный или зависший прогон тратил бы реальные деньги, а индикатор расхода в интерфейсе показывал бы $0.</p>
+      <p>Прайс сверяется с прайсом провайдера apinet.cloud напрямую. Для моделей без явно прописанной цены система не показывает $0 — берётся консервативная оценка (медиана известных цен), чтобы не занижать реальный расход.</p>
+
+      <h3>Стартовый бонус</h3>
+      <p>Новый тенант при регистрации автоматически получает бонусный бюджет — по умолчанию $5 (настраивается на бэкенде через <code>BONUS_BALANCE_USD</code>; значение 0 отключает бонус). Это единственный «баланс» до появления полноценной платёжной системы.</p>
+
+      <h3>Пауза при исчерпании бюджета</h3>
+      <p>Когда бюджет тенанта заканчивается или провайдер отвечает ошибкой квоты, офис автоматически ставится на паузу — это видно прямо в верхней панели интерфейса, а не выясняется постфактум по пустому логу.</p>
+
+      <div class="callout warn">Полноценного биллинга (тарифные планы, докупка кредитов, автосписание с карты) в системе пока нет — есть только базовый бюджетный лимит и стартовый бонус.</div>
+    </section>
+
+    <!-- ============ ADMIN ============ -->
+    <section id="admin">
+      <div class="crumbs">Документация / Деньги и доступ</div>
+      <h1>Админ-панель оператора</h1>
+      <p class="lede">Отдельная панель для оператора платформы (не для клиента) — обзор по всем тенантам сразу.</p>
+      <ul>
+        <li>Баланс и расход по каждому тенанту;</li>
+        <li>Ошибки прогонов;</li>
+        <li>Пауза/возобновление конкретного тенанта;</li>
+        <li>Per-tenant настройка прокси для исходящих LLM-запросов (нужно, если сервер на IP, который провайдер не принимает напрямую).</li>
+      </ul>
+      <p>Открывается отдельным bearer-токеном (<code>ADMIN_API_KEY</code>), никак не связанным с пользовательской авторизацией; без ключа — 503. Фронт панели — отдельный статический файл, разворачивается на изолированном URL, не часть основного веб-приложения.</p>
+    </section>
+
+    <!-- ============ ARCHITECTURE ============ -->
+    <section id="architecture">
+      <div class="crumbs">Документация / Для разработчиков</div>
+      <h1>Архитектура и модули</h1>
+      <p class="lede">Три слоя, три места — без исключений: домен только в <code>office/*.py</code>, HTTP только в роутерах (тонкие, ничего не решают сами), персистентность только через общий JSON-контекст тенанта.</p>
+
+      <h3>Ключевые модули домена (<code>src/office/</code>)</h3>
+      <table>
+        <tr><th>Модуль</th><th>Назначение</th></tr>
+        <tr><td><code>loop.py</code></td><td>главный автономный цикл + менеджер тенантов</td></tr>
+        <tr><td><code>investigation.py</code></td><td>живое интервью CEO при онбординге</td></tr>
+        <tr><td><code>plan.py</code> / <code>milestones.py</code></td><td>план-граф задач и бизнес-этапы</td></tr>
+        <tr><td><code>events.py</code></td><td>Event Layer</td></tr>
+        <tr><td><code>tool_router.py</code></td><td>use_capability → подбор интеграции</td></tr>
+        <tr><td><code>skills.py</code> / <code>builtin_skills/*.md</code></td><td>Skills-слой и встроенные скиллы</td></tr>
+        <tr><td><code>knowledge.py</code></td><td>трёхслойная память с retrieval</td></tr>
+        <tr><td><code>acceptance.py</code></td><td>приёмка задач (build/functional/базовый)</td></tr>
+        <tr><td><code>world.py</code></td><td>World Model — единый срез мира компании</td></tr>
+        <tr><td><code>objectives.py</code></td><td>измеримые цели</td></tr>
+        <tr><td><code>prompt_builder.py</code></td><td>единая сборка всех промптов, с полным логом</td></tr>
+        <tr><td><code>costs.py</code></td><td>инкрементальный учёт расхода LLM</td></tr>
+        <tr><td><code>control.py</code></td><td>пауза/возобновление офиса</td></tr>
+        <tr><td><code>critic.py</code></td><td>программные проверки + LLM-ревью перед сдачей</td></tr>
+      </table>
+
+      <h3>Мультиарендность (<code>src/saas/</code>)</h3>
+      <p>Всё, что относится к данным офиса — per-tenant и stateless. Домен-модули читают и пишут файлы через общий контекст тенанта, никаких глобальных словарей состояния — иначе утечка данных между клиентами.</p>
+
+      <h3>Интеграции (<code>src/integrations/</code>)</h3>
+      <p>Декларативное описание сервиса: нужные креды, инструкция подключения, действия с JSON-схемой и async-обработчиком. Новая интеграция регистрируется в общем каталоге — фронт и Tool Router подхватывают её автоматически, без правки агентов.</p>
+
+      <h3>Frontend (<code>webapp/</code>)</h3>
+      <p>React + Vite + TypeScript + Motion. Изометрический офис — компонент сцены; SSE-стрим доставляет события в реальном времени в единый стейт приложения. Навигация верхнего уровня сгруппирована по логическому смыслу (Офис / Обзор / Работа / Команда / Результаты / Ресурсы / Настройки), а не по историческому наслоению фич.</p>
+    </section>
+
+    <!-- ============ RUN ============ -->
+    <section id="run">
+      <div class="crumbs">Документация / Для разработчиков</div>
+      <h1>Запуск и окружение</h1>
+      <pre><code>pip install -r requirements.txt
+python scripts/run.py                # бэкенд + SPA на http://localhost:8000
+DEMO_MODE=1 python scripts/run.py    # демо без расхода токенов
+python main.py                       # CLI: ресёрчер → стратег, без игры</code></pre>
+      <div class="callout warn">Не запускать <code>uvicorn server:app --reload</code> напрямую — reload следит за всем деревом, включая рабочие папки тенантов, куда агенты постоянно пишут код. Любая запись файла агентом перезапускала бы сервер и роняла идущий офис-цикл. <code>scripts/run.py</code> включает reload только для исходников.</div>
+      <p>Frontend для активной разработки: <code>cd webapp && npm run dev</code>.</p>
+
+      <h3>Проверка перед коммитом</h3>
+      <pre><code>python -m py_compile $(git ls-files '*.py')   # синтаксис Python
+cd webapp && npx tsc --noEmit                  # типы React-приложения
+python tests/run_all.py                        # юнит-тесты, без LLM, $0</code></pre>
+    </section>
+
+    <!-- ============ INVARIANTS ============ -->
+    <section id="invariants">
+      <div class="crumbs">Документация / Для разработчиков</div>
+      <h1>Инварианты — не ломать</h1>
+      <ul>
+        <li><b>Автономность.</b> Нужен сервис → проверка доступа → OAuth-подсказка «нажми Войти через X» или запрос ключа с инструкцией. Никогда не просить ключ там, где сервис работает через OAuth.</li>
+        <li><b>Артефакты — только через инструменты.</b> Код/HTML создаются только вызовом инструмента записи файла. Ответ агента — короткое резюме, не код-блок в тексте.</li>
+        <li><b>Цель прогона ≠ то, что продаёт бизнес клиента.</b> <code>goal</code> (что клиент хочет от офиса) и <code>niche</code>/<code>audience</code> (что бизнес продаёт покупателям) — разные поля; смешение — известный класс бага.</li>
+        <li><b>Задача закрывается только приёмкой</b> — не самим фактом «сдачи».</li>
+        <li><b>Plan-driven всегда</b> — при сбое генерации плана берётся детерминированный резервный план.</li>
+        <li><b>Общие доступы</b> — любой ключ доступен любому агенту, CEO не выбирает исполнителя «потому что у него ключ».</li>
+        <li><b>Единая ответственность</b> — один агент на роль одновременно, без клонов «для параллельности».</li>
+        <li><b>Приоритет указаний клиента</b> — прямая просьба клиента отменяет любую стратегию.</li>
+        <li><b>Реальный код, не описание</b> — пуш в GitHub только после явного одобрения клиента.</li>
+        <li><b>Учёт расхода — инкрементальный</b>, не по итогам прогона.</li>
+        <li><b>Multi-tenancy</b> — никаких глобальных переменных состояния тенанта.</li>
+      </ul>
+      <p style="margin-top:24px; color:var(--muted); font-size:13px;">Полная и всегда актуальная версия правил — в <code>CLAUDE.md</code> корня репозитория; этот документ — читаемый снимок для человека, а не замена ему.</p>
+    </section>
+
+    <div class="footer-nav">
+      <span></span>
+      <span style="color:var(--muted)">AI-Office · внутренняя документация</span>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  const links = document.querySelectorAll('.nav-link');
+  const sections = document.querySelectorAll('section');
+
+  function activate(id){
+    sections.forEach(s => s.classList.toggle('active', s.id === id));
+    links.forEach(l => l.classList.toggle('active', l.dataset.target === id));
+    history.replaceState(null, '', '#' + id);
+    window.scrollTo(0,0);
+  }
+
+  links.forEach(l => l.addEventListener('click', () => activate(l.dataset.target)));
+
+  // deep-link support
+  const initial = location.hash ? location.hash.slice(1) : 'overview';
+  if (document.getElementById(initial)) activate(initial); else activate('overview');
+
+  function filterNav(q){
+    q = q.trim().toLowerCase();
+    document.querySelectorAll('.nav-group').forEach(group => {
+      let anyVisible = false;
+      group.querySelectorAll('.nav-link').forEach(link => {
+        const match = !q || link.textContent.toLowerCase().includes(q);
+        link.style.display = match ? '' : 'none';
+        if (match) anyVisible = true;
+      });
+      group.style.display = anyVisible ? '' : 'none';
+    });
+  }
+</script>
+</body>
+</html>

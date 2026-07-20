@@ -11,6 +11,7 @@ from datetime import datetime
 from src.saas import context as ctx
 
 _FILE = "digest.json"
+_LAST_FILE = "last_digest.json"
 
 # Читай-мутируй-пиши без блокировки: два почти одновременных вызова (два
 # открытых таба одного тенанта) видят один и тот же старый last_seen и оба
@@ -45,7 +46,20 @@ def get_and_mark_seen() -> dict:
     digest = _build(last_seen)
     d["last_seen"] = now
     _save(d)
+    if digest.get("count"):
+        # Сохраняем последний НЕПУСТОЙ дайджест отдельно от точки last_seen
+        # (round2 audit, U3): сам факт этого вызова необратимо продвигает
+        # last_seen — если попап закроется случайно (клик мимо, рефреш
+        # посреди чтения, F5 в пути) ДО того, как пользователь его прочитал,
+        # раньше контент терялся навсегда без единого способа его вернуть.
+        ctx.write_json(_LAST_FILE, digest)
     return digest
+
+
+def peek_last() -> dict:
+    """Последний собранный непустой дайджест — открыть повторно, НЕ трогая
+    last_seen и не потребляя новое окно (см. get_and_mark_seen)."""
+    return ctx.read_json(_LAST_FILE, {"items": [], "count": 0, "since": "", "is_first": False})
 
 
 def _fmt_ago(ts: float) -> str:

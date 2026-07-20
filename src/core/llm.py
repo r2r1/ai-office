@@ -210,6 +210,49 @@ def _fallback_model(failed: str) -> str:
     return "glm-4.5-flash" if failed != "glm-4.5-flash" else ""
 
 
+def _build_user_message(user: str, image_urls: Optional[list[str]]) -> dict[str, Any]:
+    """Собирает user-сообщение для messages[] — с картинками или без (round2
+    audit, раунд1 #2b). Формат OpenAI vision (apinet — OpenAI-совместимый
+    прокси, см. докстринг модуля): content массивом text+image_url вместо
+    простой строки, если есть хоть одна картинка. Вынесено отдельной функцией
+    для юнит-теста без реального API-клиента."""
+    if not image_urls:
+        return {"role": "user", "content": user}
+    content: list[dict[str, Any]] = [{"type": "text", "text": user or "Что на изображении?"}]
+    for u in image_urls[:4]:
+        content.append({"type": "image_url", "image_url": {"url": u}})
+    return {"role": "user", "content": content}
+
+
+def _dedupe_repeated_output(text: str) -> str:
+    """Модель иногда отдаёт итоговый текст, где весь ответ повторён дважды подряд
+    без разделителя — известный сбой генерации (самоповтор), не наша логика: сборка
+    final_text в этом файле — простое присваивание (`final_text = msg.content`), не
+    конкатенация, значит дубль приходит уже готовым в самом ответе API. Живой пример
+    (functional-gaps-round2-2026-07-20.md, U2-побочная): личный чат вернул и сохранил
+    в threads.py дословно задвоенный ответ агента, склеенный без единого пробела на
+    стыке. Раньше идентичный симптом (не в чате, а в онбординге) списали на артефакт
+    повторного набора текста в браузере — этот прогон, воспроизведённый чистым API-
+    запросом без единого нажатия клавиши, показал, что вывод отдаём как есть."""
+    t = text.strip()
+    n = len(t)
+    if n < 40:
+        return text
+    half = n // 2
+    if t[:half] == t[half:]:
+        return t[:half]
+    # Полкопии может отделяться пробелом/переносом на стыке — сверяем с точностью
+    # до одного символа сдвига, обрезая края перед сравнением.
+    for offset in (-1, 1):
+        h = half + offset
+        if h <= 0 or h >= n:
+            continue
+        a, b = t[:h].strip(), t[h:].strip()
+        if len(a) > 20 and a == b:
+            return a
+    return text
+
+
 # Инструменты, у которых ПОВТОРНЫЙ идентичный вызов подряд не даёт новой информации.
 # Реальный прод-кейс: developer на дешёвой модели 8 раз подряд читал один и тот же
 # site/index.html (tok_in ~8k на каждый повтор) и сжёг итерации, не сделав правку.
@@ -231,6 +274,7 @@ async def run_agent(
     history: Optional[list[dict[str, str]]] = None,
     max_searches: int = 5,
     on_activity: Optional[Callable[[], None]] = None,
+    image_urls: Optional[list[str]] = None,
 ) -> str:
     """
     Запускает агентный цикл: LLM думает, вызывает инструменты, отвечает.
@@ -242,6 +286,14 @@ async def run_agent(
     on_activity     — колбэк «агент жив» после каждого ответа API/инструмента: длинная
                       ЗАКОННАЯ работа (цепочка правок сайта) продлевает watchdog, иначе
                       он сбрасывал реально работающего агента как зависшего.
+    image_urls      — data:image/...;base64,... для vision-моделей (round2 audit,
+                      раунд1 #2b: раньше ни одна функция в этом файле не умела
+                      передать модели картинку вообще, хотя models.py уже
+                      предлагает выбрать vision-модель в Настройках). Модель без
+                      поддержки vision либо проигнорирует картинку, либо вернёт
+                      ошибку API — отдельного фолбэка на текст-без-картинки нет
+                      (пользователь сам выбрал модель — см. пометку "vision" в
+                      списке моделей).
     """
     client = _client()
     model = model or DEFAULT_MODEL
@@ -276,7 +328,7 @@ async def run_agent(
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     if history:
         messages.extend(history)
-    messages.append({"role": "user", "content": user})
+    messages.append(_build_user_message(user, image_urls))
 
     final_text = ""
 
@@ -505,7 +557,7 @@ async def run_agent(
     # Учёт расхода теперь инкрементальный — пишется внутри цикла после каждого
     # ответа API (см. выше), чтобы расход был виден в реальном времени и не терялся
     # при зависании/сбросе агента. Здесь больше ничего записывать не нужно.
-    return final_text
+    return _dedupe_repeated_output(final_text)
 
 
 async def describe_image(image_url: str, question: str, agent_id: str = "agent",

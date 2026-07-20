@@ -111,6 +111,11 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   // Держим их отдельно, чтобы фоновый reload (по событиям офиса) не стирал их.
   const [pending, setPending] = useState<any[]>([])
 
+  // Вложение (round2 audit, раунд1 #2) — фото/аудио/PDF к сообщению.
+  const [attachedFile, setAttachedFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => { if (initialAgent) setActive(initialAgent) }, [initialAgent])
 
   async function load() {
@@ -131,15 +136,43 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
   useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) },
     [messages, pending, sending]) // eslint-disable-line
 
+  function readAsDataURL(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+  }
+
   async function send() {
     const text = input.trim()
-    if (!text || sending) return
+    const file = attachedFile
+    if ((!text && !file) || sending) return
     setSending(true)
-    setPending(p => [...p, { from: "user", text, ts: Date.now() / 1000 }])
     setInput("")
+    setAttachedFile(null)
+    setPending(p => [...p, { from: "user", text: text || `📎 ${file?.name}`, ts: Date.now() / 1000 }])
     try {
-      if (active === "office") await api.chatPost(text)
-      else await api.ask(active, text)
+      let finalText = text
+      let imageUrls: string[] = []
+      if (file) {
+        setUploading(true)
+        const r = await api.uploadToThread(active === "office" ? "orchestrator_1" : active, file)
+        setUploading(false)
+        if (!r?.ok) {
+          window.alert(r?.error || "Не удалось загрузить файл")
+          return
+        }
+        // Путь — чтобы агент мог найти файл сам (read_file/list_files), даже
+        // если это не изображение или модель не поддерживает vision.
+        finalText = (finalText ? finalText + " " : "") + `[приложен файл: ${r.path}]`
+        if (file.type.startsWith("image/")) {
+          imageUrls = [await readAsDataURL(file)]
+        }
+      }
+      if (active === "office") await api.chatPost(finalText || "Прикрепил файл")
+      else await api.ask(active, finalText, imageUrls)
     } finally {
       setSending(false)
       setTimeout(load, 500)
@@ -150,6 +183,14 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
 
   const activeAgent = active !== "office" ? agentsMap[active] : null
   const activeUnanswered = activeAgent ? (threads[active]?.unanswered || 0) : 0
+  // Явный баннер вопроса (round2 audit, N8): /api/ask безусловно трактует ЛЮБОЕ
+  // следующее сообщение как ответ на открытый вопрос агента, даже если это на
+  // самом деле новая, не связанная команда — модель не сверяет смысл. Полная
+  // защита требовала бы классификации на бэкенде; здесь — дешёвая, но реальная
+  // мера: сам вопрос виден прямо над полем ввода, чтобы не отвечать вслепую.
+  const pendingQuestion = activeUnanswered > 0
+    ? [...messages].reverse().find((m: any) => m.kind === "question" && !m.answered)
+    : null
   const headerName = active === "office" ? "Общий чат" : (activeAgent?.name ?? "Агент")
   // Подзаголовок — стабильный (роль / ожидание ответа). НИКАКОЙ внутренней активности
   // агента: «кто что делает» живёт в журнале и на сцене офиса, а не в личной переписке.
@@ -345,7 +386,36 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
           </div>
 
           {/* ввод */}
+          {pendingQuestion && (
+            <div style={{ padding: "8px 16px", borderTop: "1px solid var(--hairline)", flexShrink: 0,
+              background: "rgba(255,172,46,0.08)", fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
+              ❓ Следующее сообщение будет засчитано как ответ на: «{(pendingQuestion.text || "").slice(0, 140)}»
+            </div>
+          )}
+          {attachedFile && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 16px 0", flexShrink: 0 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5,
+                color: "var(--text-dim)", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+                borderRadius: "var(--radius-pill)", padding: "4px 10px" }}>
+                📎 {attachedFile.name}
+                <button onClick={() => setAttachedFile(null)} aria-label="Убрать вложение"
+                  style={{ border: "none", background: "transparent", color: "var(--faint)", cursor: "pointer",
+                    fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </span>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)", flexShrink: 0 }}>
+            <input ref={fileInputRef} type="file" accept="image/*,audio/*,.pdf" style={{ display: "none" }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) setAttachedFile(f); e.target.value = "" }} />
+            {/* Загрузка фото/аудио/PDF (round2 audit, раунд1 #2) — раньше не было
+                вообще: ни этой кнопки, ни multipart-эндпоинта на бэкенде. */}
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              aria-label="Прикрепить файл" title="Прикрепить фото, аудио или PDF"
+              style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-pill)",
+                width: 40, flexShrink: 0, background: "var(--surface-soft)", color: "var(--text-dim)",
+                cursor: uploading ? "default" : "pointer", fontSize: 15 }}>
+              📎
+            </button>
             <input value={input} onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
               aria-label={active === "office" ? "Сообщение команде" : `Сообщение агенту ${activeAgent?.name ?? ""}`}
@@ -355,13 +425,13 @@ export function ChatsView({ initialAgent }: ChatsViewProps) {
                 fontSize: 13, outline: "none", transition: "border-color 0.15s", fontFamily: "var(--font-sans)" }}
               onFocus={e => (e.currentTarget.style.borderColor = "rgba(255,172,46,0.4)")}
               onBlur={e => (e.currentTarget.style.borderColor = "")} />
-            <button onClick={send} disabled={sending || !input.trim()} aria-label="Отправить сообщение"
+            <button onClick={send} disabled={sending || uploading || (!input.trim() && !attachedFile)} aria-label="Отправить сообщение"
               style={{ border: "none", borderRadius: "var(--radius-pill)", padding: "0 22px",
-                background: input.trim() && !sending ? MERCURY : "var(--ghost)",
-                color: input.trim() && !sending ? "#0a0a0a" : "var(--faint)",
-                cursor: input.trim() ? "pointer" : "default", fontSize: 14,
+                background: (input.trim() || attachedFile) && !sending && !uploading ? MERCURY : "var(--ghost)",
+                color: (input.trim() || attachedFile) && !sending && !uploading ? "#0a0a0a" : "var(--faint)",
+                cursor: (input.trim() || attachedFile) ? "pointer" : "default", fontSize: 14,
                 transition: "all 0.15s", fontFamily: "var(--font-sans)" }}>
-              {sending ? "…" : "▶"}
+              {sending || uploading ? "…" : "▶"}
             </button>
           </div>
         </div>

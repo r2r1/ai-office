@@ -81,6 +81,17 @@ const NAV: Array<{ id: Section; label: string; group: "top" | "bottom" }> = [
   { id: "settings",    label: "Настройки", group: "bottom" },
 ]
 
+// "Чаты" на десктопе НАМЕРЕННО не отдельный пункт (см. комментарий выше) —
+// там всегда рядом докнутая RightPanel, а на «Команде» есть кнопка инбокса.
+// На мобильном же RightPanel вообще не рендерится (App.tsx, isMobile) — без
+// собственного пункта единственный путь к чату был Команда → карточка агента
+// → «написать агенту», 2 лишних тапа, и НИЧЕГО не намекало на ждущий ответ
+// вопрос, если открыт не «Команда» (round2 audit, раунд1 #1). Только в
+// горизонтальном (мобильном) варианте NavRail — на десктоп-вариант не влияет.
+const MOBILE_NAV: Array<{ id: Section; label: string; group: "top" | "bottom" }> = [
+  ...NAV.slice(0, 4), { id: "chats", label: "Чаты", group: "top" }, ...NAV.slice(4),
+]
+
 interface NavRailProps {
   active: Section
   onChange: (s: Section) => void
@@ -122,7 +133,7 @@ export function NavRail({ active, onChange, orientation = "vertical", badges }: 
           maskImage: "linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
           WebkitMaskImage: "linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
         }}>
-          {NAV.map(item => {
+          {MOBILE_NAV.map(item => {
             const isActive = item.id === active
             const badge = badges?.[item.id] ?? 0
             return (

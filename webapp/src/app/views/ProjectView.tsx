@@ -62,7 +62,9 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
     refreshInitiatives()
     api.leads().then(d => setLeadsSummary(d))
     refreshProcesses()
-  }, [tick])
+    // initiativesTick — см. DashboardView: подхватывает accept/reject инициативы
+    // из ДРУГОЙ вкладки/экрана сразу, не дожидаясь общего троттлинга (round2 audit, N1).
+  }, [tick, state.initiativesTick])
 
   // Детали открытого проекта — подгружаются при открытии и обновляются каждый
   // тик, пока экран открыт (живой прогресс), как и раньше при inline-раскрытии.
@@ -94,6 +96,15 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
     setAcceptingId(iid)
     try {
       const r = await api.acceptInitiative(iid)
+      // Устаревшая карточка (round2 audit, N1) — принята/отклонена уже где-то
+      // ещё. Раньше здесь безусловно "успешно" убирали карточку и открывали
+      // проект даже при провале (postJSON на 4xx возвращал null, r?.project_id
+      // был undefined, но filter уже выполнился — тихая ложь об успехе).
+      if (r?.error === "already_resolved" || r?.error === "initiative_blocked") {
+        await refreshInitiatives()
+        window.alert(r.message || "Не удалось принять инициативу — список обновлён.")
+        return
+      }
       setInitiatives(prev => prev.filter(i => i.id !== iid))
       const d = await api.projects()
       setProjects(d.projects || [])
@@ -108,7 +119,12 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
   }
 
   async function rejectInitiative(iid: string) {
-    await api.rejectInitiative(iid)
+    const r = await api.rejectInitiative(iid)
+    if (r?.error === "already_resolved") {
+      await refreshInitiatives()
+      window.alert(r.message || "Инициатива уже решена в другой вкладке — список обновлён.")
+      return
+    }
     setInitiatives(prev => prev.filter(i => i.id !== iid))
     setSelected(null)
   }
@@ -133,6 +149,15 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
   const refreshProjects = () => api.projects().then(d => setProjects(d.projects || []))
   async function pauseProject(id: string) { await api.pauseProject(id); await refreshProjects() }
   async function resumeProject(id: string) { await api.resumeProject(id); await refreshProjects() }
+  async function cancelProject(id: string) {
+    // window.confirm — тот же паттерн, что уже принят для удаления процесса
+    // ниже: необратимое действие получает подтверждение, не просто клик.
+    const proj = projects.find((p: any) => p.id === id)
+    if (!window.confirm(`Отменить проект «${proj?.title || ""}»? Он остановится и больше не будет вестись — в отличие от паузы, это НАВСЕГДА.`)) return
+    await api.cancelProject(id)
+    setSelected(null)
+    await refreshProjects()
+  }
   // Приоритет очереди: фронт всегда шлёт ПОЛНЫЙ порядок текущей очереди —
   // индекс в списке становится priority на бэкенде (см. projects.reorder_queue).
   async function reorderQueue(order: string[]) {
@@ -167,7 +192,7 @@ export function ProjectView({ focusProjectId, onFocusHandled, onOpenStorage }: P
               details={details} leadsSummary={leadsSummary}
               onAccept={acceptInitiative} onReject={rejectInitiative} acceptingId={acceptingId}
               onPause={pauseProcess} onResume={resumeProcess} onDelete={deleteProcess}
-              onPauseProject={pauseProject} onResumeProject={resumeProject}
+              onPauseProject={pauseProject} onResumeProject={resumeProject} onCancelProject={cancelProject}
               onOpenStorage={onOpenStorage}
             />
           </motion.div>
@@ -242,13 +267,13 @@ function DetailHeader({ badge, statusPill, title, sub, onBack, actions }: {
 // ── Роутер детального экрана: по selected.kind достаёт нужную сущность из уже
 // загруженных списков и рендерит её экран. Сущность могла исчезнуть (принята/
 // отклонена/удалена только что) — тогда мягкий фолбэк вместо пустого экрана. ──
-function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject, onOpenStorage, acceptingId }: {
+function DetailScreen({ selected, onBack, initiatives, processes, projects, details, leadsSummary, onAccept, onReject, onPause, onResume, onDelete, onPauseProject, onResumeProject, onCancelProject, onOpenStorage, acceptingId }: {
   selected: Selected; onBack: () => void
   initiatives: any[]; processes: any[]; projects: any[]; details: Record<string, any>
   leadsSummary: { statuses: string[]; labels: Record<string, string>; leads: any[] }
   onAccept: (id: string) => void; onReject: (id: string) => void
   onPause: (id: string) => void; onResume: (id: string) => void; onDelete: (id: string) => void
-  onPauseProject: (id: string) => void; onResumeProject: (id: string) => void
+  onPauseProject: (id: string) => void; onResumeProject: (id: string) => void; onCancelProject: (id: string) => void
   onOpenStorage?: (workspaceDir: string) => void
   acceptingId?: string | null
 }) {
@@ -272,6 +297,7 @@ function DetailScreen({ selected, onBack, initiatives, processes, projects, deta
   if (!proj) return <GoneScreen onBack={onBack} text="Проект не найден." />
   return <ProjectDetailScreen project={proj} detail={details[proj.id]} onBack={onBack}
     onPause={() => onPauseProject(proj.id)} onResume={() => onResumeProject(proj.id)}
+    onCancel={() => onCancelProject(proj.id)}
     onOpenStorage={onOpenStorage} />
 }
 
@@ -417,7 +443,7 @@ function ProjectsOnlyTab({ projects, onOpen, onReorderQueue }: {
   // см. projects.reorder_queue), не просто дата создания.
   const queued = [...projects.filter((p: any) => p.status === "queued")]
     .sort((a, b) => (a.priority ?? a.created_ts ?? 0) - (b.priority ?? b.created_ts ?? 0))
-  const closed = [...projects.filter((p: any) => p.status === "done")].reverse()
+  const closed = [...projects.filter((p: any) => p.status === "done" || p.status === "cancelled")].reverse()
 
   function moveQueue(id: string, dir: -1 | 1) {
     const ids = queued.map((p: any) => p.id)
@@ -461,6 +487,7 @@ function ProjectRow({ project: p, onClick, onMoveUp, onMoveDown }: {
   const isActive = p.status === "active"
   const isQueued = p.status === "queued"
   const isPaused = p.status === "paused"
+  const isCancelled = p.status === "cancelled"
   const typeBadge = WORK_TYPE_BADGE[p.type || "project"]
   // Стрелки приоритета очереди — не навигация, поэтому гасим клик по строке
   // (stopPropagation), иначе стрелка одновременно открывала бы экран проекта.
@@ -489,6 +516,7 @@ function ProjectRow({ project: p, onClick, onMoveUp, onMoveDown }: {
       statusPill={isActive ? <Pill accent>Активный</Pill>
         : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
         : isPaused ? <Pill>⏸ На паузе</Pill>
+        : isCancelled ? <Pill color="var(--danger)">🚫 Отменён</Pill>
         : <Pill color="var(--success)">Закрыт</Pill>}
       title={p.title}
       sub={
@@ -747,14 +775,15 @@ const DEPT_NAMES: Record<string, string> = { tech: "Технический", mar
 // полоска для команды. DetailHeader (общий для инициатив/процессов/продаж)
 // здесь НЕ используется — только у проекта есть эта живая, самодостаточная
 // история, только для него оправдан bespoke-хедер.
-function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume, onOpenStorage }: {
-  project: any; detail: any; onBack: () => void; onPause: () => void; onResume: () => void
+function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume, onCancel, onOpenStorage }: {
+  project: any; detail: any; onBack: () => void; onPause: () => void; onResume: () => void; onCancel: () => void
   onOpenStorage?: (workspaceDir: string) => void
 }) {
   const isActive = p.status === "active"
   const isQueued = p.status === "queued"
   const isPaused = p.status === "paused"
   const isDone = p.status === "done"
+  const isCancelled = p.status === "cancelled"
   const isOngoing = isActive || isQueued || isPaused
   return (
     <>
@@ -763,6 +792,7 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume, on
         statusPill={isActive ? <Pill accent>Активный</Pill>
           : isQueued ? <Pill color="var(--warning)">⏳ В очереди</Pill>
           : isPaused ? <Pill>⏸ На паузе</Pill>
+          : isCancelled ? <Pill color="var(--danger)">🚫 Отменён</Pill>
           : <Pill color="var(--success)">Закрыт</Pill>}
         actions={
           <>
@@ -777,14 +807,29 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume, on
                 🗂 Хранилище
               </button>
             )}
+            {/* ZIP всей папки проекта (round2 audit, раунд1 #4) — раньше файлы
+                можно было забрать только по одному через Хранилище. */}
+            <a href={`/api/project/${p.id}/export.zip`} download
+              style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5,
+                border: "1px solid var(--hairline)", background: "transparent", color: "var(--text-dim)",
+                textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+              ⬇ ZIP
+            </a>
             {isOngoing && p.type === "project" && (
-              isPaused ? (
-                <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
-                  border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
-              ) : (
-                <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
-                  border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
-              )
+              <>
+                {isPaused ? (
+                  <button onClick={onResume} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                    border: "1px solid rgba(160,224,171,0.4)", background: "rgba(160,224,171,0.1)", color: "var(--success)" }}>▶ Возобновить</button>
+                ) : (
+                  <button onClick={onPause} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                    border: "1px solid var(--hairline-strong)", background: "var(--surface-soft)", color: "var(--text-dim)" }}>⏸ Пауза</button>
+                )}
+                {/* Отмена — НЕ пауза (round2 audit, N4): раньше проект, который владелец
+                    признал ошибкой, мог только встать на паузу навсегда, без пути
+                    окончательно от него избавиться. */}
+                <button onClick={onCancel} style={{ padding: "9px 16px", borderRadius: "var(--radius-pill)", fontSize: 12.5, cursor: "pointer",
+                  border: "1px solid rgba(165,45,37,0.35)", background: "transparent", color: "var(--danger)" }}>🚫 Отменить</button>
+              </>
             )}
           </>
         } />
@@ -797,7 +842,7 @@ function ProjectDetailScreen({ project: p, detail, onBack, onPause, onResume, on
         {!detail ? (
           <div style={{ fontSize: 12, color: "var(--faint)" }}>Загрузка…</div>
         ) : (
-          <ProjectDetailBody project={p} detail={detail} isDone={isDone} />
+          <ProjectDetailBody project={p} detail={detail} isDone={isDone || isCancelled} />
         )}
       </ViewBody>
     </>

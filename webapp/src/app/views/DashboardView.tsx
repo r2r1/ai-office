@@ -51,7 +51,10 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
     api.get("/api/initiatives").then(d => setInitiatives(d?.pending || [])).catch(() => {})
     api.milestones().then(d => setMilestones(d.stages || []))
     api.gap().then(d => setGaps(d.gaps || [])).catch(() => {})
-  }, [tick])
+    // initiativesTick — отдельно от tick: не троттлится вместе с общим потоком
+    // событий, чтобы принятие/отклонение в другой вкладке подхватывалось сразу
+    // (round2 audit, N1), а не ждало следующего "заметного" события в ленте.
+  }, [tick, state.initiativesTick])
 
   const currentStage = milestones.find((m: any) => m.id === state.progress.current)
     || milestones.find((m: any) => m.status === "active")
@@ -86,7 +89,11 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
     try {
       const ini = initiatives.find(i => i.id === iid)
       const headers = action === "accept" ? { "Idempotency-Key": idemKey! } : undefined
-      const r = await api.post(`/api/initiative/${iid}/${action}`, action === "accept" ? { override } : {}, headers)
+      // postReadBody, не post (round2 audit, N1): обычный post на 4xx отбрасывает
+      // тело ответа и возвращает null — ветка initiative_blocked ниже раньше
+      // никогда не срабатывала (r всегда был null на 409), переспрос по
+      // рекомендации молча не работал.
+      const r = await api.postReadBody(`/api/initiative/${iid}/${action}`, action === "accept" ? { override } : {}, headers)
       // Гейт вердикта (docs/product-capability-gaps.md п.6): исследование сказало
       // "не стоит" — сервер отказал без override. Не тихо проглатываем, а явно
       // переспрашиваем: владелец видит рекомендацию и решает сам ещё раз.
@@ -100,6 +107,13 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
           // если пользователь как-то умудрится подтвердить дважды.
           await handleInitiative(iid, "accept", true, idemKey)
         }
+        return
+      }
+      // Устаревшая вкладка (round2 audit, N1): инициатива уже принята/отклонена
+      // где-то ещё — не притворяемся успехом, объясняем и синхронизируем список.
+      if (r?.error === "already_resolved") {
+        await api.get("/api/initiatives").then(d => setInitiatives(d?.pending || []))
+        window.alert(r.message || "Инициатива уже решена в другой вкладке — список обновлён.")
         return
       }
       setInitiatives(prev => prev.filter(i => i.id !== iid))

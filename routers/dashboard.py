@@ -22,6 +22,13 @@ async def get_digest():
     from src.office import digest as digest_module
     return digest_module.get_and_mark_seen()
 
+@router.get("/api/digest/last")
+async def get_digest_last():
+    """Повторно открыть ПОСЛЕДНИЙ уже показанный дайджест (round2 audit, U3) —
+    в отличие от /api/digest, НЕ продвигает last_seen и ничего не потребляет."""
+    from src.office import digest as digest_module
+    return digest_module.peek_last()
+
 @router.get("/api/understanding")
 async def get_understanding():
     """Индикатор «Понимание компании»: score 0–100, что есть и чего не хватает."""

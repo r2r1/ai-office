@@ -438,6 +438,29 @@ async def _run_office(tid: str) -> None:
         await publish({"type": "system",
                        "text": f"📁 Задачи привязаны к проекту «{proj['title'][:50]}» ({adopted})"})
 
+    # Мониторинг конкурентов — recurring Process по умолчанию для КАЖДОГО тенанта
+    # (docs/portrait-vs-code-2026-07-20.md §11: портрет прямо требует «не по
+    # запросу, а по умолчанию», раньше не было реализовано вообще — ни строчки).
+    # processes.create() сам идемпотентен (дедуп похожего активного процесса
+    # ТОГО ЖЕ проекта, см. _similar_active) — безопасно звать на каждом цикле
+    # BOOTSTRAP, реально создаётся один раз.
+    from src.office import processes as processes_module
+    niche = brief.get().get("niche", "") or brief.effective_goal()
+    proc = processes_module.create(
+        title="Мониторинг конкурентов",
+        role="marketer",
+        instruction=(f"Раз в цикл проверяй, что происходит у конкурентов клиента "
+                     f"(ниша: «{niche[:200]}») — цены, предложения, реклама, отзывы. "
+                     f"Если заметил заметное изменение (новая акция, изменение цены, "
+                     f"новый конкурент) — коротко запиши находку в docs/competitors.md "
+                     f"и, если это важно для решений владельца, подними событие."),
+        project_id=proj["id"],
+    )
+    if not proc.get("_deduped"):
+        await publish({"type": "system",
+                       "text": "🔎 Запущен постоянный мониторинг конкурентов — маркетолог "
+                               "будет следить за рынком каждый цикл"})
+
     # Specification (Acceptance L1): контракт приёмки из брифа + плана — что делаем
     # и когда это успех. Не блокирует старт; владелец может подтвердить через API/UI.
     # per-project (см. specification.py докстринг) — этот вызов покрывает проект,

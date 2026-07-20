@@ -222,6 +222,56 @@ async def post_project_resume(project_id: str):
         raise HTTPException(status_code=400, detail="Проект не найден или не на паузе")
     return {"ok": True, "project": proj}
 
+@router.get("/api/project/{project_id}/export.zip")
+async def export_project_zip(project_id: str):
+    """Экспорт папки проекта архивом (round2 audit, раунд1 #4) — раньше унести
+    результат можно было только копипастой файлов по одному через «Хранилище»
+    или полнотекстовым отладочным логом (team.py), без единого структурированного
+    экспорта для конкретного проекта."""
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+    from src.office import projects as projects_module
+    from src.saas import context as saas_context
+
+    proj = projects_module.get(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    wd = (proj.get("workspace_dir") or "").strip()
+    base = saas_context.tenant_dir() / "workspace"
+    src_dir = (base / wd) if wd else base
+    src_dir = src_dir.resolve()
+    if base.resolve() != src_dir and base.resolve() not in src_dir.parents:
+        raise HTTPException(status_code=400, detail="Некорректная папка проекта")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        if src_dir.exists():
+            for f in src_dir.rglob("*"):
+                if f.is_file():
+                    zf.write(f, f.relative_to(src_dir))
+    buf.seek(0)
+    fname = f"{wd or 'project'}.zip"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+@router.post("/api/project/{project_id}/cancel")
+async def post_project_cancel(project_id: str, request: Request):
+    """Отменить проект навсегда (round2 audit, N4) — см. projects.cancel."""
+    from src.office import projects as projects_module
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    proj = projects_module.cancel(project_id, note=body.get("note", ""))
+    if not proj:
+        raise HTTPException(status_code=400, detail="Проект не найден или уже закрыт")
+    return {"ok": True, "project": proj}
+
 @router.post("/api/projects/reorder")
 async def post_projects_reorder(request: Request):
     """Приоритет очереди проектов — владелец решает, кто из ожидающих
@@ -412,6 +462,12 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
             "message": "Исследование рекомендует НЕ делать эту инициативу. "
                        "Чтобы принять вопреки рекомендации, повторите запрос с override=true.",
         }, status_code=409)
+    except initiatives_module.InitiativeAlreadyResolved as e:
+        return JSONResponse({
+            "error": "already_resolved", "status": e.status,
+            "message": "Инициатива уже принята/отклонена в другой вкладке или сессии "
+                       "(обновите страницу).",
+        }, status_code=409)
 
     # Аудит (docs/pre-release-audit-2026-07-15.md, находка Medium #8): реальный
     # прогон показал, что цель брифа («сайт для лидов») и принятая инициатива
@@ -537,6 +593,9 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
                            "text": f"⚠️ {len(skipped_roles)} задач(и) инициативы пропущено "
                                    f"(несуществующая роль): {'; '.join(skipped_roles[:3])}"})
 
+    # Симметрично reject_initiative — другие открытые вкладки того же тенанта
+    # узнают, что эту инициативу больше нельзя принимать/отклонять.
+    await bus.publish({"type": "initiative_resolved", "id": iid, "status": "accepted"})
     office_loop.wake_tenant()
     return {
         "ok": True, "tasks_added": added, "tasks_skipped": len(skipped_roles),
@@ -546,6 +605,13 @@ async def _do_accept_initiative(iid: str, request: Request) -> dict:
 
 @router.post("/api/initiative/{iid}/reject")
 async def reject_initiative(iid: str, request: Request):
-
-    initiatives_module.reject(iid)
+    ok = initiatives_module.reject(iid)
+    if not ok:
+        return JSONResponse({"error": "already_resolved",
+                             "message": "Инициатива уже принята/отклонена (обновите страницу)."},
+                            status_code=409)
+    # SSE-уведомление (round2 audit, N1): раньше этого события не было вообще —
+    # вторая открытая вкладка того же тенанта не узнавала об отклонении и могла
+    # показать устаревшую кнопку «Принять» на уже отклонённой инициативе.
+    await bus.publish({"type": "initiative_resolved", "id": iid, "status": "rejected"})
     return {"ok": True}

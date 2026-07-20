@@ -39,10 +39,19 @@ async def get_me(request: Request):
             "dev_login":         saas_auth.ALLOW_DEV_LOGIN,
         }
     ws = saas_store.workspace_for_user(user["id"])
+    # github_available/google_available/dev_login — те же поля, что и в ветке
+    # "не авторизован" выше (round2 audit, N9): без них AuthModal, открытый
+    # ПОСЛЕ истечения уже начатой сессии (пользователь был authenticated=true
+    # при монтировании, flags выставлялись только тогда), показывал "методы
+    # входа не настроены" — сам механизм повторного логина был на вид сломан.
+    from src.integrations import google_oauth as _goauth
     return {
         "authenticated": True,
         "user": saas_store.public_user(user),
         "workspace": ({"id": ws["id"], "name": ws["name"], "plan": ws["plan"]} if ws else None),
+        "github_available": saas_auth.github_configured(),
+        "google_available": _goauth.is_configured(),
+        "dev_login": saas_auth.ALLOW_DEV_LOGIN,
     }
 
 

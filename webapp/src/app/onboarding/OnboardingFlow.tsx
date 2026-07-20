@@ -160,6 +160,13 @@ function InvestigationChat({ landingScan, onFirstMessage, onBriefReady }: {
   }
   const tick = useThrottled(feedLength, 2000)
   useEffect(() => { if (chatting) load() }, [tick]) // eslint-disable-line
+  // Восстановление после перезагрузки (round2 audit, N6): при чистом
+  // монтировании messages/pending пусты → chatting=false → эффект выше НИКОГДА
+  // не вызывает load() на старте, хотя office_channel на бэкенде помнит весь
+  // диалог целиком. Экран показывал чипы ниш, будто разговора не было — раньше
+  // это "чинилось" только следующей отправкой (send() дёргает load() явно),
+  // а до неё видимая история терялась. Один безусловный вызов на маунте.
+  useEffect(() => { load() }, [])
 
   useEffect(() => { feedRef.current?.scrollTo(0, feedRef.current.scrollHeight) }, [messages, pending])
 

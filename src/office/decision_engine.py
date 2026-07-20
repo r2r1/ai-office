@@ -9,10 +9,17 @@ PlanDiff и проходит `propose → check → apply|reject`: Sandbox пр�
 записывается с причиной — видно в /api/decisions.
 
 PlanDiff = {
-  add_tasks:    [{title, role, done_criterion}],
-  milestone_ops:[{op, ...}],          # add|retitle|focus|note (как в interpret_directive)
-  remove_tasks: [task_id],            # зарезервировано (директивы пока не порождают)
-  dept_ops:     [{op, department}],   # зарезервировано
+  add_tasks:      [{title, role, done_criterion}],
+  milestone_ops:  [{op, ...}],          # add|retitle|focus|note (как в interpret_directive)
+  remove_tasks:   [task_id],            # зарезервировано (директивы пока не порождают)
+  dept_ops:       [{op, department}],   # зарезервировано
+  pause_projects: [project_id],         # владелец отменяет/переносит фокус с этого проекта —
+                                         # ставит его на паузу (projects.pause), НЕ закрывает Work.
+                                         # Реальный баг (functional-gaps-round2-2026-07-20.md, U1):
+                                         # CEO словами подтверждал «убираю X из плана», но проект
+                                         # оставался active и воркеры продолжали по нему работать —
+                                         # директива добавляла задачи, но никогда не останавливала
+                                         # старые. pause_projects закрывает именно этот разрыв.
 }
 
 Sandbox — механизм (sandbox.py); Decision Engine — его первый потребитель. LLM даёт
@@ -99,8 +106,12 @@ def check(diff: dict) -> dict:
 def _apply(diff: dict) -> list[str]:
     """Применяет прошедший проверки diff к реальному плану/вехам. Возвращает список
     человекочитаемых изменений (для ленты)."""
-    from src.office import plan, milestones
+    from src.office import plan, milestones, projects
     changes: list[str] = []
+    for pid in diff.get("pause_projects", []):
+        paused = projects.pause(pid)
+        if paused:
+            changes.append(f"проект «{paused.get('title','')[:40]}» поставлен на паузу")
     for op in diff.get("milestone_ops", []):
         try:
             kind = (op.get("op") or "").strip()
@@ -126,7 +137,8 @@ def _apply(diff: dict) -> list[str]:
 
 def is_empty(diff: dict) -> bool:
     return not (diff.get("add_tasks") or diff.get("milestone_ops")
-                or diff.get("remove_tasks") or diff.get("dept_ops"))
+                or diff.get("remove_tasks") or diff.get("dept_ops")
+                or diff.get("pause_projects"))
 
 
 def decide(diff: dict, made_by: str = "orchestrator_1", thought: str = "",
@@ -142,7 +154,10 @@ def decide(diff: dict, made_by: str = "orchestrator_1", thought: str = "",
     verdict = check(diff)
     n_tasks = len(diff.get("add_tasks", []))
     n_ms = len(diff.get("milestone_ops", []))
+    n_pause = len(diff.get("pause_projects", []))
     target = f"+{n_tasks} задач, {n_ms} правок этапов"
+    if n_pause:
+        target += f", {n_pause} проектов на паузу"
 
     if not verdict["ok"]:
         reason = "; ".join(r["reason"] for r in verdict["checks"] if r["verdict"] == "veto")

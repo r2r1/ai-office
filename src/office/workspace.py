@@ -179,6 +179,26 @@ def read_bytes(path: str) -> bytes | None:
     return full.read_bytes()
 
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB — щедро для фото/аудио, не безгранично
+
+
+def write_bytes(path: str, data: bytes) -> Path | None:
+    """Сохраняет сырые байты (загрузка пользователя — фото/аудио/pdf, round2
+    audit, раунд1 #2). В отличие от write_file (только текст, инструмент
+    агента) — путь ВСЕГДА валиден и предсказуем (генерируется на бэкенде, не
+    приходит от LLM), поэтому проверка `_safe()` тут скорее защита от опечатки
+    в собственном коде, чем от инъекции пути. None — путь недопустим/файл
+    больше лимита."""
+    if len(data) > MAX_UPLOAD_BYTES:
+        return None
+    full = _safe(path)
+    if full is None:
+        return None
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(data)
+    return full
+
+
 def list_dir(rel: str = "") -> list[dict]:
     """Файлы внутри подпапки рабочей папки (рекурсивно), пути относительно неё."""
     root = _safe(rel) if rel else _base().resolve()

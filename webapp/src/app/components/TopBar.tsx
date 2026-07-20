@@ -30,9 +30,14 @@ interface TopBarProps {
   limitTotalUsd?: number
   limitOverLimit?: boolean
   onOpenLimits?: () => void
+  /** Повторно открыть последний Morning Digest (round2 audit, U3) — раньше
+   * попап был одноразовым: закрылся случайно/страница перезагрузилась до
+   * того, как прочитали — контент терялся без единого способа его вернуть.
+   * Кнопка видна, только если такой дайджест реально есть (App.tsx). */
+  onReopenDigest?: () => void
 }
 
-export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, officePaused, onToggleOffice, autonomyLevel, health, trust, qualityMode, onStatusClick, limitTotalUsd, limitOverLimit, onOpenLimits }: TopBarProps) {
+export function TopBar({ progress, progressNote, cost, connected, theme, onToggleTheme, isMobile, understanding, officePaused, onToggleOffice, autonomyLevel, health, trust, qualityMode, onStatusClick, limitTotalUsd, limitOverLimit, onOpenLimits, onReopenDigest }: TopBarProps) {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: isMobile ? 10 : 16,
@@ -102,7 +107,11 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
           }} />
         </div>
          {!isMobile && cost > 0 && (
-          <div onClick={onOpenLimits} title={limitTotalUsd ? "Потрачено / осталось — открыть Лимиты" : "Расход — открыть Лимиты"}
+          // <button>, не <div onClick> (round2 audit, U4): раньше недостижимо с
+          // клавиатуры — ни Tab, ни Enter/Space не работали, единственный способ
+          // открыть Лимиты отсюда был мышью.
+          <button onClick={onOpenLimits} disabled={!onOpenLimits}
+            title={limitTotalUsd ? "Потрачено / осталось — открыть Лимиты" : "Расход — открыть Лимиты"}
             style={{
             padding: "5px 12px", borderRadius: "var(--radius-pill)",
             background: limitOverLimit ? "rgba(224,85,90,0.12)" : "var(--surface-soft)",
@@ -115,13 +124,23 @@ export function TopBar({ progress, progressNote, cost, connected, theme, onToggl
             {!!limitTotalUsd && (
               <span style={{ opacity: 0.7 }}>&nbsp;/ осталось ${Math.max(0, limitTotalUsd - cost).toFixed(2)}</span>
             )}
-          </div>
+          </button>
         )}
         {!isMobile && (understanding != null || health || trust || autonomyLevel || qualityMode) && (
           <StatusBadge understanding={understanding} health={health} trust={trust}
             autonomyLevel={autonomyLevel} qualityMode={qualityMode} onClick={onStatusClick} />
         )}
         <OfficeToggle paused={!!officePaused} onClick={onToggleOffice} isMobile={isMobile} />
+        {!isMobile && onReopenDigest && (
+          <button
+            className="btn btn-icon btn-ghost"
+            onClick={onReopenDigest}
+            title="Открыть снова: что офис сделал, пока вас не было"
+            style={{ fontSize: 16 }}
+          >
+            🌤
+          </button>
+        )}
         <button
           className="btn btn-icon btn-ghost"
           onClick={onToggleTheme}

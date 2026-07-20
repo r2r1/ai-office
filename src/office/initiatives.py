@@ -18,6 +18,17 @@ _MAX = 50
 _EXPIRE_SECS = 7 * 24 * 3600  # 7 дней
 
 
+class InitiativeAlreadyResolved(Exception):
+    """accept()/reject() отказал — инициатива уже не в статусе "pending" (гонка
+    между двумя открытыми вкладками/сессиями, functional-gaps-round2-2026-07-20.md
+    N1: reject() не публиковал SSE-событие, вторая вкладка не узнавала об отклонении
+    и её устаревшая кнопка «Принять» могла воскресить УЖЕ отклонённую инициативу
+    в новый проект — accept() раньше не проверял текущий статус вообще)."""
+    def __init__(self, status: str):
+        self.status = status
+        super().__init__(f"initiative already resolved: status={status}")
+
+
 class InitiativeBlocked(Exception):
     """accept() отказал без override=True — исследование дало явный отрицательный
     вердикт (docs/product-capability-gaps.md п.6). Раньше research был только
@@ -133,11 +144,15 @@ def accept(iid: str, override: bool = False) -> list:
     Бросает InitiativeBlocked, если исследование дало вердикт "no-go" и
     override не передан явно — «последнее слово у владельца» (BOS §2) остаётся
     в силе, но требует ОСОЗНАННОГО подтверждения вопреки рекомендации, а не
-    тихого прохождения мимо неё."""
+    тихого прохождения мимо неё. Бросает InitiativeAlreadyResolved, если
+    инициатива уже не "pending" (принята/отклонена в другой вкладке/сессии) —
+    не найдена вообще (например, устаревший id) — тихо возвращает []."""
     items = _load()
     tasks = []
     for item in items:
         if item["id"] == iid:
+            if item.get("status") != "pending":
+                raise InitiativeAlreadyResolved(item.get("status", "unknown"))
             if item.get("recommendation") == "no-go" and not override:
                 raise InitiativeBlocked(item["recommendation"], item.get("research", ""))
             item["status"] = "accepted"
@@ -147,13 +162,19 @@ def accept(iid: str, override: bool = False) -> list:
     return tasks
 
 
-def reject(iid: str) -> None:
+def reject(iid: str) -> bool:
+    """Отклонить инициативу. Возвращает False (без побочных эффектов), если
+    инициатива не найдена или уже не "pending" — тот же гейт, что в accept(),
+    вместо тихой перезаписи статуса поверх уже принятого/отклонённого решения."""
     items = _load()
     for item in items:
         if item["id"] == iid:
+            if item.get("status") != "pending":
+                return False
             item["status"] = "rejected"
-            break
-    _save(items)
+            _save(items)
+            return True
+    return False
 
 
 def snooze(iid: str, days: int = 3) -> None:
