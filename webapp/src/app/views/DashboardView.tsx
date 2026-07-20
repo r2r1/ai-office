@@ -244,12 +244,20 @@ export function DashboardView({ onNavigate, onOpenProject }: DashboardViewProps)
                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>{autonomy.desc}</div>
               </div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {["scout", "guided", "trusted", "autonomous"].map(lvl => (
-                  <button key={lvl} onClick={() => api.post("/api/autonomy", { level: lvl }).then(() => api.get("/api/autonomy").then(setAutonomy))}
+                {/* Раньше кнопки показывали сырые английские идентификаторы
+                    ("scout"/"guided"/"trusted"/"autonomous") без перевода и
+                    без объяснения, чем один уровень отличается от другого —
+                    бэкенд УЖЕ отдаёт русское название/описание/иконку для
+                    КАЖДОГО уровня (autonomy.levels), фронт просто их не
+                    использовал. Подсказка при наведении — что изменится,
+                    прежде чем нажать, не только для уже выбранного уровня. */}
+                {(autonomy.levels || []).map((l: any) => (
+                  <button key={l.key} title={l.desc}
+                    onClick={() => api.post("/api/autonomy", { level: l.key }).then(() => api.get("/api/autonomy").then(setAutonomy))}
                     style={{ padding: "4px 10px", borderRadius: "var(--radius-pill)", fontSize: 10, cursor: "pointer",
-                      border: `1px solid ${autonomy.level === lvl ? "var(--mercury-a)" : "var(--hairline)"}`,
-                      background: autonomy.level === lvl ? "rgba(160,224,171,0.15)" : "transparent",
-                      color: autonomy.level === lvl ? "var(--mercury-a)" : "var(--text-dim)" }}>{lvl}</button>
+                      border: `1px solid ${l.active ? "var(--mercury-a)" : "var(--hairline)"}`,
+                      background: l.active ? "rgba(160,224,171,0.15)" : "transparent",
+                      color: l.active ? "var(--mercury-a)" : "var(--text-dim)" }}>{l.icon} {l.name}</button>
                 ))}
               </div>
             </Card>
